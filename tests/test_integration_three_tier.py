@@ -21,7 +21,7 @@ from respro.db.models import (
     ResistanceRule,
     VariantCall,
 )
-from respro.report.html import render_html
+from respro.report.html.main import render_html
 
 
 @pytest.fixture()
@@ -77,7 +77,7 @@ class TestThreeTierIntegration:
             'ORDER BY d.name'
         ).fetchall()
         conn.close()
-        from respro.db.phenotype_ranks import label_to_rank
+        from respro.core.phenotype_ranks import label_to_rank
         ranks = {label_to_rank(row['phenotype']) for row in rows}
         # Ranks inferred: susceptible=1, low-level resistance=3, resistant=5.
         assert ranks == {1, 3, 5}

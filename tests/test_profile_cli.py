@@ -13,7 +13,7 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from respro.cli.main import app
-from respro.cli.profile_helpers import _print_completion_panel
+from respro.cli.profile_helpers import print_completion_panel as _print_completion_panel
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
@@ -22,7 +22,7 @@ from respro.db.models import (
     VariantCall,
 )
 from respro.db.schema import create_schema, init_results_db
-from respro.report.html import build_report_context
+from respro.report.html.main import build_report_context
 
 
 class TestProfileCli:
@@ -775,7 +775,7 @@ class TestInitCli:
         rules_tsv = tmp_path / 'rules_norm.tsv'
         rules_tsv.write_text(
             'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\n'
-            'NC_000001\tgag\t2\tK\tF2STOP\tDrugStop\tresistant\n'
+            'NC_000001\tgag\t2\tK\tK2STOP\tDrugStop\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2frameshift\tDrugFs\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2delQ\tDrugDel\tresistant\n'
         )

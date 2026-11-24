@@ -18,15 +18,22 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.core.alignment import load_features
 from respro.db.algorithms import load_interpretation_algorithms
 from respro.db.cache import load_cached_mappings, sequence_checksum
-from respro.db.features import _is_ncbi_protein_accession, load_features_for_reference
+from respro.db.features import (
+    _is_ncbi_protein_accession,
+    load_features,
+    load_features_for_reference,
+)
 from respro.db.models import is_internal_formula_component_drug_name
-from respro.db.rules_import import (
-    _detect_coordinate_base,
-    _resolve_anchorless_deletion,
-    _validate_reference_amino_acids,
+from respro.db.rules.alleles import (
+    resolve_anchorless_deletion as _resolve_anchorless_deletion,
+)
+from respro.db.rules.features import (
+    detect_coordinate_base as _detect_coordinate_base,
+)
+from respro.db.rules.features import (
+    validate_reference_amino_acids as _validate_reference_amino_acids,
 )
 from respro.db.rules_queries import list_plot_metadata_for_display, list_rules_for_display
 from respro.db.schema import create_schema, open_project_db
@@ -216,7 +223,7 @@ class TestValidateReferenceAminoAcids:
 
         # pos=1 (1-based) → aa_seq[0]='M', rule says 'K' → mismatch; must warn, not raise
         rows = [_rule('gX', position=1, reference='K')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert ('gX', '1', '', 'K') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
@@ -228,7 +235,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise — the rule is simply skipped.
         import logging
         rows = [_rule('gX', position=10, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -237,7 +244,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise.
         import logging
         rows = [_rule('gX', position=6, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=0)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -249,7 +256,7 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=2, reference='Z'),  # mismatch 2
             _rule('gX', position=3, reference='Z'),  # mismatch 3
         ]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert len(mismatch_keys) == 3
         assert any('3' in r.message and 'mismatch' in r.message.lower() for r in caplog.records)
@@ -264,7 +271,7 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=1, reference='Z', antiviral='DrugB'),
             _rule('gX', position=1, reference='Z', antiviral='DrugC'),
         ]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert mismatch_keys == {('gX', '1', '', 'Z')}
         mismatch_messages = [
@@ -280,7 +287,7 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=10, reference='M', antiviral='DrugA'),
             _rule('gX', position=10, reference='M', antiviral='DrugB'),
         ]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         out_of_range_messages = [
             r.message for r in caplog.records if 'out of range' in r.message
@@ -335,7 +342,7 @@ class TestValidateReferenceAminoAcids:
         }
         # Pointing to ACC1 which has 'Q' at pos 1, not 'M' — must warn, not raise
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC1')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             mismatch_keys = _validate_reference_amino_acids(rows, features_by_name, coord_base=1)
         assert ('gX', '1', 'ACC1', 'M') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
@@ -344,7 +351,7 @@ class TestValidateReferenceAminoAcids:
         import logging
 
         rows = [_rule('gX', position=1, reference='Z', reference_identifier='UNKNOWN_REF')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             mismatch_keys = _validate_reference_amino_acids(
                 rows,
                 _features('gX', _AA_SEQ),
@@ -571,7 +578,7 @@ class TestComboRuleParsing:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
@@ -599,7 +606,7 @@ class TestComboRuleParsing:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
@@ -621,47 +628,27 @@ class TestComboRuleParsing:
         assert rows[1]['drug'] == 'drugb'
         assert any('member_id stripped' in rec.message for rec in caplog.records)
 
-    def test_single_mixed_anchor_change_insertion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
+    def test_single_mixed_anchor_change_insertion_rejected(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tK2EW\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, additional_info=False)
+        with pytest.raises(ValueError, match="unrecognised mutation 'K2EW'"):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
 
-        conn = sqlite3.connect(str(db))
-        conn.row_factory = sqlite3.Row
-        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
-        rows = conn.execute(
-            'SELECT reference, mutation FROM resistance_rule ORDER BY reference, mutation'
-        ).fetchall()
-        conn.close()
-
-        assert single_count == 2
-        assert [(m['reference'], m['mutation']) for m in rows] == [('K', 'E'), ('K', 'KW')]
-
-    def test_single_mixed_anchor_change_deletion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
+    def test_single_mixed_anchor_change_deletion_rejected(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t5\tGP\tGP5A\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, additional_info=False)
-
-        conn = sqlite3.connect(str(db))
-        conn.row_factory = sqlite3.Row
-        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
-        rows = conn.execute(
-            'SELECT reference, mutation FROM resistance_rule ORDER BY reference, mutation'
-        ).fetchall()
-        conn.close()
-
-        assert single_count == 2
-        assert [(m['reference'], m['mutation']) for m in rows] == [('G', 'A'), ('GP', 'G')]
+        with pytest.raises(ValueError, match="unrecognised mutation 'GP5A'"):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
 
     def test_single_rule_publication_doi_is_stored_in_publication_table(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -729,13 +716,13 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value='12345678'),
+            patch('respro.db.rules.publications.fetch_pubmed_id_for_doi', return_value='12345678'),
             patch(
-                'respro.db._rules_publication.fetch_pubmed_metadata',
+                'respro.db.rules.publications.fetch_pubmed_metadata',
                 return_value={'title': 'PubMed title', 'doi': '10.1086/590668'},
             ),
             patch(
-                'respro.db._rules_publication.fetch_publication_metadata',
+                'respro.db.rules.publications.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -762,15 +749,15 @@ class TestComboRuleParsing:
         with (
             caplog.at_level(logging.INFO, logger='respro.db'),
             patch(
-                'respro.db._rules_publication.fetch_pubmed_id_for_doi',
+                'respro.db.rules.publications.fetch_pubmed_id_for_doi',
                 return_value='12345678',
             ),
             patch(
-                'respro.db._rules_publication.fetch_pubmed_metadata',
+                'respro.db.rules.publications.fetch_pubmed_metadata',
                 return_value={'title': '', 'doi': '10.1086/590668'},
             ),
             patch(
-                'respro.db._rules_publication.fetch_publication_metadata',
+                'respro.db.rules.publications.fetch_publication_metadata',
                 return_value={'title': 'A resolved CrossRef title'},
             ),
         ):
@@ -800,11 +787,11 @@ class TestComboRuleParsing:
         with (
             caplog.at_level(logging.INFO, logger='respro.db'),
             patch(
-                'respro.db._rules_publication.fetch_pubmed_metadata',
+                'respro.db.rules.publications.fetch_pubmed_metadata',
                 return_value={'title': 'PubMed title', 'doi': 'doi.org/10.1002/j.1460-2075.1987.tb04735.x'},
             ),
             patch(
-                'respro.db._rules_publication.fetch_publication_metadata',
+                'respro.db.rules.publications.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -831,10 +818,10 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            caplog.at_level(logging.WARNING, logger='respro.db.rules_import'),
-            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
-            patch('respro.db._rules_publication.fetch_pubmed_metadata', return_value=None),
-            patch('respro.db._rules_publication.fetch_publication_metadata', return_value=None),
+            caplog.at_level(logging.WARNING, logger='respro.db.rules'),
+            patch('respro.db.rules.publications.fetch_pubmed_id_for_doi', return_value=None),
+            patch('respro.db.rules.publications.fetch_pubmed_metadata', return_value=None),
+            patch('respro.db.rules.publications.fetch_publication_metadata', return_value=None),
         ):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
 
@@ -860,9 +847,9 @@ class TestComboRuleParsing:
 
         with (
             caplog.at_level(logging.INFO, logger='respro.db'),
-            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
+            patch('respro.db.rules.publications.fetch_pubmed_id_for_doi', return_value=None),
             patch(
-                'respro.db._rules_publication.fetch_publication_metadata',
+                'respro.db.rules.publications.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -913,7 +900,7 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
         call_count = 0
         # Patch the name as it exists in rules.py's namespace.
-        with patch('respro.db._rules_publication.fetch_pubmed_metadata', side_effect=_fake_fetch):
+        with patch('respro.db.rules.publications.fetch_pubmed_metadata', side_effect=_fake_fetch):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=True)
 
@@ -977,7 +964,7 @@ class TestPublicationRichFields:
         """))
         db = tmp_path / 'proj.db'
         with patch(
-            'respro.db._rules_publication.fetch_pubmed_metadata',
+            'respro.db.rules.publications.fetch_pubmed_metadata',
             return_value={
                 'title': 'A resistance study.',
                 'doi': '10.1234/xyz',
@@ -1012,9 +999,9 @@ class TestPublicationRichFields:
         """))
         db = tmp_path / 'proj.db'
         with (
-            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
+            patch('respro.db.rules.publications.fetch_pubmed_id_for_doi', return_value=None),
             patch(
-                'respro.db._rules_publication.fetch_publication_metadata',
+                'respro.db.rules.publications.fetch_publication_metadata',
                 return_value={
                     'title': 'A CrossRef study.',
                     'first_author': 'Doe A',
@@ -1046,7 +1033,7 @@ class TestPublicationRichFields:
         """))
         db = tmp_path / 'proj.db'
         with patch(
-            'respro.db._rules_publication.fetch_pubmed_metadata',
+            'respro.db.rules.publications.fetch_pubmed_metadata',
             return_value={
                 'title': 'A resistance study.',
                 'doi': '',
@@ -1071,56 +1058,6 @@ class TestPublicationRichFields:
         assert pubs[0].first_author == 'Smith J'
         assert pubs[0].year == '2021'
         assert pubs[0].journal == 'Journal of Virology'
-
-    def test_legacy_db_without_rich_columns_migrates_cleanly(
-        self, tmp_path, tiny_genbank
-    ) -> None:
-        # Build a project DB, then strip the rich columns to emulate a legacy schema
-        # created before this feature. Re-opening must re-add them via the optional-
-        # column migration so the report layer can SELECT them.
-        tsv = tmp_path / 'rules.tsv'
-        tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
-        """))
-        db = tmp_path / 'proj.db'
-        init_project(
-            db_path=db, name='test', genbank_paths=[tiny_genbank],
-            rules_tsv=tsv, additional_info=False,
-        )
-
-        conn = sqlite3.connect(str(db))
-        conn.row_factory = sqlite3.Row
-        conn.execute('BEGIN')
-        conn.execute(
-            'CREATE TABLE publication_legacy ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, doi TEXT NOT NULL DEFAULT "", '
-            'title TEXT NOT NULL DEFAULT "", pubmed_id TEXT NOT NULL DEFAULT "", '
-            'raw_input TEXT NOT NULL DEFAULT "")'
-        )
-        cols_legacy = ['id', 'doi', 'title', 'pubmed_id', 'raw_input']
-        conn.execute(
-            f'INSERT INTO publication_legacy ({",".join(cols_legacy)}) '
-            f'SELECT {",".join(cols_legacy)} FROM publication'
-        )
-        conn.execute('DROP TABLE publication')
-        conn.execute('ALTER TABLE publication_legacy RENAME TO publication')
-        conn.commit()
-        conn.close()
-
-        from respro.db.schema import open_project_db
-
-        with open_project_db(db) as migrated:
-            cols_after = {row[1] for row in migrated.execute('PRAGMA table_info(publication)').fetchall()}
-            # Existing row survives and rich fields default to empty.
-            row = migrated.execute(
-                'SELECT first_author, year, journal FROM publication LIMIT 1'
-            ).fetchone()
-        assert 'first_author' in cols_after
-        assert 'year' in cols_after
-        assert 'journal' in cols_after
-        assert row is not None
-        assert row[0] == '' and row[1] == '' and row[2] == ''
 
 
 class TestNcbiProteinAccession:
@@ -1444,7 +1381,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -1465,7 +1402,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -1486,7 +1423,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -1509,7 +1446,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -1549,7 +1486,7 @@ class TestRefAaMismatchSkip:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
@@ -1577,7 +1514,7 @@ class TestRefAaMismatchSkip:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
@@ -1637,7 +1574,7 @@ class TestMissingFeatureWarnings:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv,
                          additional_info=False)
 
@@ -1838,111 +1775,6 @@ class TestGenbankAliasFallbacks:
 
 
 class TestFeatureSegmentMigration:
-    def test_open_project_db_backfills_feature_segment_rows_for_legacy_features(self, tmp_path) -> None:
-        db_path = tmp_path / 'legacy_project.db'
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            'CREATE TABLE project ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'name TEXT NOT NULL, '
-            "created_at TEXT NOT NULL DEFAULT (datetime('now')), "
-            'schema_version INTEGER NOT NULL DEFAULT 1'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE reference ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL, '
-            'length INTEGER NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE feature ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'reference_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL, '
-            'start INTEGER NOT NULL, '
-            'end INTEGER NOT NULL, '
-            "strand TEXT NOT NULL DEFAULT '+'"
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE drug ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE resistance_rule ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'feature_id INTEGER NOT NULL, '
-            'drug_id INTEGER NOT NULL, '
-            'position INTEGER NOT NULL, '
-            'mutation TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE query_reference ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'name TEXT NOT NULL, '
-            'sequence TEXT NOT NULL, '
-            'length INTEGER NOT NULL, '
-            'checksum TEXT NOT NULL, '
-            'UNIQUE(checksum)'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE query_feature_mapping ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'query_ref_id INTEGER NOT NULL, '
-            'feature_id INTEGER NOT NULL, '
-            'identity REAL NOT NULL, '
-            'cds_coverage REAL NOT NULL, '
-            'query_start INTEGER NOT NULL, '
-            'query_end INTEGER NOT NULL, '
-            "strand TEXT NOT NULL DEFAULT '+', "
-            'cigar TEXT NOT NULL, '
-            'UNIQUE(query_ref_id, feature_id)'
-            ')'
-        )
-        conn.execute(
-            'INSERT INTO project (name, created_at, schema_version) VALUES (?, datetime(\'now\'), ?)',
-            ('Legacy Project', 1),
-        )
-        conn.execute(
-            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
-            (1, 'ref_legacy', 100),
-        )
-        conn.execute(
-            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
-            (1, 'gag', 11, 41, '+'),
-        )
-        conn.execute(
-            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
-            (1, 'drugx'),
-        )
-        conn.execute(
-            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
-            (1, 1, 1, 'E'),
-        )
-        conn.commit()
-        conn.close()
-
-        migrated_conn = open_project_db(db_path)
-        migrated_conn.row_factory = sqlite3.Row
-        segments = migrated_conn.execute(
-            'SELECT feature_id, segment_index, start, end FROM feature_segment WHERE feature_id = 1 '
-            'ORDER BY segment_index'
-        ).fetchall()
-        migrated_conn.close()
-
-        assert [
-            (row['feature_id'], row['segment_index'], row['start'], row['end'])
-            for row in segments
-        ] == [(1, 0, 11, 41)]
-
     def test_product_only_cds_is_accepted_for_rule_matching(self, tmp_path) -> None:
         gb = tmp_path / 'product_only.gb'
         write_genbank(gb, [
@@ -2009,7 +1841,7 @@ class TestFeatureSegmentMigration:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -2057,7 +1889,7 @@ class TestFeatureSegmentMigration:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules'):
             init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -2895,5 +2727,243 @@ class TestFormulaRuleImport:
         ).fetchone()[0]
         conn.close()
         assert formula_count == 0  # Formula rule should be skipped
+
+
+class TestGenbankSplicedAndAtomicInit:
+    def test_genbank_complement_join_and_circular_origin_wrap_order(self, tmp_path: Path) -> None:
+        from respro.core.coordinates import exon_junction_cds_offsets
+        from respro.db.models import FeatureRecord, FeatureSegment
+        from respro.io.genbank import parse_genbank_records
+
+        gb = tmp_path / 'spliced_and_circular.gb'
+        seq = 'A' * 120
+        gb.write_text(
+            textwrap.dedent(f"""\
+                LOCUS       CIRC_TEST                120 bp    DNA     circular VRL 01-JAN-2026
+                DEFINITION  Test record with reverse complement join and circular wrap.
+                ACCESSION   CIRC_TEST
+                VERSION     CIRC_TEST.1
+                FEATURES             Location/Qualifiers
+                     CDS             complement(join(11..34,65..100))
+                                     /gene="rev_spliced"
+                                     /product="Reverse spliced protein"
+                                     /codon_start=1
+                     CDS             join(101..115,1..15)
+                                     /gene="origin_wrap"
+                                     /product="Circular wrap protein"
+                                     /codon_start=1
+                ORIGIN
+                        1 {seq[:60].lower()}
+                       61 {seq[60:].lower()}
+                //
+            """),
+            encoding='utf-8',
+        )
+
+        parsed = parse_genbank_records(gb)
+        by_name = {feat.feature_name: feat for feat in parsed[0].features}
+
+        rev = by_name['rev_spliced']
+        assert rev.strand == '-'
+        assert rev.segments == ((64, 100), (10, 34))
+        rev_rec = FeatureRecord(
+            id=1, reference_id=1, name='rev_spliced', protein='',
+            start=rev.start, end=rev.end, strand='-', codon_start=0,
+            segments=tuple(FeatureSegment(i, s, e) for i, (s, e) in enumerate(rev.segments)),
+        )
+        assert exon_junction_cds_offsets(rev_rec) == [36]
+        assert rev_rec.cds_to_genomic_position(0) == 99
+        assert rev_rec.cds_to_genomic_position(35) == 64
+        assert rev_rec.cds_to_genomic_position(36) == 33
+        assert rev_rec.cds_to_genomic_position(59) == 10
+        for cds in range(60):
+            g = rev_rec.cds_to_genomic_position(cds)
+            assert g is not None and rev_rec.genomic_to_cds_position(g) == cds
+
+        circ = by_name['origin_wrap']
+        assert circ.strand == '+'
+        assert circ.segments == ((100, 115), (0, 15))
+        circ_rec = FeatureRecord(
+            id=2, reference_id=1, name='origin_wrap', protein='',
+            start=circ.start, end=circ.end, strand='+', codon_start=0,
+            segments=tuple(FeatureSegment(i, s, e) for i, (s, e) in enumerate(circ.segments)),
+        )
+        assert exon_junction_cds_offsets(circ_rec) == [15]
+        assert circ_rec.cds_to_genomic_position(0) == 100
+        assert circ_rec.cds_to_genomic_position(14) == 114
+        assert circ_rec.cds_to_genomic_position(15) == 0
+        assert circ_rec.cds_to_genomic_position(29) == 14
+
+    def test_genbank_rejects_mixed_strand_and_invalid_codon_start(self, tmp_path: Path) -> None:
+        from respro.io.genbank import parse_genbank_records
+
+        gb_mixed = tmp_path / 'mixed.gb'
+        rec = SeqRecord(Seq('ATG' * 20), id='m', name='m', description='')
+        rec.annotations['molecule_type'] = 'DNA'
+        rec.features = [
+            SeqFeature(
+                CompoundLocation([FeatureLocation(0, 15, strand=1), FeatureLocation(30, 45, strand=-1)]),
+                type='CDS',
+                qualifiers={'gene': ['bad'], 'codon_start': ['1']},
+            )
+        ]
+        with gb_mixed.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec], fh, 'genbank')
+        with pytest.raises(ValueError, match='mixed-strand'):
+            parse_genbank_records(gb_mixed)
+
+        gb_cs = tmp_path / 'bad_cs.gb'
+        rec2 = SeqRecord(Seq('ATG' * 20), id='m2', name='m2', description='')
+        rec2.annotations['molecule_type'] = 'DNA'
+        rec2.features = [
+            SeqFeature(
+                FeatureLocation(0, 30, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['badcs'], 'codon_start': ['4']},
+            )
+        ]
+        with gb_cs.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec2], fh, 'genbank')
+        with pytest.raises(ValueError, match='codon_start'):
+            parse_genbank_records(gb_cs)
+
+    def test_open_project_db_rejects_legacy_pii_column(self, tmp_path: Path) -> None:
+        db = tmp_path / 'legacy.db'
+        conn = create_schema(db)
+        conn.execute('ALTER TABLE query_reference ADD COLUMN file_name TEXT')
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ValueError, match='unexpected legacy columns'):
+            open_project_db(db)
+
+    def test_init_project_overwrite_preserves_existing_db_on_failure(self, tmp_path: Path) -> None:
+        db = tmp_path / 'existing.db'
+        db.write_bytes(b'ORIGINAL_DB_SENTINEL')
+        bad_gb = tmp_path / 'broken.gb'
+        bad_gb.write_text('not valid genbank', encoding='utf-8')
+        rules = tmp_path / 'r.tsv'
+        rules.write_text('feature\treference_identifier\tposition\treference\tmutation\tantiviral\n', encoding='utf-8')
+
+        with pytest.raises(ValueError):
+            init_project(db_path=db, name='Fail', genbank_paths=[bad_gb], rules_tsv=rules, overwrite=True, additional_info=False)
+        assert db.read_bytes() == b'ORIGINAL_DB_SENTINEL'
+        assert list(tmp_path.glob('*.tmp*')) == []
+
+    def test_consolidate_drug_names_merges_colliding_formula_rules(self, tmp_path: Path) -> None:
+        from respro.db.drugs import consolidate_drug_names_to_lowercase
+
+        db = tmp_path / 'drugs.db'
+        conn = create_schema(db)
+        conn.execute("INSERT INTO project (name, schema_version) VALUES ('p', 15)")
+        conn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'r', 30)")
+        conn.execute(
+            "INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) VALUES (1, 'f', 'F', 0, 30, '+', ?)",
+            ('ATG' * 10,),
+        )
+        conn.execute("INSERT INTO drug (project_id, name, description) VALUES (1, 'DrugX', '')")
+        conn.execute("INSERT INTO drug (project_id, name, description) VALUES (1, 'drugx', 'Antiviral desc')")
+        conn.execute("INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation) VALUES (1, 1, 1, 'M', 'V')")
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) VALUES (1, 'F1', 'A', 'resistant')"
+        )
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) VALUES (2, 'F2', 'A', 'resistant')"
+        )
+        conn.execute("INSERT INTO publication (doi) VALUES ('10.1000/test')")
+        conn.execute("INSERT INTO resistance_formula_rule_publication (formula_rule_id, publication_id) VALUES (2, 1)")
+        conn.execute("INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (2, 1)")
+        conn.commit()
+
+        consolidate_drug_names_to_lowercase(conn, 1)
+        conn.commit()
+        kept = conn.execute("SELECT name, description FROM drug WHERE name = 'drugx'").fetchall()
+        assert len(kept) == 1
+        assert kept[0]['description'] == 'Antiviral desc'
+        assert conn.execute(
+            "SELECT COUNT(*) FROM resistance_formula_rule WHERE drug_id = (SELECT id FROM drug WHERE name = 'drugx')"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            'SELECT COUNT(*) FROM resistance_formula_rule_publication WHERE formula_rule_id = 1'
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            'SELECT COUNT(*) FROM resistance_formula_rule_member WHERE formula_rule_id = 1'
+        ).fetchone()[0] == 1
+        conn.close()
+
+    def test_init_project_respects_umask_cleans_replace_failure_and_keeps_mixed_case_effect_as_resistant(
+        self, tmp_path: Path,
+    ) -> None:
+        import json
+        import os
+        import stat
+
+        gb = tmp_path / 'ref1.gb'
+        rec = SeqRecord(Seq('ATGAAAGCTTTTTAA'), id='ref1', name='ref1', description='Ref 1')
+        rec.annotations['molecule_type'] = 'DNA'
+        rec.features = [
+            SeqFeature(
+                FeatureLocation(0, 15, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['gag'], 'product': ['Gag'], 'codon_start': ['1']},
+            ),
+        ]
+        with gb.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec], fh, 'genbank')
+
+        rules = tmp_path / 'rules.tsv'
+        rules.write_text(
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            'gag\tref1\t2\tK\tE\tAciclovir\tresistant\n',
+            encoding='utf-8',
+        )
+        meta = tmp_path / 'meta.json'
+        meta.write_text(json.dumps({
+            'interpretation_algorithms': [
+                {
+                    'name': 'effect_as_resistant',
+                    'rules': [
+                        {
+                            'feature': 'gag',
+                            'reference': 'ref1',
+                            'drug': 'Aciclovir',
+                            'effect': ['frameshift'],
+                        },
+                    ],
+                },
+            ],
+        }), encoding='utf-8')
+
+        db = tmp_path / 'proj.db'
+        umask = os.umask(0o022)
+        os.umask(umask)
+        init_project(
+            db_path=db,
+            name='UmaskTest',
+            genbank_paths=[gb],
+            rules_tsv=rules,
+            metadata_json=meta,
+            additional_info=False,
+        )
+        assert stat.S_IMODE(db.stat().st_mode) == (0o666 & ~umask)
+
+        conn = open_project_db(db)
+        algos = load_interpretation_algorithms(conn, 1)
+        conn.close()
+        ear = [a for a in algos if a.get('name') == 'effect_as_resistant']
+        assert len(ear) == 1
+        assert ear[0]['rules'][0]['drug'] == 'Aciclovir'
+
+        with patch('respro.cli.init.os.replace', side_effect=OSError('disk full')):
+            with pytest.raises(OSError, match='disk full'):
+                init_project(
+                    db_path=db,
+                    name='UmaskTest',
+                    genbank_paths=[gb],
+                    rules_tsv=rules,
+                    overwrite=True,
+                    additional_info=False,
+                )
+        assert list(tmp_path.glob('*.tmp*')) == []
 
 

@@ -130,177 +130,6 @@ class TestProjectSchemaBoundary:
         assert 'schema mismatch' in message
         assert 'missing tables' in message
 
-    def test_open_project_db_adds_missing_optional_columns(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'project_optional_migration.db'
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            'CREATE TABLE project ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'name TEXT NOT NULL, '
-            "created_at TEXT NOT NULL DEFAULT (datetime('now')), "
-            'schema_version INTEGER NOT NULL DEFAULT 1'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE reference ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL, '
-            'length INTEGER NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE feature ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'reference_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL, '
-            'start INTEGER NOT NULL, '
-            'end INTEGER NOT NULL, '
-            "strand TEXT NOT NULL DEFAULT '+'"
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE drug ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_id INTEGER NOT NULL, '
-            'name TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE resistance_rule ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'feature_id INTEGER NOT NULL, '
-            'drug_id INTEGER NOT NULL, '
-            'position INTEGER NOT NULL, '
-            'mutation TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE resistance_rule_set ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'drug_id INTEGER NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE resistance_rule_set_member ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'rule_set_id INTEGER NOT NULL, '
-            'feature_id INTEGER NOT NULL, '
-            'position INTEGER NOT NULL, '
-            'mutation TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE query_reference ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'name TEXT NOT NULL, '
-            'sequence TEXT NOT NULL, '
-            'length INTEGER NOT NULL, '
-            'checksum TEXT NOT NULL, '
-            'UNIQUE(checksum)'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE query_feature_mapping ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'query_ref_id INTEGER NOT NULL, '
-            'feature_id INTEGER NOT NULL, '
-            'identity REAL NOT NULL, '
-            'cds_coverage REAL NOT NULL, '
-            'query_start INTEGER NOT NULL, '
-            'query_end INTEGER NOT NULL, '
-            "strand TEXT NOT NULL DEFAULT '+', "
-            'cigar TEXT NOT NULL, '
-            'UNIQUE(query_ref_id, feature_id)'
-            ')'
-        )
-        conn.execute(
-            'INSERT INTO project (name, created_at, schema_version) VALUES (?, datetime(\'now\'), ?)',
-            ('Legacy Project', 1),
-        )
-        conn.execute(
-            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
-            (1, 'ref_legacy', 100),
-        )
-        conn.execute(
-            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
-            (1, 'gag', 0, 30, '+'),
-        )
-        conn.execute(
-            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
-            (1, 'drugx'),
-        )
-        conn.execute(
-            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
-            (1, 1, 1, 'E'),
-        )
-        conn.execute(
-            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
-            ('legacy_query_ref', 'ATGAAACCC', 9, 'legacy_checksum'),
-        )
-        conn.execute(
-            'INSERT INTO query_feature_mapping ('
-            'query_ref_id, feature_id, identity, cds_coverage, query_start, query_end, strand, cigar'
-            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (1, 1, 0.95, 0.75, 0, 9, '+', '9M'),
-        )
-        conn.commit()
-        conn.close()
-
-        migrated_conn = open_project_db(db_path)
-        reference_columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(reference)').fetchall()
-        }
-        rule_columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(resistance_rule)').fetchall()
-        }
-        mapping_columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(query_feature_mapping)').fetchall()
-        }
-        migrated_reference = migrated_conn.execute(
-            'SELECT accession, organism, taxonomy FROM reference WHERE id = 1'
-        ).fetchone()
-        migrated_rule = migrated_conn.execute(
-            'SELECT reference_identifier, reference, phenotype, clinical_phenotype '
-            'FROM resistance_rule WHERE id = 1'
-        ).fetchone()
-        mapping_count = migrated_conn.execute(
-            'SELECT COUNT(*) AS total FROM query_feature_mapping'
-        ).fetchone()
-        migrated_mapping_stats = migrated_conn.execute(
-            'SELECT COUNT(*) AS total, COALESCE(MAX(cds_start), 0) AS max_cds_start '
-            'FROM query_feature_mapping'
-        ).fetchone()
-        reference_count = migrated_conn.execute(
-            'SELECT COUNT(*) AS total FROM query_reference'
-        ).fetchone()
-        migrated_conn.close()
-
-        assert 'organism' in reference_columns
-        assert 'query_coverage' in mapping_columns  # auto-added by optional migration
-        assert 'cds_start' in mapping_columns  # auto-added by optional migration
-        assert 'reference_identifier' in rule_columns
-        assert 'clinical_phenotype' in rule_columns
-        assert migrated_reference is not None
-        assert migrated_reference['accession'] == ''
-        assert migrated_reference['organism'] == ''
-        assert migrated_reference['taxonomy'] == ''
-        assert migrated_rule is not None
-        assert migrated_rule['reference_identifier'] == ''
-        assert migrated_rule['reference'] == ''
-        assert migrated_rule['phenotype'] == ''
-        assert migrated_rule['clinical_phenotype'] == ''
-        assert migrated_mapping_stats is not None
-        assert int(migrated_mapping_stats['total']) == 1
-        assert int(migrated_mapping_stats['max_cds_start']) == 0
-        assert mapping_count is not None
-        assert int(mapping_count['total']) == 1
-        assert reference_count is not None
-        assert int(reference_count['total']) == 1
-
 
 class TestResultsDbSchema:
     def test_init_results_db_creates_expected_tables(self, tmp_path: Path) -> None:
@@ -349,72 +178,6 @@ class TestResultsDbSchema:
         message = str(exc_info.value)
         assert 'schema mismatch' in message
         assert 'results_meta' in message
-
-    def test_init_results_db_adds_missing_optional_columns(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'results_optional_migration.db'
-        conn = sqlite3.connect(str(db_path))
-        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-        conn.execute(
-            'CREATE TABLE run ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_name TEXT NOT NULL, '
-            'project_db_path TEXT NOT NULL, '
-            'reference_name TEXT NOT NULL, '
-            'vcf_path TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE variant_result ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'run_id INTEGER NOT NULL, '
-            'chrom TEXT NOT NULL, '
-            'pos INTEGER NOT NULL, '
-            'ref TEXT NOT NULL, '
-            'alt TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'INSERT INTO run (project_name, project_db_path, reference_name, vcf_path) '
-            'VALUES (?, ?, ?, ?)',
-            ('p', '/tmp/project.db', 'ref', '/tmp/sample.vcf'),
-        )
-        conn.execute(
-            'INSERT INTO variant_result (run_id, chrom, pos, ref, alt) VALUES (?, ?, ?, ?, ?)',
-            (1, 'ref', 4, 'A', 'G'),
-        )
-        conn.commit()
-        conn.close()
-
-        migrated_conn = init_results_db(db_path)
-        run_columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(run)').fetchall()
-        }
-        variant_columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(variant_result)').fetchall()
-        }
-        migrated_run = migrated_conn.execute(
-            'SELECT sample_name, total_variants, resistance_hits, status FROM run WHERE id = 1'
-        ).fetchone()
-        migrated_variant = migrated_conn.execute(
-            'SELECT feature_name, af_bin, drug_hits FROM variant_result WHERE id = 1'
-        ).fetchone()
-        migrated_conn.close()
-
-        assert 'sample_name' in run_columns
-        assert 'resistance_hits' in run_columns
-        assert 'af_bin' in variant_columns
-        assert 'drug_hits' in variant_columns
-        assert migrated_run is not None
-        assert migrated_run['sample_name'] == ''
-        assert migrated_run['total_variants'] == 0
-        assert migrated_run['resistance_hits'] == 0
-        assert migrated_run['status'] == 'complete'
-        assert migrated_variant is not None
-        assert migrated_variant['feature_name'] == ''
-        assert migrated_variant['af_bin'] == ''
-        assert migrated_variant['drug_hits'] == '[]'
 
 
 class TestResultsPersistence:
@@ -658,46 +421,6 @@ class TestResultsPersistence:
         ann = annotations[0]
         assert ann.rule_effect_aa_freq == {10: 0.5, 20: 0.3}
         assert ann.rule_effect_alt == {10: 'I', 20: 'M'}
-
-    def test_legacy_db_without_rule_effect_columns_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
-        """An existing results DB without the rule_effect_aa_freq/rule_effect_alt
-        columns opens after migration, defaulting to empty dicts."""
-        result = self._make_result()
-        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
-        results_conn.close()
-        legacy_path = tmp_path / 'results.db'
-        conn = sqlite3.connect(legacy_path)
-        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_aa_freq')
-        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_alt')
-        conn.commit()
-        conn.close()
-        init_results_db(legacy_path)
-        conn = sqlite3.connect(legacy_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
-        assert row['rule_effect_aa_freq'] == '{}'
-        assert row['rule_effect_alt'] == '{}'
-        conn.close()
-
-    def test_legacy_db_without_combined_states_column_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
-        """An existing results DB without the combined_states column opens after migration."""
-        result = self._make_result()
-        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
-        results_conn.close()
-        # Simulate a legacy DB by dropping the column.
-        legacy_path = tmp_path / 'results.db'
-        conn = sqlite3.connect(legacy_path)
-        conn.execute('ALTER TABLE variant_result DROP COLUMN combined_states')
-        conn.commit()
-        conn.close()
-        # Re-init adds the missing column.
-        init_results_db(legacy_path)
-        # The DB opens and loads without error.
-        conn = sqlite3.connect(legacy_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
-        assert row['combined_states'] == '[]'
-        conn.close()
 
     def test_save_run_persists_formula_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
         save_run(
@@ -949,62 +672,6 @@ class TestCoverageGapPersistence:
         gaps = load_coverage_gaps(results_conn, run_id)
         assert gaps == []
 
-    def test_legacy_db_without_coverage_gap_table_returns_empty(self, tmp_path: Path) -> None:
-        """A results DB that pre-dates coverage_gap returns [] gracefully."""
-        db_path = tmp_path / 'legacy_results.db'
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-        conn.execute(
-            'CREATE TABLE run (id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_name TEXT NOT NULL, project_db_path TEXT NOT NULL, '
-            'reference_name TEXT NOT NULL, vcf_path TEXT NOT NULL)'
-        )
-        conn.execute(
-            'CREATE TABLE variant_result (id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'run_id INTEGER NOT NULL, chrom TEXT NOT NULL, pos INTEGER NOT NULL, '
-            'ref TEXT NOT NULL, alt TEXT NOT NULL)'
-        )
-        conn.execute(
-            'INSERT INTO run (project_name, project_db_path, reference_name, vcf_path) '
-            'VALUES (?, ?, ?, ?)',
-            ('p', '/tmp/p.db', 'ref', '/tmp/s.vcf'),
-        )
-        conn.commit()
-
-        gaps = load_coverage_gaps(conn, 1)
-        assert gaps == []
-        conn.close()
-
-    def test_init_results_db_adds_coverage_gap_table_to_existing_db(self, tmp_path: Path) -> None:
-        """Existing results DB without optional tables gets them added on open."""
-        db_path = tmp_path / 'old_results.db'
-        conn = sqlite3.connect(str(db_path))
-        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-        conn.execute(
-            'CREATE TABLE run (id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_name TEXT NOT NULL, project_db_path TEXT NOT NULL, '
-            'reference_name TEXT NOT NULL, vcf_path TEXT NOT NULL)'
-        )
-        conn.execute(
-            'CREATE TABLE variant_result (id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'run_id INTEGER NOT NULL, chrom TEXT NOT NULL, pos INTEGER NOT NULL, '
-            'ref TEXT NOT NULL, alt TEXT NOT NULL)'
-        )
-        conn.commit()
-        conn.close()
-
-        migrated = init_results_db(db_path)
-        tables = {
-            row['name']
-            for row in migrated.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        migrated.close()
-        assert 'coverage_gap' in tables
-        assert 'formula_rule_hit' in tables
-
 
 class TestDeleteRun:
     def test_delete_run_removes_run_and_related_rows(self, tmp_path: Path) -> None:
@@ -1107,25 +774,6 @@ class TestFreqMethodProvenance:
         _, variant_rows = load_run(results_conn, 1)
         annotations = reconstruct_annotations(variant_rows)
         assert annotations[0].freq_method == 'estimated'
-
-    def test_legacy_db_without_freq_method_defaults_observed(
-        self, results_conn, minimal_project_conn, tmp_path,
-    ) -> None:
-        """An old results DB without the freq_method column opens with 'observed'."""
-        result = self._make_result()
-        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
-        results_conn.close()
-        legacy_path = tmp_path / 'results.db'
-        conn = sqlite3.connect(legacy_path)
-        conn.execute('ALTER TABLE variant_result DROP COLUMN freq_method')
-        conn.commit()
-        conn.close()
-        init_results_db(legacy_path)
-        conn = sqlite3.connect(legacy_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
-        assert row['freq_method'] == 'observed'
-        conn.close()
 
     def _make_result(self) -> ProfilingResult:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
@@ -1283,3 +931,278 @@ class TestFormulaHitFrechetPersistence:
         assert restored[0].frechet_lower == 0.0
         assert restored[0].forced_fraction == 0.0
         assert restored[0].member_count == 1
+
+    def test_load_run_from_json_validation_and_reconstruct_unset_freq(self, tmp_path: Path) -> None:
+        from respro.db.results import load_run_from_json
+
+        base_run = {
+            'sample_name': 's',
+            'created_at': '2026-01-01T00:00:00',
+            'project_name': 'p',
+            'reference_name': 'r',
+            'resistance_hits': 0,
+            'total_variants': 1,
+            'variants_in_cds': 1,
+            'vcf_path': 's.vcf',
+        }
+        bad = tmp_path / 'bad.results.json'
+        bad.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': 'not-int', 'ref': 'A', 'alt': 'G', 'drug_hits': '[]'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        with pytest.raises(ValueError, match='pos'):
+            load_run_from_json(bad)
+
+        bad_hits = tmp_path / 'bad_hits.results.json'
+        bad_hits.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G', 'drug_hits': '{bad'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        with pytest.raises(ValueError, match='drug_hits'):
+            load_run_from_json(bad_hits)
+
+        # String integer pos is coerced in place so downstream regenerate receives int.
+        str_pos = tmp_path / 'str_pos.results.json'
+        str_pos.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': '12', 'ref': 'A', 'alt': 'G', 'drug_hits': '[]'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        _, loaded_variants, _, _, _ = load_run_from_json(str_pos)
+        assert loaded_variants[0]['pos'] == 12
+        assert isinstance(loaded_variants[0]['pos'], int)
+
+        # Malformed nested structures must raise ValueError at the upload boundary.
+        malformed_payloads = [
+            {
+                'format_version': 1,
+                'run': {**base_run, 'vcf_path': None},
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': 'r', 'profiled_feature_names': 123}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': ['bad'], 'profiled_feature_names': ['f']}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'drug_hits': json.dumps([{'rule_id': 1, 'drug': 'D', 'publications': 'bad'}]),
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'single_exchange_aa_freq': {},
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [{'hit_json': json.dumps({'members': 'bad'})}],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [{'hit_json': json.dumps({'matched_variants': 123})}],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': 'r', 'query_name': ['bad']}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'reference_name': ['bad'],
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[{}]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[Infinity, 1, 0.5]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[1, 2, NaN]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[true, false, true]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '["123"]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'combined_states': json.dumps([{
+                        'alt_codon': ['bad'], 'alt_aa': {'bad': 1},
+                        'lower': 0.5, 'upper': 0.6, 'forced_fraction': 0.5,
+                        'accepted': True, 'member_indices': [0],
+                    }]),
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'combined_states': json.dumps([{
+                        'alt_codon': 'GAA', 'alt_aa': 'E',
+                        'lower': 'NaN', 'upper': 0.6, 'forced_fraction': 0.5,
+                        'accepted': True, 'member_indices': [0],
+                    }]),
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+        ]
+        for idx, payload in enumerate(malformed_payloads):
+            p = tmp_path / f'malformed_{idx}.results.json'
+            p.write_text(json.dumps(payload), encoding='utf-8')
+            with pytest.raises(ValueError):
+                load_run_from_json(p)
+
+        anns = reconstruct_annotations([
+            {
+                'chrom': 'c', 'pos': 3, 'ref': 'A', 'alt': 'G', 'allele_freq': 0.5,
+                'single_exchange_aa_freq': None,
+                'drug_hits': json.dumps([{'rule_id': 1, 'drug': 'D', 'source': 'CuratedDB'}]),
+            },
+            {
+                'chrom': 'c', 'pos': 6, 'ref': 'G', 'alt': 'A', 'allele_freq': 0.5,
+                'single_exchange_aa_freq': 0.0,
+                'drug_hits': '[]',
+            },
+        ])
+        assert anns[0].single_exchange_aa_freq == pytest.approx(0.5)
+        assert anns[0].rule_matches[0].source == 'CuratedDB'
+        assert anns[1].single_exchange_aa_freq == 0.0
+
+    def test_resolve_run_id_rejects_wildcards_and_classify_supports_multiple_drugs(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        from respro.db.results import delete_run, load_classifications, save_classification
+
+        res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf')
+        run_id = save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, res)
+
+        with pytest.raises(ValueError, match='numeric'):
+            delete_run(_persist_results_conn, '%')
+
+        save_classification(_persist_results_conn, run_id, drug='Acyclovir', phenotype='resistant', note='n1')
+        save_classification(_persist_results_conn, run_id, drug='Foscarnet', phenotype='sensitive', note='n2')
+        save_classification(_persist_results_conn, run_id, drug='acyclovir', phenotype='intermediate', note='n3')
+        rows = load_classifications(_persist_results_conn, run_id)
+
+        assert len(rows) == 2
+        by_drug = {r['drug'].lower(): r for r in rows}
+        assert by_drug['acyclovir']['phenotype'] == 'intermediate'
+        assert by_drug['foscarnet']['phenotype'] == 'sensitive'

@@ -86,6 +86,19 @@ class TestCliUrlConfig:
         assert '{cid}' in config.urls.pubchem_structure_png
         assert '{name}' in config.urls.pubchem_cid_lookup
 
+    def test_pubchem_substance_urls_have_placeholders(self):
+        """Should have {name}/{sid} placeholders in the substance fallback URLs."""
+        config = _load_cli_config()
+        assert '{name}' in config.urls.pubchem_substance_sids
+        assert '{sid}' in config.urls.pubchem_substance_record
+        assert '{sid}' in config.urls.pubchem_substance_page
+
+    def test_wikipedia_summary_url_has_placeholder(self):
+        """Should have {name} placeholder in the Wikipedia summary URL."""
+        config = _load_cli_config()
+        assert '{name}' in config.urls.wikipedia_summary
+        assert config.urls.wikipedia_summary.startswith('https://en.wikipedia.org/')
+
     def test_ncbi_urls_have_placeholders(self):
         """Should have {pmid}/{identifier} placeholders in NCBI URLs."""
         config = _load_cli_config()
@@ -558,3 +571,33 @@ class TestMatchingCombinationFraction:
         )
         cfg = load_config_with_overrides(p)
         assert cfg.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)
+
+    def test_tuple_validation_rejects_wrong_length_or_bool_and_accepts_int_for_float(self, tmp_path):
+        from respro.config.cli_settings import load_config_with_overrides
+
+        bad_len = self._write_override(tmp_path, '[af_bins]\nhigh = [0.5]\n')
+        with pytest.raises(ValueError, match='expected 2'):
+            load_config_with_overrides(bad_len)
+
+        bad_bool = self._write_override(tmp_path, '[af_bins]\nhigh = [true, 1.0]\n')
+        with pytest.raises(ValueError):
+            load_config_with_overrides(bad_bool)
+
+        int_as_float = self._write_override(tmp_path, '[af_bins]\nhigh = [1, 1]\n')
+        cfg = load_config_with_overrides(int_as_float)
+        assert cfg.af_bins.high == (1.0, 1.0)
+
+    @pytest.mark.parametrize(
+        'toml_body',
+        [
+            '[matching]\nfrechet_epsilon = nan\n',
+            '[timeouts]\ngenbank_backoff_base = inf\n',
+            '[af_bins]\nhigh = [nan, 1.0]\n',
+        ],
+    )
+    def test_non_finite_float_overrides_rejected(self, tmp_path, toml_body: str):
+        from respro.config.cli_settings import load_config_with_overrides
+
+        p = self._write_override(tmp_path, toml_body)
+        with pytest.raises(ValueError):
+            load_config_with_overrides(p)

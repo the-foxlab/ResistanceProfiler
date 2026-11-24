@@ -42,35 +42,6 @@ class TestExampleFastaSchema:
 
         assert value == ''
 
-    def test_open_project_db_auto_adds_example_fasta_column(self, tmp_path: Path) -> None:
-        # Build a complete DB, then strip the example_fasta column to simulate a legacy DB.
-        db_path = tmp_path / 'legacy.db'
-        conn = create_schema(db_path)
-        conn.execute("INSERT INTO project (name, schema_version, uuid) VALUES ('Legacy', 1, 'u')")
-        conn.execute(
-            'CREATE TABLE project_legacy AS '
-            'SELECT id, name, uuid, created_at, updated_at, schema_version, '
-            'metadata_maintainers, metadata_contact, metadata_publication_pmid, '
-            'metadata_publication_doi, metadata_website, metadata_description, '
-            'metadata_maintainer_update, metadata_license, metadata_tsv_checksum '
-            'FROM project'
-        )
-        conn.execute('DROP TABLE project')
-        conn.execute('ALTER TABLE project_legacy RENAME TO project')
-        conn.commit()
-        conn.close()
-
-        migrated_conn = open_project_db(db_path)
-        columns = {
-            row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(project)').fetchall()
-        }
-        value = migrated_conn.execute('SELECT example_fasta FROM project').fetchone()[0]
-        migrated_conn.close()
-
-        assert 'example_fasta' in columns
-        assert value == ''
-
     def test_get_project_example_fasta_returns_none_when_empty(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'fresh.db'
         conn = create_schema(db_path)

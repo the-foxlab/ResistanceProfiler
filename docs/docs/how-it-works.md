@@ -46,27 +46,33 @@ In both modes, input is converted into a common internal representation before r
 
 Query sequence context is aligned to the internal project references and features. Only rule-backed features (`has_rules = 1`, i.e. features carrying at least one resistance rule) participate in alignment; a FASTA record that aligns to no rule-backed feature is dropped with a warning rather than profiled. The reference is determined automatically from [minimap2](https://github.com/lh3/minimap2)-based (mappy) CDS matching, and the sequence with the highest identity is selected.
 
-#### CIGAR-based coordinate remapping
+#### VCF reference comparison
 
-For VCF input, variants are defined in user-provided reference coordinates. ResPro uses the CIGAR string from the minimap2 alignment to build a bidirectional coordinate map between query positions and internal CDS positions:
+VCF variants are called against the **supplied** reference FASTA, but resistance rules are defined against the **internal project reference** — the two often differ. ResPro compares both and emits one variant set in internal-reference coordinates:
 
-- Each VCF variant position is projected from the user reference into the internal CDS coordinate space.
-- REF alleles are verified against the user query FASTA; mismatches produce a warning and the variant is skipped.
-- For reverse-strand features, alleles are reverse-complemented to the internal forward strand.
-- Anchor-changed indels (where the VCF anchor base differs from the internal reference) are automatically split into a substitution plus a canonical indel before annotation.
+- The supplied↔internal alignment (the same minimap2 CIGAR used for coordinate mapping) identifies **reference mismatches**: positions where the supplied reference differs from the internal reference. These mismatches carry an assumed allele frequency of 1.0 and are labelled `Reference derived` in the report.
+- When the supplied reference matches the internal reference (across the feature or across a VCF call's local span), validated VCF calls map directly into internal coordinates (`VCF derived`).
+- Only VCF calls that overlap or border a reference mismatch are resolved surgically in a local window: a call that reverts a reference mismatch cancels it; a call insertion countering a reference deletion resolves into the net event, while a VCF deletion overlapping or touching a reference deletion is skipped with a warning (retaining the reference deletion at AF 1.0); equal-length block substitutions (MNVs) preserve their shared haplotype linkage across emitted atomic substitutions without masking unchanged reference mismatches inside the span.
+- Any **remaining uncalled frequency** (1 − Σ call AFs at an overlapping position) stays with the supplied reference, so the underlying reference mismatch is emitted at that residual frequency as `Reference derived`.
+- Calls below the `--min-af`/`--min-depth` cutoffs are removed first, leaving any underlying reference mismatch at AF 1.0. FILTER≠PASS calls participate like any other call — pass/fail decisions belong to the upstream pipeline.
+- Two separate VCF records whose spans overlap cannot be phased together; they are skipped with a warning. Records with non-overlapping spans are mapped independently.
+- When the supplied and internal references are identical, there are no reference mismatches and VCF calls map directly.
+
+!!! note "Choosing a reference FASTA"
+    ResPro does its best to also infer variants from mismatches between the supplied reference and the stored internal reference. For best results, use a reference that is highly similar to the stored one the resistance rules apply to — divergent references (especially with many indels) increase the number of reference-derived assumptions and unresolvable overlaps.
+
+See [Technical reference — Variant emission & remapping](technical-reference.md#4-variant-emission-remapping) for the full contract and worked examples.
 
 #### Spliced genes and unspliced queries
 
-When a project feature is a spliced CDS (more than one segment in `feature_segment`) and the user supplies an unspliced whole-genome query, minimap2 reports the inter-exon intron as a single large `I` (FASTA) or `D` (raw mappy) operation in the CIGAR. Without special handling this intron would be misinterpreted as a giant coding insertion (e.g. a multi-kilobase frameshift) and would crash per-exon identity.
+When a project feature is a spliced (multi-exon) CDS and the sample is an unspliced whole-genome sequence, minimap2 aligns across the inter-exon intron as a single large insertion in the query. Without special handling this intron would look like a giant coding frameshift and depress per-exon identity.
 
-ResPro classifies such intron operations:
+ResPro detects and strips introns automatically:
 
-- The exon-junction CDS offsets are derived from `feature.segments` in genomic 5'→3' order (matching the normalized CIGAR's walking order for both strands).
-- A CIGAR `I` op is classified as an intron when **both** hold: (1) its CDS position coincides with a known junction offset within `alignment.intron_junction_tolerance` (default 5 nt; configurable in `defaults.toml`), and (2) its length is strictly greater than that same tolerance. 
-- Classified intron `I` ops are removed from the CIGAR stored on the `FeatureMatch` (producing an exon-only CIGAR) and recorded as `IntronInterval`s (CDS junction position, query span, length).
-- Identity and CDS coverage are recomputed over exons only, so a perfect exons match reports ~99% identity rather than the genomic span including the intron.
-- In FASTA mode the intron query span is stripped from the region before codon walking, so no intron insertion variant is emitted. Real coding insertions (any `I` op not at a junction within tolerance, or of length ≤ tolerance) are still emitted.
-- In VCF mode the query-to-CDS coordinate map skips intron query positions and offsets exon-2 (and later) CDS positions past the intron span, so variants inside the intron are excluded and exon-2 variants remap to the correct CDS offset.
+- An alignment insertion is classified as an intron when it sits within `alignment.intron_junction_tolerance` (default 5 nt; configurable via `--config`) of an annotated exon junction **and** its length exceeds that tolerance.
+- Intron spans are excluded from identity and CDS coverage metrics, so a perfect exon match reports ~100% identity regardless of intron length.
+- In FASTA mode, intron bases are stripped before codon walking so no spurious intron insertion is emitted, while real coding insertions (away from junctions or shorter than the tolerance) are preserved.
+- In VCF and BAM coverage modes, coordinate projection skips intron spans so intronic variants are ignored, downstream exons map to their exact genomic coordinates, and low-depth intronic bases never create false exonic coverage gaps.
 
 ### Amino-acid consequence interpretation
 
@@ -86,8 +92,8 @@ When two or more SNPs fall within the same codon, they are evaluated together as
 
 There are two paths, selected by whether an alignment file is supplied:
 
-- **No BAM (`--bam` omitted or the mode is fasta) — lower-bound frequencies.** ResPro uses **Fréchet (probability) bounds** to determine which combined codon states are *guaranteed* to exist, and reports the conservative lower-bound frequency (assuming no linkage information). These frequencies are tagged `lower bound` in the report.
-- **With BAM (`--bam` provided) — observed frequencies.** ResPro slices the BAM for each affected codon, counts the spanning reads that carry each candidate codon state (after MAPQ filtering and paired-end dedup/agreement), and reports the exact observed co-occurrence frequency. The Fréchet path is not taken at all. These frequencies are tagged `observed` in the report.
+- **No BAM (`--bam` omitted or the mode is fasta) — lower-bound frequencies.** ResPro partitions codon positions into disjoint **phase factors** (positions sharing source-record haplotype links from an equal-length block substitution stay linked in one factor; independent positions stay singleton factors) and applies **Fréchet (probability) bounds** across the disjoint factors to determine which combined codon states are *guaranteed* to exist, reporting the conservative lower-bound frequency. These frequencies are tagged `lower bound` in the report.
+- **With BAM (`--bam` provided) — observed frequencies.** ResPro slices the BAM for each affected codon, counts the spanning reads that carry each candidate codon state (accounting for reverse-strand alignment orientation, MAPQ filtering, and paired-end deduplication/agreement), and reports the exact observed co-occurrence frequency. The Fréchet path is not taken at all. These frequencies are tagged `observed` in the report.
 
 A single-exchange that is impossible (guaranteed absent, lower bound 0 on the no-BAM path; observed frequency 0 on the BAM path) is omitted from the report and cannot match a single-amino-acid rule — only its combined states can fire. On the no-BAM (Fréchet) path, a combined state is accepted only when its forced fraction reaches 2/3 (`min_cooccurrence_codon_fraction` in the config). On the BAM path there is no per-state frequency threshold: every candidate state observed in at least one spanning molecule is accepted, and the only gate is the spanning-molecule count (`min_depth`) — below it the codon falls back to single events.
 
@@ -113,7 +119,7 @@ For the full mathematical derivation, worked examples, the multiallelic-site gen
 
 Non-covered codon positions are identified differently depending on the input mode:
 
-- **FASTA mode** — any stretch of `N` characters spanning a full codon (`NNN`) is treated as a coverage gap. Each contiguous N-run is reported as a `CoverageGap` entry with the affected feature, codon start, and codon end. Rule positions that fall within a gap are not evaluated.
+- **FASTA mode** — any stretch of `N` characters spanning a full codon (`NNN`) is treated as a coverage gap, recording the affected feature and codon range. Rule positions that fall within a gap are not evaluated.
 - **VCF mode with BAM** — an optional BAM file (aligned against the same query reference as the VCF) can be provided via `--bam`. Per-base depth is extracted from the BAM and projected through the CIGAR map onto internal CDS coordinates. Codons where any nucleotide falls below `--min-depth` (default 10) are reported as coverage gaps. This allows the report to flag positions that technically lack sufficient read support even if no variant was called. In the web app's **batch VCF** mode, an optional BAM can be attached to each sample: BAMs are auto-paired to VCFs by filename stem (e.g. `sample1.vcf` ↔ `sample1.bam`) on multi-select upload, and any pairing can be overridden per row. Pairing is positional per uploaded VCF row, not by on-disk filename (uploaded files are stored under anonymous names). A sample without a BAM skips coverage-gap analysis, exactly like a single-VCF run without `--bam`.
 - **VCF mode without BAM** — coverage gaps are not assessed; the report assumes all positions targeted by variants are covered.
 

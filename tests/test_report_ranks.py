@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from respro.core.phenotype_ranks import RANK_COLOURS
 from respro.db.models import (
     AnnotatedVariant,
     FeatureMatch,
@@ -14,10 +15,13 @@ from respro.db.models import (
     ResistanceRule,
     VariantCall,
 )
-from respro.db.phenotype_ranks import RANK_COLOURS
-from respro.report.html import (
-    _build_rule_metrics,
-    _phenotype_badge_class,
+from respro.report.html.formatting import (
+    build_rule_metrics as _build_rule_metrics,
+)
+from respro.report.html.formatting import (
+    phenotype_badge_class as _phenotype_badge_class,
+)
+from respro.report.html.main import (
     build_report_context,
     render_html,
 )

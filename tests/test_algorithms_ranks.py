@@ -8,7 +8,7 @@ pass because those labels are valid vocabulary entries (ranks 5/4/1).
 
 from __future__ import annotations
 
-from respro.db.algorithms import (
+from respro.core.algorithms import (
     compute_drug_assessment,
 )
 

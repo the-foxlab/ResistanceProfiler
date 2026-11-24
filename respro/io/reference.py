@@ -1,6 +1,4 @@
-"""
-Reference I/O — load reference sequences from the project DB or FASTA files.
-"""
+"""Reference FASTA reader normalizing RNA (U->T) and trimming trailing N tails."""
 
 from __future__ import annotations
 
@@ -10,19 +8,11 @@ from Bio import SeqIO
 
 
 def read_fasta(fasta_path: Path) -> dict[str, str]:
-    """
-    Read a FASTA file and return a dict of sequences, normalized to DNA.
-
-    Normalization steps:
-    - RNA sequences (containing U) converted to DNA (U→T)
-    - Trailing N/n bases removed (represent missing tail information)
-
-    :param fasta_path: path to FASTA file
-    :return: dict mapping record_id to upper-case DNA sequence string
-    """
+    """Read a FASTA file into ``{record_id: uppercase_dna_sequence}``."""
     seqs: dict[str, str] = {}
-    for record in SeqIO.parse(str(fasta_path), 'fasta'):
-        seq = str(record.seq).upper().replace('U', 'T').rstrip('N')
-        seqs[record.id] = seq
+    with fasta_path.open(encoding='utf-8') as fh:
+        for record in SeqIO.parse(fh, 'fasta'):
+            if record.id in seqs:
+                raise ValueError(f'Duplicate FASTA record identifier {record.id!r} in {fasta_path}')
+            seqs[record.id] = str(record.seq).upper().replace('U', 'T').rstrip('N')
     return seqs
-

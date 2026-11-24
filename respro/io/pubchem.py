@@ -1,195 +1,165 @@
-"""
-Thin client for the PubChem PUG REST API.
-
-Resolves a drug name to its PubChem CID and a short human-readable description.
-Only stdlib modules are required and no API key is needed.
-
-All public functions return None / empty on any failure so that callers can
-treat PubChem data lookup as strictly best-effort.
-"""
+"""Thin client for the PubChem PUG REST API (compound CID and substance SID drug lookups)."""
 
 from __future__ import annotations
 
-import json
 import logging
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 
 from respro.config.cli_settings import CLI_CONFIG
+from respro.io.http import LookupResult, LookupStatus, fetch_json_lookup
 
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass(frozen=True)
 class PubChemRecord:
-    """
-    Minimal PubChem compound record for a single drug.
-    """
+    """Minimal PubChem compound or substance metadata record for one drug."""
 
-    cid: int
+    cid: int | None  # None for substance-only (SID) records such as monoclonal antibodies
     url: str
     description: str
-    structure_url: str = ''  # 2D structure image URL from PubChem
+    structure_url: str = ''
 
 
-def lookup_drug(name: str, timeout: int = CLI_CONFIG.timeouts.pubchem) -> PubChemRecord | None:
-    """
-    Look up a drug by name on PubChem and return a minimal record.
+def lookup_drug(name: str, timeout: int = CLI_CONFIG.timeouts.pubchem) -> LookupResult[PubChemRecord]:
+    """Resolve *name* via PubChem compound (CID) first, falling back to substance (SID) on 404."""
+    cid_result = _fetch_cid(name, timeout)
+    if cid_result.status is LookupStatus.FOUND and cid_result.value is not None:
+        cid = cid_result.value
+        return LookupResult.found(PubChemRecord(
+            cid=cid,
+            url=CLI_CONFIG.urls.pubchem_compound_page.format(cid=cid),
+            description=_fetch_description(cid, timeout),
+            structure_url=CLI_CONFIG.urls.pubchem_structure_png.format(cid=cid),
+        ))
+    if cid_result.status is LookupStatus.ERROR:
+        return LookupResult.error()
+    return _lookup_substance(name, timeout)
 
-    Returns None when the name cannot be resolved or any network or parsing
-    failure occurs, so callers do not need to handle exceptions.
 
-    :param name: drug name as it appears in the rules TSV
-    :param timeout: HTTP request timeout in seconds (default 5)
-    :return: PubChemRecord if found, otherwise None
-    """
-    cid = _fetch_cid(name, timeout)
-    if cid is None:
-        return None
+def _lookup_substance(name: str, timeout: int) -> LookupResult[PubChemRecord]:
+    """Resolve *name* to its lowest PubChem SID and pick a representative synonym."""
+    sids_result = _fetch_substance_sids(name, timeout)
+    if sids_result.status is not LookupStatus.FOUND or not sids_result.value:
+        return LookupResult.not_found() if sids_result.status is LookupStatus.NOT_FOUND else LookupResult.error()
 
-    description = _fetch_description(cid, timeout)
-    return PubChemRecord(
-        cid=cid,
-        url=CLI_CONFIG.urls.pubchem_compound_page.format(cid=cid),
-        description=description,
-        structure_url=CLI_CONFIG.urls.pubchem_structure_png.format(cid=cid),
+    sid = min(sids_result.value)
+    synonyms_result = _fetch_substance_synonyms(sid, timeout)
+    synonyms = synonyms_result.value if synonyms_result.status is LookupStatus.FOUND and synonyms_result.value else []
+
+    lowered = name.strip().lower()
+    description = next((s for s in synonyms if s.strip().lower() == lowered), '') or (
+        synonyms[0] if synonyms else ''
     )
+    return LookupResult.found(PubChemRecord(
+        cid=None,
+        url=CLI_CONFIG.urls.pubchem_substance_page.format(sid=sid),
+        description=description,
+        structure_url='',
+    ))
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Internal helpers
-# ──────────────────────────────────────────────────────────────────────
+def _fetch_identifier_list(url: str, key: str, label: str, timeout: int) -> LookupResult[list]:
+    """Fetch a PubChem ``IdentifierList.<key>`` list payload."""
+    res = fetch_json_lookup(url, timeout=timeout, label=label)
+    if res.status is not LookupStatus.FOUND:
+        return LookupResult(status=res.status)
+    data = res.value
+    if not isinstance(data, dict) or not isinstance(data.get('IdentifierList'), dict):
+        logger.debug('%s malformed payload: missing IdentifierList object', label)
+        return LookupResult.error()
+    items = data['IdentifierList'].get(key)
+    if not isinstance(items, list):
+        logger.debug('%s malformed payload: %s is not a list', label, key)
+        return LookupResult.error()
+    return LookupResult.found(items)
 
-def _fetch_cid(name: str, timeout: int) -> int | None:
-    """
-    Resolve a drug name to its primary PubChem CID.
 
-    :param name: drug name
-    :param timeout: HTTP request timeout in seconds
-    :return: integer CID if found, otherwise None
-    """
-    encoded = urllib.parse.quote(name)
-    url = CLI_CONFIG.urls.pubchem_cid_lookup.format(name=encoded)
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            if not isinstance(data, dict):
-                logger.debug('PubChem CID lookup malformed payload for %r: root is %s', name, type(data).__name__)
-                return None
-            identifier_list = data.get('IdentifierList')
-            if not isinstance(identifier_list, dict):
-                logger.debug('PubChem CID lookup malformed payload for %r: missing IdentifierList object', name)
-                return None
-            cids = identifier_list.get('CID')
-            if not isinstance(cids, list):
-                logger.debug('PubChem CID lookup malformed payload for %r: CID is not a list', name)
-                return None
-            return int(cids[0]) if cids else None
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            logger.debug('PubChem: no compound found for %r', name)
-        else:
-            logger.warning('PubChem CID lookup failed for %r: HTTP %s', name, exc.code)
-        return None
-    except OSError as exc:
-        # Covers socket timeouts, connection refused, no network, etc.
-        logger.warning('PubChem CID lookup failed for %r (network): %s', name, exc)
-        return None
-    except Exception as exc:
-        logger.warning('PubChem CID lookup failed for %r: %s', name, exc)
-        return None
+def _fetch_cid(name: str, timeout: int) -> LookupResult[int]:
+    """Resolve a drug name to its primary PubChem CID."""
+    url = CLI_CONFIG.urls.pubchem_cid_lookup.format(name=urllib.parse.quote(name, safe=''))
+    res = _fetch_identifier_list(url, 'CID', f'PubChem CID lookup for {name!r}', timeout)
+    if res.status is not LookupStatus.FOUND or res.value is None:
+        return LookupResult(status=res.status)
+    if not res.value:
+        return LookupResult.not_found()
+    first = res.value[0]
+    first_str = str(first)
+    if isinstance(first, bool) or not isinstance(first, (int, str)) or not (first_str.isascii() and first_str.isdigit()):
+        return LookupResult.error()
+    return LookupResult.found(int(first_str))
+
+
+def _fetch_substance_sids(name: str, timeout: int) -> LookupResult[list[int]]:
+    """Resolve a drug name to its PubChem substance IDs (SIDs)."""
+    url = CLI_CONFIG.urls.pubchem_substance_sids.format(name=urllib.parse.quote(name, safe=''))
+    res = _fetch_identifier_list(url, 'SID', f'PubChem SID lookup for {name!r}', timeout)
+    if res.status is LookupStatus.NOT_FOUND:
+        logger.debug('PubChem: no substance found for %r', name)
+        return LookupResult.not_found()
+    if res.status is not LookupStatus.FOUND or res.value is None:
+        return LookupResult(status=res.status)
+    sids = [
+        int(s_str) for s in res.value
+        if not isinstance(s, bool)
+        and isinstance(s, (int, str))
+        and (s_str := str(s)).isascii()
+        and s_str.isdigit()
+    ]
+    return LookupResult.found(sids) if sids else LookupResult.not_found()
+
+
+def _fetch_substance_synonyms(sid: int, timeout: int) -> LookupResult[list[str]]:
+    """Fetch the synonym list of a PubChem substance record."""
+    url = CLI_CONFIG.urls.pubchem_substance_record.format(sid=sid)
+    res = fetch_json_lookup(url, timeout=timeout, label=f'PubChem substance record lookup for SID {sid}')
+    if res.status is not LookupStatus.FOUND:
+        return LookupResult(status=res.status)
+    data = res.value
+    if not isinstance(data, dict):
+        return LookupResult.error()
+    substances = data.get('PC_Substances')
+    if not isinstance(substances, list) or not substances or not isinstance(substances[0], dict):
+        return LookupResult.error()
+    synonyms = substances[0].get('synonyms')
+    if not isinstance(synonyms, list):
+        return LookupResult.error()
+    return LookupResult.found([s.strip() for s in synonyms if isinstance(s, str) and s.strip()])
 
 
 def _fetch_description(cid: int, timeout: int) -> str:
-    """
-    Fetch a human-readable description for a PubChem compound.
-
-    Prefers the Description endpoint, but falls back to a title if no
-    description text is available.
-
-    :param cid: PubChem compound ID
-    :param timeout: HTTP request timeout in seconds
-    :return: description string, empty string if unavailable
-    """
-    description_url = CLI_CONFIG.urls.pubchem_description.format(cid=cid)
+    """Fetch a best-effort compound description (falling back to title) for *cid*."""
+    desc_url = CLI_CONFIG.urls.pubchem_description.format(cid=cid)
     first_title = ''
-    try:
-        with urllib.request.urlopen(description_url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            if not isinstance(data, dict):
-                logger.debug(
-                    'PubChem description lookup malformed payload for CID %s: root is %s',
-                    cid,
-                    type(data).__name__,
-                )
-                return ''
-            information_list = data.get('InformationList')
-            if not isinstance(information_list, dict):
-                logger.debug(
-                    'PubChem description lookup malformed payload for CID %s: missing InformationList object',
-                    cid,
-                )
-                return ''
-            information_entries = information_list.get('Information')
-            if not isinstance(information_entries, list):
-                logger.debug(
-                    'PubChem description lookup malformed payload for CID %s: Information is not a list',
-                    cid,
-                )
-                return ''
-            for entry in information_entries:
+    res = fetch_json_lookup(desc_url, timeout=timeout, label=f'PubChem description lookup for CID {cid}')
+    if res.status is LookupStatus.FOUND and isinstance(res.value, dict):
+        info_list = res.value.get('InformationList')
+        entries = info_list.get('Information') if isinstance(info_list, dict) else None
+        if isinstance(entries, list):
+            for entry in entries:
                 if not isinstance(entry, dict):
-                    logger.debug(
-                        'PubChem description lookup malformed payload for CID %s: entry is not an object',
-                        cid,
-                    )
                     return ''
                 raw_title = entry.get('Title', '')
-                title = raw_title.strip() if isinstance(raw_title, str) else ''
-                if title and not first_title:
-                    first_title = title
-                raw_description = entry.get('Description', '')
-                description = raw_description.strip() if isinstance(raw_description, str) else ''
-                if description:
-                    return description
-    except OSError as exc:
-        logger.warning('PubChem description lookup failed for CID %s (network): %s', cid, exc)
-    except Exception as exc:
-        logger.warning('PubChem description lookup failed for CID %s: %s', cid, exc)
+                if isinstance(raw_title, str) and raw_title.strip() and not first_title:
+                    first_title = raw_title.strip()
+                raw_desc = entry.get('Description', '')
+                if isinstance(raw_desc, str) and raw_desc.strip():
+                    return raw_desc.strip()
 
     if first_title:
         return first_title
 
     title_url = CLI_CONFIG.urls.pubchem_title.format(cid=cid)
-    try:
-        with urllib.request.urlopen(title_url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            if not isinstance(data, dict):
-                logger.debug('PubChem title lookup malformed payload for CID %s: root is %s', cid, type(data).__name__)
-                return ''
-            property_table = data.get('PropertyTable')
-            if not isinstance(property_table, dict):
-                logger.debug('PubChem title lookup malformed payload for CID %s: missing PropertyTable object', cid)
-                return ''
-            properties = property_table.get('Properties')
-            if not isinstance(properties, list):
-                logger.debug('PubChem title lookup malformed payload for CID %s: Properties is not a list', cid)
-                return ''
-            for entry in properties:
+    title_res = fetch_json_lookup(title_url, timeout=timeout, label=f'PubChem title lookup for CID {cid}')
+    if title_res.status is LookupStatus.FOUND and isinstance(title_res.value, dict):
+        prop_table = title_res.value.get('PropertyTable')
+        props = prop_table.get('Properties') if isinstance(prop_table, dict) else None
+        if isinstance(props, list):
+            for entry in props:
                 if not isinstance(entry, dict):
-                    logger.debug('PubChem title lookup malformed payload for CID %s: entry is not an object', cid)
                     return ''
                 raw_title = entry.get('Title', '')
-                title = raw_title.strip() if isinstance(raw_title, str) else ''
-                if title:
-                    return title
-    except OSError as exc:
-        logger.warning('PubChem title lookup failed for CID %s (network): %s', cid, exc)
-    except Exception as exc:
-        logger.warning('PubChem title lookup failed for CID %s: %s', cid, exc)
-
+                if isinstance(raw_title, str) and raw_title.strip():
+                    return raw_title.strip()
     return ''
-

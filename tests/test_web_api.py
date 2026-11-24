@@ -22,12 +22,14 @@ from rq import Queue
 from rq.exceptions import NoSuchJobError
 
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
+from web.backend.artifact_kinds import ARTIFACT_KINDS, ARTIFACT_RESULT_FIELDS
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _SAMPLE_QUOTA_COUNTER, _resolve_proxy_settings, create_app
 from web.backend.queue import get_batch_queue, get_queue
 from web.backend.services.session import (
     SESSION_COOKIE_NAME,
     hash_session_token,
+    record_artifact,
     record_job,
     reset_memory_stores,
 )
@@ -83,6 +85,35 @@ def _poll_job(client: TestClient, job_id: str) -> dict:
             break
     assert payload is not None
     return payload
+
+
+def _profile_vcf_result(
+    client: TestClient,
+    vcf_path: Path,
+    ref_fasta_path: Path,
+    *,
+    sample: str,
+    display_name: str,
+) -> dict:
+    """Run one VCF profile job and return its succeeded result payload."""
+    vcf_id = _upload_file(client, vcf_path, 'vcf')
+    ref_id = _upload_file(client, ref_fasta_path, 'fasta')
+    submit = client.post(
+        '/api/profile/vcf',
+        json={
+            'vcf_id': vcf_id,
+            'reference_id': ref_id,
+            'input_display_name': display_name,
+            'sample': sample,
+        },
+    )
+    assert submit.status_code == 200, submit.text
+
+    payload = _poll_job(client, submit.json()['job_id'])
+    assert payload['status'] == 'succeeded'
+    result = payload['result']
+    assert isinstance(result, dict)
+    return result
 
 
 def _download_artifact_json(
@@ -175,12 +206,25 @@ def web_sample_ref_fasta(startup_config: StartupConfig) -> Path:
 
 
 @pytest.fixture()
-def client(sync_queue: Queue, startup_config: StartupConfig):
-    """TestClient with queue override and startup config injected."""
+def client(sync_queue: Queue, startup_config: StartupConfig, monkeypatch: pytest.MonkeyPatch):
+    """TestClient with default batch size and injected queue and startup config."""
+    monkeypatch.delenv('RESPRO_WEB_MAX_BATCH_SIZE', raising=False)
     app = create_app(startup_config=startup_config)
     app.dependency_overrides[get_queue] = lambda: sync_queue
     app.dependency_overrides[get_batch_queue] = lambda: sync_queue
     return TestClient(app)
+
+
+def test_client_uses_default_batch_size_with_ambient_override(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default test client must not inherit a deployment's batch-size override."""
+    monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '100')
+    test_client = request.getfixturevalue('client')
+
+    response = test_client.get('/api/ui/config')
+
+    assert response.json()['data']['batch_max_samples'] == WEB_BACKEND_CONFIG.defaults.max_batch_size
 
 
 class TestNoApiToken:
@@ -974,6 +1018,38 @@ class TestWebApi:
             report_payload = json.loads(archive.read('bundle-name-check.json').decode('utf-8'))
             assert report_payload['run']['sample_name'] == 'artifact-bundle'
 
+    def test_artifact_bundle_packs_a_full_default_batch(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+    ) -> None:
+        """A full default batch (one artifact per kind per sample) fits in one request."""
+        session_hash = _establish_session(client)
+        full_batch_ids = []
+        expected_files = {}
+        for sample in range(WEB_BACKEND_CONFIG.defaults.max_batch_size):
+            for kind in ARTIFACT_KINDS:
+                path = startup_config.results_dir / f'sample-{sample}{kind.internal_suffix}'
+                content = f'sample-{sample}-{kind.download_suffix}'
+                path.write_text(content)
+                expected_files[f'sample-{sample}{kind.download_suffix}'] = content
+                full_batch_ids.append(record_artifact(
+                    session_hash=session_hash, canonical_path=path, media_type=kind.media_type,
+                ))
+
+        assert len(set(full_batch_ids)) == len(full_batch_ids)
+
+        bundle = client.post(
+            '/api/artifact-bundle',
+            json={'artifact_ids': full_batch_ids},
+        )
+
+        assert bundle.status_code == 200, bundle.text
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            assert set(archive.namelist()) == set(expected_files)
+            for name, content in expected_files.items():
+                assert archive.read(name).decode() == content
+
     def test_artifact_bundle_rejects_unknown_artifact_id(
         self,
         client: TestClient,
@@ -985,6 +1061,122 @@ class TestWebApi:
 
         assert response.status_code == 404
         assert response.json()['detail'] == 'Artifact not found.'
+
+    def test_bundle_parts_extract_without_overwriting_conflicting_names(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        tmp_path: Path,
+    ) -> None:
+        session_hash = _establish_session(client)
+        filenames = [
+            'sample.results.json', 'sample.results.json', 'sample_1.results.json',
+            'sample.results.json', 'sample_1.results.json', 'part1-sample.results.json',
+            'part2-sample.results.json', 'sample.results.json',
+        ]
+        artifact_ids = []
+        for index, filename in enumerate(filenames):
+            directory = startup_config.results_dir / str(index)
+            directory.mkdir()
+            path = directory / filename
+            path.write_text(f'artifact-{index}')
+            artifact_ids.append(record_artifact(
+                session_hash=session_hash, canonical_path=path, media_type='application/json',
+            ))
+
+        extracted = tmp_path / 'extracted'
+        all_names = []
+        for part, start in enumerate(range(0, len(artifact_ids), 3), start=1):
+            request_body = {'artifact_ids': artifact_ids[start:start + 3]}
+            response = client.post(
+                '/api/artifact-bundle',
+                params={'part': part},
+                json=request_body,
+            )
+            assert response.status_code == 200, response.text
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                names = archive.namelist()
+                all_names.extend(names)
+                archive.extractall(extracted)
+            repeated = client.post('/api/artifact-bundle', params={'part': part}, json=request_body)
+            assert repeated.status_code == 200
+            with zipfile.ZipFile(io.BytesIO(repeated.content)) as archive:
+                assert archive.namelist() == names
+
+        assert all_names == [
+            'part1-sample.json', 'part1-sample_1.json', 'part1-sample_1_1.json',
+            'part2-sample.json', 'part2-sample_1.json', 'part2-part1-sample.json',
+            'part3-part2-sample.json', 'part3-sample.json',
+        ]
+        assert len(set(all_names)) == len(filenames)
+        assert {name: (extracted / name).read_text() for name in all_names} == {
+            name: f'artifact-{index}' for index, name in enumerate(all_names)
+        }
+
+    @pytest.mark.parametrize('part', ['../other', '0', '-1'])
+    def test_bundle_rejects_invalid_part_number(self, client: TestClient, part: str) -> None:
+        response = client.post(
+            '/api/artifact-bundle', params={'part': part}, json={'artifact_ids': ['unknown']},
+        )
+
+        assert response.status_code == 422
+
+    def test_bundle_part_still_enforces_artifact_ownership(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        _establish_session(client)
+        path = startup_config.results_dir / 'private.results.json'
+        path.write_text('private')
+        artifact_id = record_artifact(
+            session_hash='another-session', canonical_path=path, media_type='application/json',
+        )
+
+        response = client.post(
+            '/api/artifact-bundle', params={'part': 1}, json={'artifact_ids': [artifact_id]},
+        )
+
+        assert response.status_code == 404
+
+    def test_job_result_exposes_registry_ordered_artifact_ids(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        """Every result carries one resolvable artifact ID per registered kind."""
+        result = _profile_vcf_result(
+            client,
+            web_sample_vcf,
+            web_sample_ref_fasta,
+            sample='artifact-ids',
+            display_name='artifact-ids.vcf',
+        )
+
+        assert result['artifact_ids'] == [
+            result[kind.result_field] for kind in ARTIFACT_KINDS
+        ]
+        for artifact_id in result['artifact_ids']:
+            download = client.get('/api/artifact', params={'artifact_id': artifact_id})
+            assert download.status_code == 200
+
+    def test_job_result_artifact_fields_match_the_registry(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        """Drift guard: an export added without a result field fails here."""
+        result = _profile_vcf_result(
+            client,
+            web_sample_vcf,
+            web_sample_ref_fasta,
+            sample='artifact-drift',
+            display_name='artifact-drift.vcf',
+        )
+
+        artifact_fields = {key for key in result if key.endswith('_path')}
+        assert artifact_fields == set(ARTIFACT_RESULT_FIELDS)
+        assert len(result['artifact_ids']) == len(ARTIFACT_KINDS)
 
     def test_profile_vcf_path_outside_uploads_rejected(
         self,
@@ -1675,6 +1867,10 @@ class TestWebApi:
         payload = response.json()['data']
         assert payload['batch_max_samples'] == 7
         assert payload['sample_limit_per_minute'] == 7
+        assert payload['artifact_bundle_max_artifacts'] == min(
+            len(ARTIFACT_KINDS) * 7,
+            WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+        )
 
     def test_ui_config_reports_respro_version(
         self,
@@ -2912,31 +3108,43 @@ class TestApiRouteRateLimits:
         throttled = [s for s in statuses if s == 429]
         assert throttled, 'Expected at least one 429 when exceeding the API rate limit'
 
-    def test_artifact_bundle_rejects_more_than_50_paths(
+    def test_artifact_bundle_rejects_more_than_the_derived_cap(
         self,
         client: TestClient,
     ) -> None:
-        """ArtifactBundlePayload.artifact_ids capped at 50 → 422 for 51 ids (SEC-004)."""
-        artifact_ids = [f'artifact-id-{i}' for i in range(51)]
+        """Above the derived cap the bundle route returns a readable string 400."""
+        cap = min(
+            len(ARTIFACT_KINDS) * WEB_BACKEND_CONFIG.defaults.max_batch_size,
+            WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+        )
+        artifact_ids = [f'artifact-id-{i}' for i in range(cap + 1)]
         response = client.post(
             '/api/artifact-bundle',
             json={'artifact_ids': artifact_ids},
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
+        detail = response.json()['detail']
+        assert isinstance(detail, str)
+        assert str(cap + 1) in detail
+        assert str(cap) in detail
 
-    def test_artifact_bundle_accepts_50_paths(
+    def test_artifact_bundle_accepts_the_derived_cap(
         self,
         client: TestClient,
     ) -> None:
-        """ArtifactBundlePayload.artifact_ids cap of 50 accepts exactly 50 ids (boundary)."""
-        artifact_ids = [f'artifact-id-{i}' for i in range(50)]
+        """Exactly the derived cap passes request validation (it may 404 as unresolved)."""
+        cap = min(
+            len(ARTIFACT_KINDS) * WEB_BACKEND_CONFIG.defaults.max_batch_size,
+            WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+        )
+        artifact_ids = [f'artifact-id-{i}' for i in range(cap)]
         response = client.post(
             '/api/artifact-bundle',
             json={'artifact_ids': artifact_ids},
         )
-        # 50 ids is within the cap; it should not be a 422 validation error.
-        # (It may be 404 because the ids do not resolve, but never 422.)
-        assert response.status_code != 422
+        # The ids do not resolve, but neither the payload validation nor the
+        # workflow cap may reject a full batch.
+        assert response.status_code == 404
 
 
 class TestRequestFieldBounds:

@@ -1,10 +1,10 @@
-"""
-SQLite schema creation and validation for ResistanceProfiler databases.
-"""
+"""SQLite schema definitions, creation, and read-only validation for project and results DBs."""
+
+from __future__ import annotations
 
 import re
 import sqlite3
-import uuid
+from functools import lru_cache
 from pathlib import Path
 
 from respro.utils.files import require_file
@@ -13,7 +13,6 @@ PROJECT_SCHEMA_VERSION = 4
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
--- Project metadata
 CREATE TABLE IF NOT EXISTS project (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
@@ -29,11 +28,10 @@ CREATE TABLE IF NOT EXISTS project (
     metadata_maintainer_update TEXT NOT NULL DEFAULT '',
     metadata_license TEXT NOT NULL DEFAULT '',
     metadata_tsv_checksum TEXT NOT NULL DEFAULT '',
-    example_fasta TEXT NOT NULL DEFAULT '',  -- optional per-database example consensus FASTA (single record)
-    schema_version INTEGER NOT NULL DEFAULT 1
+    example_fasta TEXT NOT NULL DEFAULT '',
+    schema_version INTEGER NOT NULL DEFAULT 4
 );
 
--- Reference sequences
 CREATE TABLE IF NOT EXISTS reference (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES project(id),
@@ -45,25 +43,24 @@ CREATE TABLE IF NOT EXISTS reference (
     UNIQUE(project_id, name)
 );
 
--- features / ORFs / CDS
 CREATE TABLE IF NOT EXISTS feature (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     reference_id INTEGER NOT NULL REFERENCES reference(id),
     name        TEXT    NOT NULL,
     protein     TEXT    DEFAULT '',
-    protein_id  TEXT    DEFAULT '',  -- GenBank protein_id qualifier
-    ncbi_protein_url TEXT DEFAULT '',  -- verified NCBI protein URL when reachable
-    locus_tag   TEXT    DEFAULT '',  -- GenBank locus_tag qualifier
-    note        TEXT    DEFAULT '',  -- GenBank note qualifier (short free text)
-    start       INTEGER NOT NULL,  -- 0-based inclusive
-    end         INTEGER NOT NULL,  -- 0-based exclusive
+    protein_id  TEXT    DEFAULT '',
+    ncbi_protein_url TEXT DEFAULT '',
+    locus_tag   TEXT    DEFAULT '',
+    note        TEXT    DEFAULT '',
+    start       INTEGER NOT NULL,
+    end         INTEGER NOT NULL,
     strand      TEXT    NOT NULL DEFAULT '+',
-    codon_start INTEGER NOT NULL DEFAULT 0,  -- 0-based offset (GenBank codon_start qualifier minus 1)
-    nt_sequence TEXT    NOT NULL DEFAULT '',  -- CDS nucleotide slice in coding orientation
-    aa_sequence TEXT    NOT NULL DEFAULT '',  -- pre-translated protein sequence
+    codon_start INTEGER NOT NULL DEFAULT 0,
+    nt_sequence TEXT    NOT NULL DEFAULT '',
+    aa_sequence TEXT    NOT NULL DEFAULT '',
     feature_type TEXT   NOT NULL DEFAULT 'CDS',
     parent_feature_name TEXT NOT NULL DEFAULT '',
-    has_rules   INTEGER NOT NULL DEFAULT 0,  -- 1 when at least one resistance rule targets this feature
+    has_rules   INTEGER NOT NULL DEFAULT 0,
     UNIQUE(reference_id, name)
 );
 
@@ -71,34 +68,33 @@ CREATE TABLE IF NOT EXISTS feature_segment (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     feature_id     INTEGER NOT NULL REFERENCES feature(id),
     segment_index INTEGER NOT NULL,
-    start       INTEGER NOT NULL,  -- 0-based inclusive
-    end         INTEGER NOT NULL,  -- 0-based exclusive
+    start       INTEGER NOT NULL,
+    end         INTEGER NOT NULL,
     UNIQUE(feature_id, segment_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_feature_segment_feature ON feature_segment(feature_id);
 
--- Drugs
 CREATE TABLE IF NOT EXISTS drug (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES project(id),
     name        TEXT    NOT NULL,
     alias       TEXT    DEFAULT '',
-    pubchem_cid TEXT    DEFAULT '',  -- PubChem compound ID (integer stored as text)
-    pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound URL
-    description TEXT    DEFAULT '',  -- short human-readable description from PubChem
-    structure_url TEXT    DEFAULT '',  -- 2D structure image URL from PubChem
+    pubchem_cid TEXT    DEFAULT '',
+    pubchem_url TEXT    DEFAULT '',
+    description TEXT    DEFAULT '',
+    structure_url TEXT    DEFAULT '',
+    pubchem_lookup_failed INTEGER DEFAULT 0,
     UNIQUE(project_id, name)
 );
 
--- Resistance rules
 CREATE TABLE IF NOT EXISTS resistance_rule (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     feature_id     INTEGER NOT NULL REFERENCES feature(id),
     drug_id     INTEGER NOT NULL REFERENCES drug(id),
     external_id TEXT    NOT NULL DEFAULT '',
     reference_identifier TEXT DEFAULT '',
-    position    INTEGER NOT NULL,  -- 0-based AA position within feature
+    position    INTEGER NOT NULL,
     reference   TEXT    DEFAULT '',
     mutation    TEXT    NOT NULL,
     phenotype   TEXT    NOT NULL DEFAULT '',
@@ -146,7 +142,6 @@ ON resistance_formula_rule(drug_id, normalized_expression);
 CREATE INDEX IF NOT EXISTS idx_formula_rule_member_formula
 ON resistance_formula_rule_member(formula_rule_id);
 
--- Publications (deduped; doi is the natural key when available)
 CREATE TABLE IF NOT EXISTS publication (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     doi         TEXT    NOT NULL DEFAULT '',
@@ -158,7 +153,6 @@ CREATE TABLE IF NOT EXISTS publication (
     journal     TEXT    NOT NULL DEFAULT ''
 );
 
--- Link tables between rules/rule-sets and publications
 CREATE TABLE IF NOT EXISTS rule_publication (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
@@ -175,10 +169,7 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
 );
 CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
 
--- Cached user-provided query references. Privacy-minimal: only the sequence
--- checksum (computed from the sequence alone, header excluded) is persisted so
--- identical sequences can reuse stored CIGAR mappings. No FASTA header,
--- sequence, length, or timestamp is stored.
+-- Privacy-minimal query cache: persists only sequence checksum + CIGAR mappings (no FASTA header or sequence).
 CREATE TABLE IF NOT EXISTS query_reference (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     checksum    TEXT    NOT NULL,
@@ -201,7 +192,6 @@ CREATE TABLE IF NOT EXISTS query_feature_mapping (
     UNIQUE(query_ref_id, feature_id)
 );
 
--- Interpretation algorithms (non-mutually-exclusive; stored as JSON config blobs)
 CREATE TABLE IF NOT EXISTS interpretation_algorithm (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id     INTEGER NOT NULL REFERENCES project(id),
@@ -232,6 +222,7 @@ CREATE TABLE IF NOT EXISTS run (
     formula_hits    INTEGER NOT NULL DEFAULT 0,
     status          TEXT    NOT NULL DEFAULT 'complete',
     is_fasta_mode   INTEGER NOT NULL DEFAULT 0,
+    coverage_assessed INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -261,7 +252,9 @@ CREATE TABLE IF NOT EXISTS variant_result (
     single_exchange_aa_freq REAL    DEFAULT 0.0,
     rule_effect_aa_freq     TEXT    DEFAULT '{}',
     rule_effect_alt         TEXT    DEFAULT '{}',
-    freq_method             TEXT    DEFAULT 'observed'
+    freq_method             TEXT    DEFAULT 'observed',
+    variant_source          TEXT    DEFAULT '',
+    haplotype_links         TEXT    DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -313,205 +306,11 @@ CREATE TABLE IF NOT EXISTS profiled_feature (
 CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
 """
 
-
-_REQUIRED_RESULTS_COLUMNS = {
-    'results_meta': {'key', 'value'},
-    'run': {'id', 'project_name', 'project_db_path', 'reference_name', 'vcf_path'},
-    'variant_result': {'id', 'run_id', 'chrom', 'pos', 'ref', 'alt'},
-}
-
-_RESULTS_OPTIONAL_TABLES_SQL = """\
-CREATE TABLE IF NOT EXISTS coverage_gap (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id      INTEGER NOT NULL REFERENCES run(id),
-    feature_name   TEXT    NOT NULL,
-    reference_name TEXT    DEFAULT '',
-    chrom          TEXT    DEFAULT '',
-    codon_start INTEGER NOT NULL,
-    codon_end   INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
-
-CREATE TABLE IF NOT EXISTS formula_rule_hit (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id      INTEGER NOT NULL REFERENCES run(id),
-    reference_name TEXT DEFAULT '',
-    hit_json    TEXT    NOT NULL DEFAULT '{}'
-);
-CREATE INDEX IF NOT EXISTS idx_frh_run ON formula_rule_hit(run_id);
-
-CREATE TABLE IF NOT EXISTS sample_classification (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id              INTEGER NOT NULL REFERENCES run(id),
-    drug                TEXT    DEFAULT '',
-    phenotype           TEXT    NOT NULL DEFAULT '',
-    clinical_phenotype  TEXT    NOT NULL DEFAULT '',
-    ic50                TEXT    DEFAULT '',
-    fold_ic50           TEXT    DEFAULT '',
-    note                TEXT    DEFAULT '',
-    source              TEXT    DEFAULT '',
-    created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
-
-CREATE TABLE IF NOT EXISTS profiled_feature (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id          INTEGER NOT NULL REFERENCES run(id),
-    reference_name  TEXT    NOT NULL DEFAULT '',
-    feature_name    TEXT    NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
-"""
-
-_OPTIONAL_RESULTS_COLUMN_DEFS = {
-    'run': {
-        'project_fingerprint': "TEXT DEFAULT ''",
-        'project_updated_at': "TEXT DEFAULT ''",
-        'sample_name': "TEXT DEFAULT ''",
-        'total_variants': 'INTEGER NOT NULL DEFAULT 0',
-        'variants_in_cds': 'INTEGER NOT NULL DEFAULT 0',
-        'resistance_hits': 'INTEGER NOT NULL DEFAULT 0',
-        'formula_hits': 'INTEGER NOT NULL DEFAULT 0',
-        'status': "TEXT NOT NULL DEFAULT 'complete'",
-        'created_at': "TEXT DEFAULT ''",
-        'is_fasta_mode': 'INTEGER NOT NULL DEFAULT 0',
-    },
-    'variant_result': {
-        'allele_freq': 'REAL',
-        'depth': 'INTEGER',
-        'feature_name': "TEXT DEFAULT ''",
-        'reference_name': "TEXT DEFAULT ''",
-        'codon_pos': 'INTEGER',
-        'ref_codon': "TEXT DEFAULT ''",
-        'alt_codon': "TEXT DEFAULT ''",
-        'ref_aa': "TEXT DEFAULT ''",
-        'alt_aa': "TEXT DEFAULT ''",
-        'consequence': "TEXT DEFAULT ''",
-        'af_bin': "TEXT DEFAULT ''",
-        'rule_match': 'INTEGER DEFAULT 0',
-        'drug_hits': "TEXT DEFAULT '[]'",
-        'is_combined_codon_event': 'INTEGER DEFAULT 0',
-        'combined_member_count': 'INTEGER DEFAULT 1',
-        'combined_states': "TEXT DEFAULT '[]'",
-        'single_exchange_aa_freq': 'REAL DEFAULT 0.0',
-        'rule_effect_aa_freq': "TEXT DEFAULT '{}'",
-        'rule_effect_alt': "TEXT DEFAULT '{}'",
-        'freq_method': "TEXT DEFAULT 'observed'",
-    },
-    'coverage_gap': {
-        'reference_name': "TEXT DEFAULT ''",
-        'chrom': "TEXT DEFAULT ''",
-    },
-    'formula_rule_hit': {
-        'reference_name': "TEXT DEFAULT ''",
-    },
-}
-
-_REQUIRED_PROJECT_COLUMNS = {
-    'project': {'id', 'name', 'created_at', 'schema_version'},
-    'reference': {'id', 'project_id', 'name', 'length'},
-    'feature': {'id', 'reference_id', 'name', 'start', 'end', 'strand'},
-    'feature_segment': {'id', 'feature_id', 'segment_index', 'start', 'end'},
-    'drug': {'id', 'project_id', 'name'},
-    'resistance_rule': {'id', 'feature_id', 'drug_id', 'position', 'mutation'},
-    'query_reference': {'id', 'checksum'},
-    'query_feature_mapping': {
-        'id', 'query_ref_id', 'feature_id', 'identity', 'cds_coverage',
-        'query_start', 'query_end', 'strand', 'cigar',
-    },
-    'publication': {'id', 'doi', 'title', 'pubmed_id', 'raw_input'},
-    'rule_publication': {'id', 'rule_id', 'publication_id'},
-}
-
-# Note: first_author/year/journal on `publication` are defined as optional columns
-# (see _OPTIONAL_PROJECT_COLUMN_DEFS) so legacy databases migrate automatically.
-
-_OPTIONAL_PROJECT_COLUMN_DEFS = {
-    'project': {
-        'uuid': "TEXT NOT NULL DEFAULT ''",
-        # Use static default for ALTER TABLE compatibility (no datetime() in ADD COLUMN).
-        'updated_at': "TEXT NOT NULL DEFAULT ''",
-        'metadata_maintainers': "TEXT NOT NULL DEFAULT ''",
-        'metadata_contact': "TEXT NOT NULL DEFAULT ''",
-        'metadata_publication_pmid': "TEXT NOT NULL DEFAULT ''",
-        'metadata_publication_doi': "TEXT NOT NULL DEFAULT ''",
-        'metadata_website': "TEXT NOT NULL DEFAULT ''",
-        'metadata_description': "TEXT NOT NULL DEFAULT ''",
-        'metadata_maintainer_update': "TEXT NOT NULL DEFAULT ''",
-        'metadata_license': "TEXT NOT NULL DEFAULT ''",
-        'metadata_tsv_checksum': "TEXT NOT NULL DEFAULT ''",
-        'example_fasta': "TEXT NOT NULL DEFAULT ''",
-    },
-    'reference': {
-        'accession': "TEXT DEFAULT ''",
-        'organism': "TEXT DEFAULT ''",
-        'taxonomy': "TEXT DEFAULT ''",
-    },
-    'feature': {
-        'protein': "TEXT DEFAULT ''",
-        'protein_id': "TEXT DEFAULT ''",
-        'ncbi_protein_url': "TEXT DEFAULT ''",
-        'locus_tag': "TEXT DEFAULT ''",
-        'note': "TEXT DEFAULT ''",
-        'codon_start': 'INTEGER NOT NULL DEFAULT 0',
-        'nt_sequence': "TEXT NOT NULL DEFAULT ''",
-        'aa_sequence': "TEXT NOT NULL DEFAULT ''",
-        'feature_type': "TEXT NOT NULL DEFAULT 'CDS'",
-        'parent_feature_name': "TEXT NOT NULL DEFAULT ''",
-        'has_rules': 'INTEGER NOT NULL DEFAULT 0',
-    },
-    'drug': {
-        'alias': "TEXT DEFAULT ''",
-        'pubchem_cid': "TEXT DEFAULT ''",
-        'pubchem_url': "TEXT DEFAULT ''",
-        'description': "TEXT DEFAULT ''",
-        'structure_url': "TEXT DEFAULT ''",
-    },
-    'resistance_rule': {
-        'external_id': "TEXT NOT NULL DEFAULT ''",
-        'reference_identifier': "TEXT DEFAULT ''",
-        'reference': "TEXT DEFAULT ''",
-        'phenotype': "TEXT NOT NULL DEFAULT ''",
-        'clinical_phenotype': "TEXT NOT NULL DEFAULT ''",
-        'ic50': "TEXT DEFAULT ''",
-        'fold_ic50': "TEXT DEFAULT ''",
-        'score': "TEXT DEFAULT ''",
-        'publication': "TEXT DEFAULT ''",
-        'source': "TEXT DEFAULT ''",
-        'comment': "TEXT DEFAULT ''",
-    },
-    'resistance_rule_set': {
-        'phenotype': "TEXT NOT NULL DEFAULT ''",
-        'clinical_phenotype': "TEXT NOT NULL DEFAULT ''",
-        'ic50': "TEXT DEFAULT ''",
-        'fold_ic50': "TEXT DEFAULT ''",
-        'publication': "TEXT DEFAULT ''",
-        'source': "TEXT DEFAULT ''",
-        'group_name': "TEXT DEFAULT ''",
-        'comment': "TEXT DEFAULT ''",
-    },
-    'resistance_rule_set_member': {
-        'reference_identifier': "TEXT DEFAULT ''",
-        'reference': "TEXT DEFAULT ''",
-    },
-    'query_feature_mapping': {
-        'query_coverage': 'REAL NOT NULL DEFAULT 0',
-        'cds_start': 'INTEGER NOT NULL DEFAULT 0',
-        'intron_intervals': "TEXT NOT NULL DEFAULT '[]'",
-    },
-    'publication': {
-        'first_author': "TEXT NOT NULL DEFAULT ''",
-        'year': "TEXT NOT NULL DEFAULT ''",
-        'journal': "TEXT NOT NULL DEFAULT ''",
-    },
-}
-
 _SQL_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
 def _quote_sql_identifier(identifier: str, *, kind: str) -> str:
-    """Validate and quote an SQL identifier for safe interpolation."""
+    """Validate and quote an SQL identifier for safe PRAGMA interpolation."""
     if not _SQL_IDENTIFIER_RE.match(identifier):
         raise ValueError(f'Invalid SQL {kind} identifier: {identifier!r}')
     return f'"{identifier}"'
@@ -522,11 +321,69 @@ def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
 
 
-def create_schema(db_path: Path) -> sqlite3.Connection:
-    """Create a new project database with the full schema.
+@lru_cache(maxsize=2)
+def _expected_schema_columns(schema_sql: str) -> dict[str, frozenset[str]]:
+    """Derive the canonical ``{table: columns}`` contract directly from DDL."""
+    with sqlite3.connect(':memory:') as mem:
+        mem.executescript(schema_sql)
+        tables = [
+            row[0]
+            for row in mem.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+        return {
+            table: frozenset(row[1] for row in mem.execute(f'PRAGMA table_info("{table}")').fetchall())
+            for table in tables
+        }
 
-    Returns the open connection.
-    """
+
+def _validate_schema(
+    conn: sqlite3.Connection,
+    db_path: Path,
+    *,
+    schema_sql: str,
+    label: str,
+) -> None:
+    """Verify an existing SQLite database contains every expected table and column."""
+    expected = _expected_schema_columns(schema_sql)
+    existing_tables = {
+        row['name']
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+
+    missing_tables: list[str] = []
+    missing_columns: list[str] = []
+    unexpected_columns: list[str] = []
+    for table_name, expected_columns in expected.items():
+        if table_name not in existing_tables:
+            missing_tables.append(table_name)
+            continue
+        table_id = _quote_sql_identifier(table_name, kind='table')
+        available = {row['name'] for row in conn.execute(f'PRAGMA table_info({table_id})').fetchall()}
+        missing = sorted(expected_columns - available)
+        if missing:
+            missing_columns.append(f'{table_name}: {", ".join(missing)}')
+        if table_name == 'query_reference':
+            extra = sorted(available - expected_columns)
+            if extra:
+                unexpected_columns.append(f'{table_name}: {", ".join(extra)}')
+
+    if not missing_tables and not missing_columns and not unexpected_columns:
+        return
+
+    errors: list[str] = []
+    if missing_tables:
+        errors.append('missing tables: ' + ', '.join(sorted(missing_tables)))
+    if missing_columns:
+        errors.append('missing columns: ' + '; '.join(missing_columns))
+    if unexpected_columns:
+        errors.append('unexpected legacy columns: ' + '; '.join(unexpected_columns))
+    raise ValueError(f'{label} schema mismatch for {db_path}:\n- ' + '\n- '.join(errors))
+
+
+def create_schema(db_path: Path) -> sqlite3.Connection:
+    """Create a new project database with the canonical schema and return its connection."""
     conn = sqlite3.connect(str(db_path))
     conn.execute('PRAGMA journal_mode=WAL')
     _configure_connection(conn)
@@ -535,17 +392,21 @@ def create_schema(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def open_project_db(db_path: Path) -> sqlite3.Connection:
+    """Open an existing project database and validate its schema without mutating it."""
+    require_file(db_path, 'Project database')
+    conn = sqlite3.connect(str(db_path))
+    _configure_connection(conn)
+    try:
+        _validate_schema(conn, db_path, schema_sql=PROJECT_SCHEMA_SQL, label='Project database')
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
 def init_results_db(db_path: Path) -> sqlite3.Connection:
-    """
-    Create or validate a results database.
-
-    If ``db_path`` does not exist, a fresh results schema is created.
-    If it already exists, schema overlap with the expected internal structure is
-    validated and no schema mutation is attempted.
-
-    :param db_path: path to the results database
-    :return: open SQLite connection
-    """
+    """Create a fresh results database, or open and validate an existing one."""
     if db_path.exists() and not db_path.is_file():
         raise ValueError(f'Results database path is not a file: {db_path}')
 
@@ -563,373 +424,22 @@ def init_results_db(db_path: Path) -> sqlite3.Connection:
         conn.commit()
         return conn
 
-    _validate_results_schema_overlap(conn, db_path)
-    conn.executescript(_RESULTS_OPTIONAL_TABLES_SQL)
-    if _add_missing_optional_columns(conn, _OPTIONAL_RESULTS_COLUMN_DEFS):
-        conn.commit()
+    try:
+        _validate_schema(conn, db_path, schema_sql=RESULTS_SCHEMA_SQL, label='Results database')
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
 def open_results_db(db_path: Path) -> sqlite3.Connection:
-    """
-    Open and validate an existing results database.
-
-    :param db_path: path to existing results database
-    :return: open SQLite connection
-    """
+    """Open an existing results database and validate its schema without mutating it."""
     require_file(db_path, 'Results database')
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
-    _validate_results_schema_overlap(conn, db_path)
-    conn.executescript(_RESULTS_OPTIONAL_TABLES_SQL)
-    if _add_missing_optional_columns(conn, _OPTIONAL_RESULTS_COLUMN_DEFS):
-        conn.commit()
-    return conn
-
-
-def _validate_results_schema_overlap(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Validate that an existing results DB contains required tables/columns."""
-    _validate_required_schema_overlap(
-        conn,
-        db_path,
-        required_columns=_REQUIRED_RESULTS_COLUMNS,
-        label='Results database',
-    )
-
-
-def _validate_project_schema_overlap(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Validate that an existing project DB contains required tables/columns."""
-    _validate_required_schema_overlap(
-        conn,
-        db_path,
-        required_columns=_REQUIRED_PROJECT_COLUMNS,
-        label='Project database',
-    )
-
-
-def _validate_required_schema_overlap(
-    conn: sqlite3.Connection,
-    db_path: Path,
-    *,
-    required_columns: dict[str, set[str]],
-    label: str,
-) -> None:
-    """Validate table/column presence for required schema contract."""
-    existing_tables = {
-        row['name']
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
-
-    missing_tables: list[str] = []
-    missing_columns: list[str] = []
-    for table_name, expected_columns in required_columns.items():
-        table_identifier = _quote_sql_identifier(table_name, kind='table')
-        if table_name not in existing_tables:
-            missing_tables.append(table_name)
-            continue
-
-        available_columns = {
-            row['name']
-            for row in conn.execute(f'PRAGMA table_info({table_identifier})').fetchall()
-        }
-        missing = sorted(expected_columns - available_columns)
-        if missing:
-            missing_columns.append(f'{table_name}: {", ".join(missing)}')
-
-    if not missing_tables and not missing_columns:
-        return
-
-    errors: list[str] = []
-    if missing_tables:
-        errors.append('missing tables: ' + ', '.join(sorted(missing_tables)))
-    if missing_columns:
-        errors.append('missing columns: ' + '; '.join(missing_columns))
-
-    details = '\n- '.join(errors)
-    raise ValueError(f'{label} schema mismatch for {db_path}:\n- {details}')
-
-
-def _add_missing_optional_columns(
-    conn: sqlite3.Connection,
-    optional_column_defs: dict[str, dict[str, str]],
-) -> bool:
-    """Add missing optional columns with schema defaults and return whether DB changed."""
-    changed = False
-    existing_tables = {
-        row['name']
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
-
-    for table_name, column_defs in optional_column_defs.items():
-        table_identifier = _quote_sql_identifier(table_name, kind='table')
-        if table_name not in existing_tables:
-            continue
-
-        available_columns = {
-            row['name']
-            for row in conn.execute(f'PRAGMA table_info({table_identifier})').fetchall()
-        }
-        for column_name, column_def in column_defs.items():
-            column_identifier = _quote_sql_identifier(column_name, kind='column')
-            if column_name in available_columns:
-                continue
-            conn.execute(
-                f'ALTER TABLE {table_identifier} ADD COLUMN {column_identifier} {column_def}'
-            )
-            changed = True
-
-    return changed
-
-
-def _ensure_project_indexes(conn: sqlite3.Connection) -> None:
-    """Create project indexes that depend on optional columns when prerequisites exist."""
-    existing_tables = {
-        row['name']
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
-    if 'resistance_rule' not in existing_tables:
-        return
-
-    available_columns = {
-        row['name']
-        for row in conn.execute('PRAGMA table_info(resistance_rule)').fetchall()
-    }
-    if 'external_id' not in available_columns:
-        return
-
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_external_id_unique "
-        "ON resistance_rule(external_id) WHERE external_id != ''"
-    )
-
-
-def _feature_has_column(conn: sqlite3.Connection, column_name: str) -> bool:
-    """Return whether the feature table currently has the given column."""
-    available = {
-        row['name']
-        for row in conn.execute('PRAGMA table_info(feature)').fetchall()
-    }
-    return column_name in available
-
-
-def _backfill_feature_has_rules(conn: sqlite3.Connection) -> None:
-    """One-time backfill of feature.has_rules from existing resistance rules.
-
-    Runs only during the migration that adds the column, so the flag is never
-    recomputed afterwards — rule import maintains it transactionally (see
-    respro.db.rules_import).
-    """
-    conn.execute(
-        'UPDATE feature SET has_rules = 1 '
-        'WHERE id IN (SELECT DISTINCT feature_id FROM resistance_rule)'
-    )
-
-
-# Columns removed from query_reference by the privacy-minimal cache migration.
-# They previously stored the FASTA header (potentially patient-identifying),
-# the full sequence, its length, and a creation timestamp.
-_LEGACY_QUERY_REFERENCE_COLUMNS = ('name', 'sequence', 'length', 'created_at')
-
-
-def _drop_query_reference_pii_columns(conn: sqlite3.Connection) -> bool:
-    """Purge legacy query_reference columns that stored user-identifying data.
-
-    Kept rows (id, checksum) and their query_feature_mapping rows are preserved.
-    Returns whether the database was changed.
-    """
-    if 'query_reference' not in {
-        row['name']
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }:
-        return False
-
-    available_columns = {
-        row['name']
-        for row in conn.execute('PRAGMA table_info(query_reference)').fetchall()
-    }
-    droppable = [c for c in _LEGACY_QUERY_REFERENCE_COLUMNS if c in available_columns]
-    if not droppable:
-        return False
-
-    if tuple(int(part) for part in sqlite3.sqlite_version.split('.')[:2]) < (3, 35):
-        raise ValueError(
-            'Migrating this project database requires SQLite >= 3.35 to drop legacy '
-            f'query_reference columns ({", ".join(droppable)}); '
-            f'found SQLite {sqlite3.sqlite_version}. Please upgrade Python/SQLite '
-            'to open this database.'
-        )
-
-    for column in droppable:
-        column_identifier = _quote_sql_identifier(column, kind='column')
-        conn.execute(f'ALTER TABLE query_reference DROP COLUMN {column_identifier}')
-    return True
-
-
-def open_project_db(db_path: Path) -> sqlite3.Connection:
-    """
-    Open an existing project database and validate the schema version.
-
-    :param db_path: path to project database
-    :return: SQLite connection object
-    """
-    require_file(db_path, 'Project database')
-    conn = sqlite3.connect(str(db_path))
-    _configure_connection(conn)
-    _ensure_optional_tables(conn)
-    _validate_project_schema_overlap(conn, db_path)
-    had_has_rules = _feature_has_column(conn, 'has_rules')
-    changed = False
-    if _drop_query_reference_pii_columns(conn):
-        changed = True
-    if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
-        changed = True
-    if not had_has_rules and _feature_has_column(conn, 'has_rules'):
-        _backfill_feature_has_rules(conn)
-        changed = True
-    if _backfill_feature_segments(conn):
-        changed = True
-    if changed:
-        _ensure_project_indexes(conn)
-        conn.commit()
-    else:
-        _ensure_project_indexes(conn)
-    _ensure_project_uuid(conn)
-    return conn
-
-
-def _ensure_optional_tables(conn: sqlite3.Connection) -> None:
-    """
-    Create publication join tables if they are absent from an existing project database.
-
-    Safe to call on new databases (uses CREATE TABLE IF NOT EXISTS).
-    """
-    conn.executescript("""\
-CREATE TABLE IF NOT EXISTS publication (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    doi        TEXT    NOT NULL DEFAULT '',
-    title      TEXT    NOT NULL DEFAULT '',
-    pubmed_id  TEXT    NOT NULL DEFAULT '',
-    raw_input  TEXT    NOT NULL DEFAULT '',
-    first_author TEXT  NOT NULL DEFAULT '',
-    year       TEXT    NOT NULL DEFAULT '',
-    journal    TEXT    NOT NULL DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS feature_segment (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    feature_id     INTEGER NOT NULL REFERENCES feature(id),
-    segment_index INTEGER NOT NULL,
-    start       INTEGER NOT NULL,
-    end         INTEGER NOT NULL,
-    UNIQUE(feature_id, segment_index)
-);
-CREATE INDEX IF NOT EXISTS idx_feature_segment_feature ON feature_segment(feature_id);
-CREATE TABLE IF NOT EXISTS rule_publication (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
-    publication_id INTEGER NOT NULL REFERENCES publication(id),
-    UNIQUE(rule_id, publication_id)
-);
-CREATE INDEX IF NOT EXISTS idx_rule_pub ON rule_publication(rule_id);
-CREATE TABLE IF NOT EXISTS resistance_formula_rule (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    drug_id     INTEGER NOT NULL REFERENCES drug(id),
-    formula_id  TEXT    NOT NULL,
-    label       TEXT    DEFAULT '',
-    normalized_expression TEXT NOT NULL,
-    phenotype   TEXT    NOT NULL DEFAULT '',
-    clinical_phenotype TEXT NOT NULL DEFAULT '',
-    ic50        TEXT    DEFAULT '',
-    fold_ic50   TEXT    DEFAULT '',
-    source      TEXT    DEFAULT '',
-    comment     TEXT    DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS resistance_formula_rule_member (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
-    rule_id         INTEGER NOT NULL REFERENCES resistance_rule(id),
-    UNIQUE(formula_rule_id, rule_id)
-);
-CREATE INDEX IF NOT EXISTS idx_formula_rule_drug ON resistance_formula_rule(drug_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_id_unique
-ON resistance_formula_rule(formula_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_expression_unique
-ON resistance_formula_rule(drug_id, normalized_expression);
-CREATE INDEX IF NOT EXISTS idx_formula_rule_member_formula
-ON resistance_formula_rule_member(formula_rule_id);
-CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
-    publication_id  INTEGER NOT NULL REFERENCES publication(id),
-    UNIQUE(formula_rule_id, publication_id)
-);
-CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
-CREATE TABLE IF NOT EXISTS interpretation_algorithm (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id     INTEGER NOT NULL REFERENCES project(id),
-    algorithm_name TEXT    NOT NULL,
-    config_json    TEXT    NOT NULL DEFAULT '{}'
-);
-""")
-    conn.commit()
-    _drop_interpretation_algorithm_unique_constraint(conn)
-
-
-def _drop_interpretation_algorithm_unique_constraint(conn: sqlite3.Connection) -> None:
-    """
-    Migrate the interpretation_algorithm table to remove the UNIQUE(project_id, algorithm_name) constraint.
-
-    This allows multiple rows with algorithm_name='drug_interpretation' (different methods).
-    SQLite does not support dropping constraints directly, so we recreate the table.
-    """
-    # Check if the unique constraint still exists
     try:
-        table_info = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='interpretation_algorithm'"
-        ).fetchone()
-    except sqlite3.Error:
-        return
-
-    if not table_info or 'UNIQUE(project_id, algorithm_name)' not in (table_info['sql'] or ''):
-        return
-
-    # Recreate without the unique constraint
-    conn.executescript("""\
-CREATE TABLE IF NOT EXISTS interpretation_algorithm_v2 (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id     INTEGER NOT NULL REFERENCES project(id),
-    algorithm_name TEXT    NOT NULL,
-    config_json    TEXT    NOT NULL DEFAULT '{}'
-);
-INSERT INTO interpretation_algorithm_v2 (id, project_id, algorithm_name, config_json)
-    SELECT id, project_id, algorithm_name, config_json FROM interpretation_algorithm;
-DROP TABLE interpretation_algorithm;
-ALTER TABLE interpretation_algorithm_v2 RENAME TO interpretation_algorithm;
-""")
-    conn.commit()
-
-
-def _backfill_feature_segments(conn: sqlite3.Connection) -> bool:
-    """Ensure every existing feature has at least one feature_segment row."""
-    rows = conn.execute(
-        'SELECT g.id, g.start, g.end FROM feature g '
-        'LEFT JOIN feature_segment gs ON gs.feature_id = g.id '
-        'GROUP BY g.id HAVING COUNT(gs.id) = 0'
-    ).fetchall()
-    if not rows:
-        return False
-
-    conn.executemany(
-        'INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, ?, ?)',
-        [(int(row['id']), int(row['start']), int(row['end'])) for row in rows],
-    )
-    return True
-
-
-def _ensure_project_uuid(conn: sqlite3.Connection) -> None:
-    """Assign a UUID to any project row that does not yet have one (one-time migration)."""
-    rows = conn.execute("SELECT id FROM project WHERE uuid = '' OR uuid IS NULL").fetchall()
-    for row in rows:
-        conn.execute('UPDATE project SET uuid = ? WHERE id = ?', (str(uuid.uuid4()), row['id']))
-    if rows:
-        conn.commit()
-
+        _validate_schema(conn, db_path, schema_sql=RESULTS_SCHEMA_SQL, label='Results database')
+    except Exception:
+        conn.close()
+        raise
+    return conn

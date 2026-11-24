@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from unittest.mock import Mock
 
 import fakeredis
 import pytest
+from fastapi import HTTPException
 from rq import Queue
 from rq.job import Job
 
 from web.backend.jobs import _run_job_with_logging
+from web.backend.routes.jobs import _redact_result_paths
+from web.backend.services import session as session_service
 
 
 class TestRunJobWithLogging:
@@ -69,6 +73,124 @@ class TestRunJobWithLogging:
         assert sensitive_sample not in joined
         assert 'job_id=job-3' in joined
         assert 'mode=fasta' in joined
+
+
+class TestJobResultPathRedaction:
+    @pytest.fixture(autouse=True)
+    def _owned_records(self, monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeRedis:
+        connection = fakeredis.FakeRedis()
+        monkeypatch.setattr(session_service, '_redis_connection', lambda: connection)
+        return connection
+
+    def test_missing_job_record_does_not_return_paths(self) -> None:
+        result = {'report_html_path': '/private/results/sample.report.html'}
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('missing-job', 'owner', result)
+
+        assert exc.value.status_code == 404
+        assert '/private/' not in str(exc.value.detail)
+
+    def test_changed_job_owner_does_not_return_paths(self) -> None:
+        session_service.record_job(session_hash='another-owner', upload_ids=[], job_id='job-1')
+        result = {'report_html_path': '/private/results/sample.report.html'}
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', result)
+
+        assert exc.value.status_code == 404
+        assert '/private/' not in str(exc.value.detail)
+
+    @pytest.mark.parametrize('stored_ids', ['valid-id', 'id-1,id-2,id-3', 'id-1,,id-2'])
+    def test_mismatched_stored_ids_do_not_return_paths(
+        self, _owned_records: fakeredis.FakeRedis, stored_ids: str,
+    ) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        _owned_records.hset('respro:job:job-1', 'artifact_ids', stored_ids)
+        result = {
+            'report_html_path': '/private/results/sample.report.html',
+            'report_json_path': '/private/results/sample.results.json',
+        }
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', result)
+
+        assert exc.value.status_code == 500
+        assert '/private/' not in str(exc.value.detail)
+
+    def test_persisted_path_is_not_returned_as_an_artifact_id(
+        self, _owned_records: fakeredis.FakeRedis,
+    ) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        _owned_records.hset('respro:job:job-1', 'artifact_ids', '/private/results/leaked')
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', {'report_html_path': '/private/report.html'})
+
+        assert exc.value.status_code == 500
+        assert '/private/' not in str(exc.value.detail)
+
+    @pytest.mark.parametrize(
+        ('artifact_owner', 'artifact_path'),
+        [('other-owner', '/private/report.html'), ('owner', '/private/other.html')],
+    )
+    def test_persisted_id_must_match_artifact_owner_and_path(
+        self, _owned_records: fakeredis.FakeRedis, artifact_owner: str, artifact_path: str,
+    ) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        artifact_id = session_service.record_artifact(
+            session_hash=artifact_owner, canonical_path=Path(artifact_path), media_type='text/html',
+        )
+        _owned_records.hset('respro:job:job-1', 'artifact_ids', artifact_id)
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', {'report_html_path': '/private/report.html'})
+
+        assert exc.value.status_code == 500
+        assert '/private/' not in str(exc.value.detail)
+
+    def test_missing_persisted_artifact_record_is_rejected(
+        self, _owned_records: fakeredis.FakeRedis,
+    ) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        _owned_records.hset('respro:job:job-1', 'artifact_ids', 'missing-id')
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', {'report_html_path': '/private/report.html'})
+
+        assert exc.value.status_code == 404
+        assert '/private/' not in str(exc.value.detail)
+
+    def test_persisted_artifact_media_type_must_match_field(
+        self, _owned_records: fakeredis.FakeRedis,
+    ) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        artifact_id = session_service.record_artifact(
+            session_hash='owner', canonical_path=Path('/private/report.html'), media_type='application/pdf',
+        )
+        _owned_records.hset('respro:job:job-1', 'artifact_ids', artifact_id)
+
+        with pytest.raises(HTTPException) as exc:
+            _redact_result_paths('job-1', 'owner', {'report_html_path': '/private/report.html'})
+
+        assert exc.value.status_code == 500
+        assert '/private/' not in str(exc.value.detail)
+
+    def test_valid_ids_are_stable_and_follow_present_fields(self) -> None:
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-1')
+        result = {
+            'report_html_path': '/private/results/sample.report.html',
+            'report_pdf_path': '/private/results/sample.report.pdf',
+            'mode': 'fasta',
+        }
+
+        first = _redact_result_paths('job-1', 'owner', result)
+        second = _redact_result_paths('job-1', 'owner', result)
+
+        assert first == second
+        assert first['artifact_ids'] == [first['report_html_path'], first['report_pdf_path']]
+        assert all('/' not in artifact_id for artifact_id in first['artifact_ids'])
+        assert first['mode'] == 'fasta'
 
 
 class TestJobTtlExpiry:

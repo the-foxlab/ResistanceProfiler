@@ -11,8 +11,8 @@ from typer.testing import CliRunner
 
 from respro.cli.init import init_project
 from respro.cli.main import app
+from respro.core.frechet import frechet_and_bound as _frechet_and_bound
 from respro.core.rules import (
-    _frechet_and_bound,
     match_formula_rules,
     match_rules,
 )
@@ -20,9 +20,9 @@ from respro.db.models import (
     AnnotatedVariant,
     CodonState,
     FormulaRuleHit,
-    FormulaRuleRuntime,
     ResistanceRule,
     ResistanceRuleSet,
+    ResistanceRuleSetMember,
     VariantCall,
 )
 from respro.db.rules_queries import load_rules
@@ -658,12 +658,9 @@ class TestMatchFormulaRules:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
             id=1,
-            formula_id='formula_1',
-            label='Formula 1',
-            normalized_expression=expression,
             drug_name='DrugA',
             drug_id=1,
             phenotype='resistant',
@@ -672,8 +669,24 @@ class TestMatchFormulaRules:
             fold_ic50='',
             score='',
             source='',
+            group_name='Formula 1',
             comment='',
-            member_rules={rule.external_id: rule for rule in members if rule.external_id},
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx,
+                    rule_set_id=1,
+                    feature_name=rule.feature_name,
+                    feature_id=rule.feature_id,
+                    reference_identifier=rule.reference_identifier,
+                    position=rule.position,
+                    reference=rule.reference,
+                    mutation=rule.mutation,
+                    external_id=rule.external_id,
+                )
+                for idx, rule in enumerate(members, start=1)
+                if rule.external_id
+            ],
         )
 
     def test_formula_and_matches_when_all_members_pass_af_gate(self) -> None:
@@ -1162,7 +1175,7 @@ class TestFrechetAndBound:
     EPS = 1e-9
 
     def _bound(self, q_values):
-        from respro.core.rules import _frechet_and_bound
+        from respro.core.frechet import frechet_and_bound as _frechet_and_bound
         return _frechet_and_bound(q_values, self.MIN_FRACTION)
 
     # ── worked-example table (TODO.md) ────────────────────────────────────
@@ -1363,14 +1376,23 @@ class TestFrechetEpsilonParameter:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
-            id=1, formula_id='formula_1', label='Formula 1',
-            normalized_expression=expression,
-            drug_name='DrugA', drug_id=1,
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
+            id=1, drug_name='DrugA', drug_id=1,
             phenotype='resistant', clinical_phenotype='unknown',
-            ic50='', fold_ic50='', score='', source='', comment='',
-            member_rules={r.external_id: r for r in members if r.external_id},
+            ic50='', fold_ic50='', score='', source='', group_name='Formula 1', comment='',
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx, rule_set_id=1,
+                    feature_name=r.feature_name, feature_id=r.feature_id,
+                    reference_identifier=r.reference_identifier,
+                    position=r.position, reference=r.reference, mutation=r.mutation,
+                    external_id=r.external_id,
+                )
+                for idx, r in enumerate(members, start=1)
+                if r.external_id
+            ],
         )
 
     def test_member_gate_uses_passed_eps(self) -> None:
@@ -1460,14 +1482,23 @@ class TestFrechetFormulaMatching:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
-            id=1, formula_id='formula_1', label='Formula 1',
-            normalized_expression=expression,
-            drug_name='DrugA', drug_id=1,
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
+            id=1, drug_name='DrugA', drug_id=1,
             phenotype='resistant', clinical_phenotype='unknown',
-            ic50='', fold_ic50='', score='', source='', comment='',
-            member_rules={r.external_id: r for r in members if r.external_id},
+            ic50='', fold_ic50='', score='', source='', group_name='Formula 1', comment='',
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx, rule_set_id=1,
+                    feature_name=r.feature_name, feature_id=r.feature_id,
+                    reference_identifier=r.reference_identifier,
+                    position=r.position, reference=r.reference, mutation=r.mutation,
+                    external_id=r.external_id,
+                )
+                for idx, r in enumerate(members, start=1)
+                if r.external_id
+            ],
         )
 
     def test_and_with_members_below_old_gate_fires(self) -> None:
@@ -1753,3 +1784,89 @@ class TestFrechetFormulaMatching:
         assert len(hits1) == len(hits2) == 1
         assert hits1[0].matched_member_ids == hits2[0].matched_member_ids
         assert hits1[0].frechet_lower == hits2[0].frechet_lower
+
+    def test_or_expression_selects_highest_lower_bound_branch(self) -> None:
+        mut_a = self._atomic_rule('M1', 'E', rule_id=10)
+        mut_b = self._atomic_rule('M2', 'V', rule_id=11)
+        mut_c = self._atomic_rule('M3', 'D', rule_id=12)
+        formula = self._formula('(M1 AND M2) OR M3', [mut_a, mut_b, mut_c])
+        ann_a = self._make_ann('gag', 1, 'K', 'E', effect_lower=0.9, allele_freq=0.9)
+        ann_b = self._make_ann('gag', 2, 'A', 'V', effect_lower=0.8, allele_freq=0.8)
+        ann_c = self._make_ann('gag', 3, 'G', 'D', effect_lower=0.85, allele_freq=0.85)
+        ann_a.rule_matches = [mut_a]
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.9
+        ann_b.rule_matches = [mut_b]
+        ann_b.rule_effect_aa_freq[mut_b.id] = 0.8
+        ann_c.rule_matches = [mut_c]
+        ann_c.rule_effect_aa_freq[mut_c.id] = 0.85
+
+        # (M1 AND M2) has Fréchet lower 0.70 (max member 0.90), while M3 has lower 0.85.
+        hits = match_formula_rules([ann_a, ann_b, ann_c], [formula], min_fraction=self.MIN_FRACTION)
+        assert len(hits) == 1
+        assert hits[0].matched_member_ids == ['M3']
+        assert hits[0].frechet_lower == pytest.approx(0.85)
+
+    def test_match_rules_combined_dedup_keeps_max_freq_and_rejects_indel_mismatch(self) -> None:
+        rule = ResistanceRule(
+            id=1, feature_name='g', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='ref', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        a_low = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=3, ref='A', alt='G', allele_freq=0.2),
+            feature_name='g', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            is_combined_codon_event=True,
+        )
+        a_high = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=4, ref='A', alt='G', allele_freq=0.8),
+            feature_name='g', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            is_combined_codon_event=True,
+        )
+        match_rules([a_low, a_high], [rule])
+        assert len(a_low.rule_matches) == 0
+        assert len(a_high.rule_matches) == 1
+
+        del_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=3, ref='AAA', alt='A', allele_freq=1.0),
+            feature_name='g', codon_pos=1, ref_aa='KE', alt_aa='E',
+            consequence='deletion',
+        )
+        match_rules([del_ann], [rule])
+        assert del_ann.rule_matches == []
+
+    def test_canonical_del_aa_insertion_rule_does_not_match_deletions_and_del_sentinel_is_isolated(self) -> None:
+        from respro.core.rules import _indel_anchor_mismatch_warning, _matches_rule_alleles
+
+        # Uppercase 'DEL' is the 3-AA insertion Asp-Glu-Leu (e.g. D50DEL), NOT a deletion sentinel.
+        assert not _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='KD', ann_alt='K', ann_consequence='deletion',
+        )
+        assert not _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='D', ann_alt='del', ann_consequence='deletion',
+        )
+        assert _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='D', ann_alt='DEL', ann_consequence='insertion',
+        )
+
+        # Lowercase 'del' sentinel matches deletions only and never emits anchor-mismatch warnings.
+        assert _matches_rule_alleles(
+            reference='M', mutation='del', ann_ref='M', ann_alt='del', ann_consequence='deletion',
+        )
+        assert not _matches_rule_alleles(
+            reference='M', mutation='del', ann_ref='M', ann_alt='MEL', ann_consequence='insertion',
+        )
+        assert not _matches_rule_alleles(
+            reference='', mutation='del', ann_ref='?', ann_alt='?', ann_consequence='deletion',
+        )
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='M', rule_mutation='del', ann_ref='K', ann_alt='KGG',
+            ann_consequence='insertion', feature_name='g', codon_pos=0,
+        ) is None
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='MKAL', rule_mutation='del', ann_ref='AMKAL', ann_alt='A',
+            ann_consequence='deletion', feature_name='g', codon_pos=0,
+        ) is None
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='AM', rule_mutation='A', ann_ref='M', ann_alt='del',
+            ann_consequence='deletion', feature_name='g', codon_pos=0,
+        ) is None

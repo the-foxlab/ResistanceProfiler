@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import faviconSrc from './assets/favicon.svg';
 import packageJson from '../package.json';
 import { FRONTEND_CONFIG } from './config';
-import { API_BASE, buildHeaders, apiGet } from './api';
+import { API_BASE, buildHeaders, apiGet, chunkIds, getArtifactBundleLimit, setArtifactBundleLimit } from './api';
 import { ROUTES } from './routes';
 import { PROFILE_MODES } from './constants';
 import { useProfileSubmit } from './hooks/useProfileSubmit';
@@ -91,6 +91,9 @@ export function useDashboardLogic() {
         if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
         }
+        if (Number.isInteger(uiConfig.artifact_bundle_max_artifacts) && uiConfig.artifact_bundle_max_artifacts > 0) {
+          setArtifactBundleLimit(uiConfig.artifact_bundle_max_artifacts);
+        }
         if (uiConfig.cli_version) {
           setCliVersion(uiConfig.cli_version);
         }
@@ -134,27 +137,50 @@ export function useDashboardLogic() {
   useEffect(() => {
     const cleanupUrl = `${API_BASE}/api/session/cleanup`;
 
-    const handlePageHide = () => {
-      if (session.uploadedPaths.length === 0 && session.reportPaths.length === 0) {
+    const handlePageHide = (event) => {
+      if (event.persisted || (session.uploadedPaths.length === 0 && session.reportPaths.length === 0)) {
         return;
       }
-      const payload = JSON.stringify({
-        upload_ids: session.uploadedPaths,
-        artifact_ids: session.reportPaths,
-      });
-      if (navigator.sendBeacon) {
-        const blob = new Blob([payload], { type: 'application/json' });
-        navigator.sendBeacon(cleanupUrl, blob);
-        return;
+      const limit = getArtifactBundleLimit();
+      const uploadChunks = chunkIds(session.uploadedPaths, limit);
+      const artifactChunks = chunkIds(session.reportPaths, limit);
+      const requestCount = Math.max(uploadChunks.length, artifactChunks.length);
+      if (requestCount > 1) {
+        console.warn('Session cleanup needs multiple requests; rate limits may prevent cleanup.');
       }
-      fetch(cleanupUrl, {
-        method: 'POST',
-        headers: buildHeaders({ 'Content-Type': 'application/json' }),
-        body: payload,
-        keepalive: true,
-      }).catch(() => {
-        // Ignore cleanup errors during page unload.
-      });
+      for (let index = 0; index < requestCount; index += 1) {
+        const payload = JSON.stringify({
+          upload_ids: uploadChunks[index] || [],
+          artifact_ids: artifactChunks[index] || [],
+        });
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: 'application/json' });
+          try {
+            if (navigator.sendBeacon(cleanupUrl, blob)) {
+              continue;
+            }
+            console.warn('Session cleanup beacon was rejected; attempting keepalive fetch.');
+          } catch (error) {
+            console.warn('Session cleanup beacon failed; attempting keepalive fetch.', error);
+          }
+        }
+        try {
+          fetch(cleanupUrl, {
+            method: 'POST',
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: payload,
+            keepalive: true,
+          }).then((response) => {
+            if (!response.ok) {
+              console.warn(`Session cleanup failed with HTTP ${response.status}.`);
+            }
+          }).catch((error) => {
+            console.warn('Session cleanup keepalive request failed.', error);
+          });
+        } catch (error) {
+          console.warn('Session cleanup keepalive request failed.', error);
+        }
+      }
     };
 
     window.addEventListener('pagehide', handlePageHide);

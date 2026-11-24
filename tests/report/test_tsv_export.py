@@ -22,16 +22,16 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
-from respro.report._row_helpers import (
+from respro.report.non_html_exports import export_results, write_tsv
+from respro.report.row_helpers import (
     build_reference_name_by_chrom,
     nt_change_stored,
     nt_change_user,
 )
-from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 19-column header, in order.
+# Canonical 20-column header, in order.
 TSV_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
     'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
@@ -44,7 +44,7 @@ _PLACEHOLDER = 'n/a'
 # Hits table). Conditional columns (phenotype group, ic50, fold_ic50, score,
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
     'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'source',
@@ -425,8 +425,10 @@ class TestFormulaRows:
     def _two_member_formula(self) -> tuple[list[AnnotatedVariant], FormulaRuleHit]:
         member_a = _ann(chrom='ref', pos=3, af=0.88, feature='gag', codon_pos=2,
                         alt_aa='E', af_bin='high')
+        member_a.variant.source = 'vcf_derived'
         member_b = _ann(chrom='ref', pos=9, af=0.97, feature='gag', codon_pos=4,
                         ref_aa='A', alt_aa='T', af_bin='high')
+        member_b.variant.source = 'reference_derived'
         rs = ResistanceRuleSet(
             id=10, drug_name='Brincidofovir', drug_id=1, phenotype='resistant',
             clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
@@ -467,6 +469,7 @@ class TestFormulaRows:
         # the members' joined variant allele frequencies).
         assert ';' not in row[header.index('aa_frequency')]
         assert row[header.index('strand')] == '+;+'
+        assert row[header.index('variant_source')] == 'VCF derived;Reference derived'
         # Metrics come from the combined rule set, not members.
         assert row[header.index('drug')] == 'Brincidofovir'
         assert row[header.index('phenotype')] == 'resistant'

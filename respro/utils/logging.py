@@ -1,6 +1,6 @@
-"""
-Structured logging setup for ResistanceProfiler.
-"""
+"""Structured Rich logging setup for the ``respro`` package."""
+
+from __future__ import annotations
 
 import logging
 
@@ -11,33 +11,23 @@ from rich.theme import Theme
 
 
 class _LogHighlighter(RegexHighlighter):
-    """Highlights quoted strings and respro.* module paths in log messages."""
+    """Highlight quoted strings and ``respro.*`` module paths in log messages."""
 
     highlights = [
-        r'(?P<str_val>\'[^\']*\'|\"[^\"]*\")',   # single- or double-quoted strings
-        r'(?P<module>respro(?:\.[a-z][a-z0-9_]*)*)',  # respro or respro.module.path identifiers
+        r'(?P<str_val>\'[^\']*\'|\"[^\"]*\")',
+        r'(?P<module>respro(?:\.[a-z][a-z0-9_]*)*)',
     ]
 
 
-_LOG_THEME = Theme({
-    'str_val': 'green1',    # same shade as Rich's repr.str
-    'module': 'bold cyan',
-})
+_LOG_THEME = Theme({'str_val': 'green1', 'module': 'bold cyan'})
 
-# Shared stderr console used by both RichHandler and CLI status spinners.
-# Sharing the same Console instance lets Rich coordinate spinner animations
-# with log output — the spinner pauses cleanly when a log line is emitted.
+# Shared stderr console lets Rich pause CLI status spinners cleanly when log lines emit.
 err_console = Console(stderr=True, theme=_LOG_THEME)
 
 
 def setup_logging(verbosity: int = 0) -> logging.Logger:
-    """
-    Configure and return the package-level logger.
-
-    :param verbosity: 0 = WARNING, 1 = INFO, 2+ = DEBUG
-    :return: configured Logger instance
-    """
-    level = {0: logging.WARNING, 1: logging.INFO}.get(verbosity, logging.DEBUG)
+    """Configure and return the ``respro`` package logger (0=WARNING, 1=INFO, 2+=DEBUG)."""
+    level = {0: logging.WARNING, 1: logging.INFO}.get(max(0, verbosity), logging.DEBUG)
 
     logger = logging.getLogger('respro')
     logger.setLevel(level)
@@ -53,5 +43,8 @@ def setup_logging(verbosity: int = 0) -> logging.Logger:
         )
         handler.setFormatter(logging.Formatter('%(name)s — %(message)s'))
         logger.addHandler(handler)
+    else:
+        for existing in logger.handlers:
+            existing.setLevel(level)
 
     return logger

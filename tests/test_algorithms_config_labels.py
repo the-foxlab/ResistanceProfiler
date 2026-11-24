@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from respro.db.algorithms import validate_interpretation_algorithms
+from respro.core.algorithms import validate_interpretation_algorithms
 
 
 class TestConfigStrictLabels:

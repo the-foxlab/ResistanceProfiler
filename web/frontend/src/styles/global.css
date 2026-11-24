@@ -36,7 +36,7 @@
   --font-size-table: var(--font-size-sm);
   --font-size-button: var(--font-size-sm);
   --analysis-slider-width: 21.5rem;
-  --analysis-progress-width: 28rem;
+  --analysis-progress-width: calc((var(--analysis-slider-width) * 2) + 0.75rem);
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;

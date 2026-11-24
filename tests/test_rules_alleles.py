@@ -11,12 +11,22 @@ Covers: respro/db/_rules_alleles.py
 
 from __future__ import annotations
 
-from respro.db._rules_alleles import (
-    _RE_ANCHORLESS_DEL,
-    _RE_REWRITE_TOKEN,
-    _is_noop_mutation,
-    _is_supported_mutation_token,
-    _normalize_rule_alleles_for_storage,
+import pytest
+
+from respro.db.rules.alleles import (
+    RE_ANCHORLESS_DEL as _RE_ANCHORLESS_DEL,
+)
+from respro.db.rules.alleles import (
+    RE_REWRITE_TOKEN as _RE_REWRITE_TOKEN,
+)
+from respro.db.rules.alleles import (
+    is_noop_mutation as _is_noop_mutation,
+)
+from respro.db.rules.alleles import (
+    is_supported_mutation_token as _is_supported_mutation_token,
+)
+from respro.db.rules.alleles import (
+    normalize_rule_alleles_for_storage as _normalize_rule_alleles_for_storage,
 )
 
 
@@ -304,3 +314,54 @@ class TestNormalizeRuleAllelesForStorage:
             )
             assert result is not None
             assert result[0] == pos
+
+    def test_rejects_embedded_position_or_reference_conflict(self):
+        """Should reject mutation tokens whose embedded position or ref AA disagrees with columns."""
+        errors: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='F2STOP', position_0based=1, context='r', errors=errors,
+        ) is None
+        assert any('conflicts' in e for e in errors)
+
+        errors2: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K99*', position_0based=1, context='r', errors=errors2,
+        ) is None
+        assert any('conflicts' in e for e in errors2)
+
+        for ref_aa, mut_raw in (
+            ('KG', 'K2delA'),
+            ('KGA', 'K2delG'),
+            ('KG', 'K2insT'),
+        ):
+            conflict_errors: list[str] = []
+            assert _normalize_rule_alleles_for_storage(
+                reference_aa=ref_aa, mutation_raw=mut_raw, position_0based=1, context='r', errors=conflict_errors,
+            ) is None
+            assert any('conflicts' in e for e in conflict_errors)
+
+        ok_errors: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K2delA', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'KA', 'K')
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='KA', mutation_raw='K2delA', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'KA', 'K')
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K2insT', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'K', 'KT')
+        assert ok_errors == []
+
+    @pytest.mark.parametrize('token', ['fs*12', 'fs*23', 'fsTer12', 'fsX10'])
+    def test_accepts_bare_hgvs_frameshift_tokens_with_stop_distance(self, token: str):
+        """Bare HGVS frameshift tokens with multi-digit stop distances must normalize without conflict."""
+        errors: list[str] = []
+        result = _normalize_rule_alleles_for_storage(
+            reference_aa='R',
+            mutation_raw=token,
+            position_0based=99,
+            context='test',
+            errors=errors,
+        )
+        assert errors == []
+        assert result == (99, 'R', 'RfsX')

@@ -1,16 +1,10 @@
-"""
-Shared profiling orchestration helpers and output utilities for the CLI layer.
-
-These functions depend on Click, DB wiring, persistence, and report export —
-they belong to the CLI layer and must not be moved into respro/core/.
-"""
+"""Shared profiling orchestration, reconstruction, and export helpers for the CLI layer."""
 
 from __future__ import annotations
 
 import logging
 import re
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,10 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.config.cli_settings import CLI_CONFIG, CliConfig
-from respro.core.annotation import (
-    annotate_variants,
-    assign_af_bins,
-)
+from respro.core.annotation import annotate_variants, assign_af_bins
 from respro.core.query import (
     QueryRecord,
     pick_best_reference_id,
@@ -32,6 +23,8 @@ from respro.core.rules import match_formula_rules, match_rules
 from respro.db.features import (
     load_all_features_for_reference,
     load_features_for_reference,
+    load_reference_metadata,
+    load_reference_name,
 )
 from respro.db.models import (
     AnnotatedVariant,
@@ -41,13 +34,11 @@ from respro.db.models import (
     ReferenceGroup,
     VariantCall,
 )
-from respro.db.profile_queries import (
+from respro.db.results import (
     load_existing_run_project_fingerprint,
-    load_reference_metadata,
-    load_reference_name,
+    save_run,
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
-from respro.db.results import save_run
 from respro.db.rules_queries import load_formula_rules, load_rules
 from respro.db.schema import init_results_db
 from respro.report.non_html_exports import export_results
@@ -59,34 +50,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger('respro')
 
 
-def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
-    """Normalize and validate repeated ``--export`` values."""
+def safe_report_stem(input_basename: str) -> str:
+    """Derive a filesystem-safe filename stem from an input path or basename."""
+    raw_stem = Path(input_basename).stem.strip() or 'profile'
+    return re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
+
+
+def parse_export_formats(export_values: list[str] | None) -> set[str] | None:
+    """Normalize and validate repeated ``--export`` format options."""
     if export_values is None:
         return None
-
-    normalized_formats: set[str] = set()
-    for export_value in export_values:
-        normalized_value = export_value.strip().lower()
-        if normalized_value not in ('json', 'pdf', 'tsv'):
+    formats: set[str] = set()
+    for value in export_values:
+        normalized = value.strip().lower()
+        if normalized not in ('json', 'pdf', 'tsv'):
             raise click.ClickException('Invalid --export value. Choose one of: json, pdf, tsv.')
-        normalized_formats.add(normalized_value)
+        formats.add(normalized)
+    return formats or None
 
-    return normalized_formats if normalized_formats else None
 
-
-def _init_results_db_connection(
+def init_results_db_connection(
     results_db: str | None,
     project_conn: sqlite3.Connection,
-    logger: logging.Logger,
+    log: logging.Logger,
 ) -> sqlite3.Connection | None:
-    """
-    Open or initialise a results database and validate project fingerprint compatibility.
-
-    :param results_db: path to results database, or None to skip
-    :param project_conn: open project database connection
-    :param logger: logger instance
-    :return: open results database connection, or None
-    """
+    """Open or create a results DB and verify its project fingerprint matches *project_conn*."""
     if not results_db:
         return None
 
@@ -98,10 +86,10 @@ def _init_results_db_connection(
         raise click.ClickException(str(exc)) from exc
 
     if existed:
-        logger.info('Results database validated: %s', results_db_path)
+        log.info('Results database validated: %s', results_db_path)
         current_fp = compute_project_fingerprint(project_conn)
-        existing_run_fp = load_existing_run_project_fingerprint(results_conn)
-        if existing_run_fp is not None and existing_run_fp != current_fp:
+        existing_fp = load_existing_run_project_fingerprint(results_conn)
+        if existing_fp is not None and existing_fp != current_fp:
             results_conn.close()
             raise click.ClickException(
                 'Project fingerprint mismatch: the provided --project database does not match '
@@ -109,116 +97,113 @@ def _init_results_db_connection(
                 'Ensure you use the same project database for all runs in this results file.'
             )
     else:
-        logger.info('Results database initialised: %s', results_db_path)
-
+        log.info('Results database initialised: %s', results_db_path)
     return results_conn
 
 
-def _resolve_reference(
-    project_conn: sqlite3.Connection,
-    fasta_matches: list,
-    query_name: str,
-    logger: logging.Logger,
-) -> tuple[int, str, list]:
-    """
-    Pick the best reference, filter fasta_matches, and log matched features.
-
-    :param project_conn: open project database connection
-    :param fasta_matches: list of feature alignment matches
-    :param query_name: query sequence name for logging
-    :param logger: logger instance
-    :return: (ref_id, ref_name, filtered fasta_matches)
-    """
-    ref_id = pick_best_reference_id(fasta_matches)
-    fasta_matches = select_matches_for_reference(fasta_matches, ref_id)
-
-    ref_name = load_reference_name(project_conn, ref_id)
-    if ref_name is None:
-        raise click.ClickException(f'Reference id {ref_id} not found in project database')
-
-    logger.info('Matched query reference %r to internal reference %r', query_name, ref_name)
-    matched_feature_names = sorted({match.feature.name for match in fasta_matches})
-    logger.info('Matched %d feature(s): %s', len(matched_feature_names), ', '.join(matched_feature_names))
-    for match in fasta_matches:
-        logger.debug(
-            'feature=%s identity=%.2f%% cds_coverage=%.2f%% query_coverage=%.2f%% strand=%s cigar=%s',
-            match.feature.name, match.identity * 100, match.cds_coverage * 100,
-            match.query_coverage * 100, match.strand, match.cigar,
-        )
-
-    return ref_id, ref_name, fasta_matches
-
-
-def _load_reference_data(
+def load_reference_data(
     project_conn: sqlite3.Connection,
     ref_id: int,
 ) -> tuple[list, list, list, set[str], list]:
-    """
-    Load features, atomic rules, formula rules, the union of rule-covered features,
-    and the full feature list for reporting.
-
-    The first list is rule-backed (``has_rules = 1``) and scopes alignment and
-    variant annotation. The fifth list contains every feature of the reference
-    (rule-backed or not) for report rendering: the genome overview draws all CDS
-    genes and mat_peptide panels resolve their parent CDS from it.
-
-    :param project_conn: open project database connection
-    :param ref_id: internal reference id
-    :return: (features, rules, formula_rules, rule_feature_names, report_features)
-    """
+    """Return ``(rule_backed_features, rules, formula_rules, rule_feature_names, all_features)``."""
     features = load_features_for_reference(project_conn, ref_id)
     report_features = load_all_features_for_reference(project_conn, ref_id)
     rules = load_rules(project_conn, ref_id)
     formula_rules = load_formula_rules(project_conn, ref_id)
-    rule_feature_names: set[str] = {rule.feature_name for rule in rules}
-    for formula_rule in formula_rules:
-        for member_rule in formula_rule.member_rules.values():
-            rule_feature_names.add(member_rule.feature_name)
+    rule_feature_names: set[str] = {r.feature_name for r in rules}
+    for formula in formula_rules:
+        for member in formula.members:
+            rule_feature_names.add(member.feature_name)
     return features, rules, formula_rules, rule_feature_names, report_features
 
 
+def bam_excluded_positions(
+    rg: ReferenceGroup,
+    coverage_gaps: list[CoverageGap],
+) -> set[tuple[str, int]]:
+    """Return ``(chrom, genomic_pos)`` pairs falling inside low-coverage BAM codons."""
+    features_by_name = {f.name: f for f in rg.features}
+    excluded: set[tuple[str, int]] = set()
+    for gap in coverage_gaps:
+        if gap.chrom != rg.query_name:
+            continue
+        feature = features_by_name.get(gap.feature_name)
+        if feature is None:
+            continue
+        for codon_idx in range(gap.codon_start, gap.codon_end + 1):
+            for nt_offset in range(3):
+                genomic_pos = feature.cds_to_genomic_position(
+                    feature.codon_start + codon_idx * 3 + nt_offset,
+                )
+                if genomic_pos is not None:
+                    excluded.add((gap.chrom, genomic_pos))
+    return excluded
+
+
+def variant_touches_excluded_positions(
+    var: VariantCall,
+    excluded: set[tuple[str, int]],
+) -> bool:
+    """Return True if any genomic base covered by ``var.ref`` is in *excluded*."""
+    return any((var.chrom, var.pos + offset) in excluded for offset in range(len(var.ref)))
+
+
 def _reject_cross_species_gene_name_collisions(references: list[ReferenceGroup]) -> None:
-    """
-    Raise :class:`click.ClickException` if a matched feature name appears on selected
-    references belonging to more than one distinct organism.
-
-    The collision is evaluated over each group's narrowed ``feature_matches`` — the CDS
-    features the query actually aligned to on that record — not over the full internal
-    reference feature list. This prevents a false collision from an unmatched gene (e.g.
-    an HSV-2 ``RL1`` that never aligned) when the query only matched ``UL23`` on HSV-1.
-    A genuine cross-species matched-gene collision (e.g. HSV-1 UL23 and HSV-2 UL23 both
-    aligned) is ambiguous: the report cannot attribute resistance-relevant mutations to a
-    single species, so no HTML report is produced rather than a misleading one. Same-species
-    shared gene names are allowed — the per-reference scoping in the rule/annotation loops
-    disambiguates them.
-
-    :param references: assembled :class:`ReferenceGroup` list
-    :raises click.ClickException: naming the first colliding gene and the organisms involved
-    """
-    # Map each matched feature name to the set of distinct organisms whose selected
-    # references actually aligned to that feature. rg.feature_matches is the narrowed set
-    # produced by pick_best_reference_id + select_matches_for_reference during assembly,
-    # so it reflects only the CDS the query covered on this record — not every CDS on the
-    # internal reference.
-    organisms_by_feature_name: dict[str, set[str]] = {}
-    reference_names_by_feature_name: dict[str, set[str]] = {}
+    """Abort if the same matched feature name appears across multiple organisms."""
+    organisms_by_feature: dict[str, set[str]] = {}
+    refs_by_feature: dict[str, set[str]] = {}
     for rg in references:
         for match in rg.feature_matches:
-            feature_name = match.feature.name
-            organisms_by_feature_name.setdefault(feature_name, set()).add(rg.organism)
-            reference_names_by_feature_name.setdefault(feature_name, set()).add(rg.reference_name)
+            fname = match.feature.name
+            organisms_by_feature.setdefault(fname, set()).add(rg.organism)
+            refs_by_feature.setdefault(fname, set()).add(rg.reference_name)
 
-    for feature_name, organisms in sorted(organisms_by_feature_name.items()):
+    for fname, organisms in sorted(organisms_by_feature.items()):
         if len(organisms) > 1:
-            organisms_str = ', '.join(sorted(organisms))
-            ref_names_str = ', '.join(sorted(reference_names_by_feature_name[feature_name]))
             raise click.ClickException(
-                f"Cannot create an HTML report: matched gene {feature_name!r} occurs in "
-                f'multiple species ({organisms_str}; references: {ref_names_str}). '
+                f"Cannot create an HTML report: matched gene {fname!r} occurs in "
+                f"multiple species ({', '.join(sorted(organisms))}; references: "
+                f"{', '.join(sorted(refs_by_feature[fname]))}). "
                 'Resistance-relevant mutations cannot be attributed to a single species '
                 'unambiguously. Restrict the reference FASTA to one species or remove the '
                 'overlapping gene.'
             )
+
+
+def match_rules_across_references(
+    annotations: list[AnnotatedVariant],
+    references: list[ReferenceGroup],
+    *,
+    is_fasta_mode: bool = False,
+    cfg: CliConfig = CLI_CONFIG,
+) -> list:
+    """Run atomic and formula rule matching once per distinct reference, scoped by CHROM."""
+    chroms_by_ref_id: dict[int, set[str]] = {}
+    for rg in references:
+        chroms_by_ref_id.setdefault(rg.reference_id, set()).add(rg.query_name)
+
+    single_fasta = is_fasta_mode and len(references) == 1
+    all_formula_hits: list = []
+    seen_ref_ids: set[int] = set()
+    for rg in references:
+        if rg.reference_id in seen_ref_ids:
+            continue
+        seen_ref_ids.add(rg.reference_id)
+        ref_annotations = (
+            annotations
+            if single_fasta
+            else [a for a in annotations if a.variant.chrom in chroms_by_ref_id[rg.reference_id]]
+        )
+        if not ref_annotations:
+            continue
+        match_rules(ref_annotations, rg.rules)
+        all_formula_hits.extend(match_formula_rules(
+            ref_annotations,
+            rg.formula_rules,
+            min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
+            eps=float(cfg.matching.frechet_epsilon),
+        ))
+    return all_formula_hits
 
 
 def assemble_multi_reference_result(
@@ -230,48 +215,17 @@ def assemble_multi_reference_result(
     project_name: str,
     sample: str,
     vcf_name: str,
-    total_variants: int,
+    total_variants: int | None = None,
     af_bins: dict[str, tuple[float, float]] | None = None,
     is_fasta_mode: bool = False,
+    coverage_assessed: bool = False,
     bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> ProfilingResult:
-    """
-    Build one ``ReferenceGroup`` per matched query record, annotate per reference,
-    and run per-reference rule matching.
-
-    Remapped variants are grouped by their ``chrom`` (the original VCF CHROM, which
-    equals the matching ``QueryRecord.query_name``) and annotated against only that
-    reference's features. This is required because internal references share the
-    same coordinate origin (each starts at 0), so annotating a variant against the
-    union of all references' features would produce spurious cross-reference hits.
-    ``annotate_variants`` itself is not modified.
-
-    For each :class:`QueryRecord` the best internal reference is selected, its
-    features/rules/formula_rules loaded, and a :class:`ReferenceGroup` constructed.
-    Rule matching (``match_rules`` and ``match_formula_rules``) is run per reference
-    against the annotations whose ``feature_name`` belongs to that reference.
-
-    At least one matched reference must have rules loaded (non-empty
-    ``rule_feature_names``); otherwise :class:`click.ClickException` is raised.
-    References that aligned but have no rules are retained and reported with a
-    warning (orphan case), not an error.
-
-    :param project_conn: open project database connection
-    :param query_records: one per matched FASTA record
-    :param remapped_variants: flat list of variants remapped to internal coordinates;
-        each variant's ``chrom`` must match a query record's ``query_name``
-    :param coverage_gaps: flat coverage gaps
-    :param project_name: project name for the report
-    :param sample: sample name
-    :param vcf_name: input VCF basename
-    :param total_variants: total variant count (pre-annotation)
-    :param af_bins: AF bin thresholds; defaults to CLI config when None
-    :param is_fasta_mode: mark emitted annotations as FASTA-derived
-    :return: assembled :class:`ProfilingResult` with ``references`` populated
-    :raises click.ClickException: if no matched reference has resistance rules
-    """
-    bins = af_bins if af_bins is not None else cfg.af_bins.as_dict()
+    """Build ``ReferenceGroup``s per query record, annotate per reference, and match rules."""
+    bins = af_bins if af_bins is not None else (
+        cfg.af_bins_fasta.as_dict() if is_fasta_mode else cfg.af_bins.as_dict()
+    )
 
     references: list[ReferenceGroup] = []
     for record in query_records:
@@ -281,16 +235,13 @@ def assemble_multi_reference_result(
         if ref_name is None:
             raise click.ClickException(f'Reference id {ref_id} not found in project database')
         organism, reference_length_nt = load_reference_metadata(project_conn, ref_id)
-        features, rules, formula_rules, rule_feature_names, _report_features = _load_reference_data(
-            project_conn, ref_id,
-        )
-
+        features, rules, formula_rules, rule_feature_names, _ = load_reference_data(project_conn, ref_id)
         references.append(ReferenceGroup(
             reference_name=ref_name,
             reference_id=ref_id,
             organism=organism,
             reference_length_nt=reference_length_nt,
-            query_name=record.query_name,
+            query_name=ref_name if is_fasta_mode and len(query_records) == 1 else record.query_name,
             query_sequence=record.query_sequence,
             feature_matches=selected_matches,
             features=features,
@@ -299,91 +250,38 @@ def assemble_multi_reference_result(
             rule_feature_names=rule_feature_names,
         ))
 
-    # Validate: reject cross-species matched-gene collisions. A feature name that the
-    # query actually aligned to on more than one distinct organism is an ambiguous
-    # cross-species hit (e.g. HSV-1 UL23 and HSV-2 UL23 both matched): the report cannot
-    # attribute resistance-relevant mutations to a single species, so no HTML report is
-    # produced. Same-species shared gene names are allowed (the per-reference scoping in
-    # the rule/annotation loops disambiguates them). The gate inspects narrowed
-    # feature_matches (only the CDS the query covered), not the full internal feature
-    # list, so an unmatched gene on a selected reference cannot trigger a false collision.
-    # The gate runs before any annotation or rule matching so a rejected run produces no
-    # partial report.
     _reject_cross_species_gene_name_collisions(references)
 
-    # Validate: at least one matched reference must carry resistance rules.
-    ruled_references = [rg for rg in references if rg.rule_feature_names]
-    if not ruled_references:
+    if not any(rg.rule_feature_names for rg in references):
         ref_names = ', '.join(rg.reference_name for rg in references) or '(none)'
         raise click.ClickException(
             f'no matched reference has resistance rules in the project database '
             f'(matched references: {ref_names})'
         )
 
-    # Annotate per reference: group remapped variants by chrom (== query_name) and
-    # annotate each group against only its reference's features.
     variants_by_chrom: dict[str, list[VariantCall]] = {}
     for var in remapped_variants:
         variants_by_chrom.setdefault(var.chrom, []).append(var)
 
+    single_fasta = is_fasta_mode and len(references) == 1
     annotations: list[AnnotatedVariant] = []
     for rg in references:
-        group_variants = variants_by_chrom.get(rg.query_name, [])
+        group_variants = remapped_variants if single_fasta else variants_by_chrom.get(rg.query_name, [])
         bam_ctx = bam_cooccurrence_by_chrom.get(rg.query_name) if bam_cooccurrence_by_chrom else None
+        if bam_cooccurrence_by_chrom is not None:
+            excluded = bam_excluded_positions(rg, coverage_gaps)
+            if excluded:
+                group_variants = [
+                    v for v in group_variants if not variant_touches_excluded_positions(v, excluded)
+                ]
         annotations.extend(annotate_variants(
             group_variants, rg.features, is_fasta_mode=is_fasta_mode,
             bam_cooccurrence=bam_ctx, cfg=cfg,
         ))
 
-    # Rule matching must run once per DISTINCT reference, not once per
-    # ReferenceGroup. In the targeted-sequencing case two records align to the same
-    # reference and produce two ReferenceGroups carrying the same rules; running match_rules
-    # twice against the shared annotations list would append each ResistanceRule twice
-    # (match_rules mutates in place via ann.rule_matches.append). Dedupe by reference_id.
-    #
-    # match_rules / match_formula_rules index rules by feature_name (no chrom) and mutate
-    # ann.rule_matches in place, so they must be scoped to the annotations belonging to this
-    # reference. Scoping by feature_name alone is insufficient when two references in the same
-    # project DB share a feature name (e.g. both pathogens have a "pol" CDS): a rule on refA
-    # would fire on a refB annotation at the same codon — a false resistance hit. The unique,
-    # unambiguous scope key is the chrom (== query_name), which is unique per ReferenceGroup.
-    # A single reference_id may span several chroms in the targeted case, so the scope for a
-    # reference_id is the union of its ReferenceGroups' query_names. The matchers mutate the
-    # shared annotation objects in place, so filtering the passed list is sufficient.
-    chroms_by_reference_id: dict[int, set[str]] = {}
-    for rg in references:
-        chroms_by_reference_id.setdefault(rg.reference_id, set()).add(rg.query_name)
-
-    seen_reference_ids: set[int] = set()
-    for rg in references:
-        if rg.reference_id in seen_reference_ids:
-            continue
-        seen_reference_ids.add(rg.reference_id)
-        ref_chroms = chroms_by_reference_id[rg.reference_id]
-        ref_annotations = [a for a in annotations if a.variant.chrom in ref_chroms]
-        if ref_annotations:
-            match_rules(ref_annotations, rg.rules)
-
-    # Per-reference formula rule matching; collect all hits into a flat list.
-    # Dedupe by reference_id and scope by chrom for the same reasons as the rule loop above.
-    all_formula_hits: list = []
-    seen_reference_ids_formula: set[int] = set()
-    for rg in references:
-        if rg.reference_id in seen_reference_ids_formula:
-            continue
-        seen_reference_ids_formula.add(rg.reference_id)
-        ref_chroms = chroms_by_reference_id[rg.reference_id]
-        ref_annotations = [a for a in annotations if a.variant.chrom in ref_chroms]
-        if not ref_annotations:
-            continue
-        formula_hits = match_formula_rules(
-            ref_annotations,
-            rg.formula_rules,
-            min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
-            eps=float(cfg.matching.frechet_epsilon),
-        )
-        all_formula_hits.extend(formula_hits)
-
+    formula_hits = match_rules_across_references(
+        annotations, references, is_fasta_mode=is_fasta_mode, cfg=cfg,
+    )
     annotations = assign_af_bins(annotations, bins=bins)
     variants_in_cds = sum(1 for a in annotations if a.feature_name)
 
@@ -392,74 +290,164 @@ def assemble_multi_reference_result(
         organism=references[0].organism,
         sample_name=sample,
         vcf_name=vcf_name,
-        total_variants=total_variants,
+        total_variants=len(annotations) if total_variants is None else total_variants,
         variants_in_cds=variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
+        is_fasta_mode=is_fasta_mode,
+        coverage_assessed=coverage_assessed,
         annotations=annotations,
-        formula_hits=all_formula_hits,
+        formula_hits=formula_hits,
         coverage_gaps=coverage_gaps,
         references=references,
     )
 
 
-@dataclass
-class _ProfilingRunContext:
-    """Pipeline data assembled before finalization and export."""
+def reconstruct_reference_groups(
+    project_conn: sqlite3.Connection,
+    run_dict: dict,
+    variant_rows: list[dict],
+    profiled_by_ref: dict[str, list[str]],
+) -> tuple[list[ReferenceGroup], list, list, set[str], str]:
+    """Reconstruct ``ReferenceGroup``s plus reporting features/rules for stored runs (regenerate/sync)."""
+    # Collect ordered (reference_name, query_name) pairs without collapsing multi-chrom targeted refs.
+    ref_query_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    json_references = run_dict.get('references') or []
 
-    annotations: list[AnnotatedVariant]
-    formula_rules: list
-    features: list
-    report_features: list
-    rule_feature_names: set[str]
-    rules: list
-    total_variants: int
-    variants_in_cds: int
-    coverage_gaps: list[CoverageGap]
-    query_sequence: str
-    feature_matches: list[FeatureMatch]
-    af_bins: dict[str, tuple[float, float]]
+    def _add_pair(ref_name: str, query_name: str) -> None:
+        if not ref_name:
+            return
+        pair = (ref_name, query_name or ref_name)
+        if pair not in seen_pairs:
+            seen_pairs.add(pair)
+            ref_query_pairs.append(pair)
+
+    is_fasta_mode = bool(run_dict.get('is_fasta_mode', 0))
+    if json_references:
+        for ref in json_references:
+            _add_pair(ref.get('reference_name', ''), ref.get('query_name', ''))
+    else:
+        for row in variant_rows:
+            ref_name = row.get('reference_name', '') or run_dict.get('reference_name', '')
+            qname = ref_name if is_fasta_mode else (row.get('chrom', '') or ref_name)
+            _add_pair(ref_name, qname)
+        # Include zero-variant profiled references persisted in profiled_feature.
+        known_refs = {ref for ref, _ in ref_query_pairs}
+        for ref_name in profiled_by_ref:
+            if ref_name and ref_name not in known_refs:
+                _add_pair(ref_name, ref_name)
+
+    if not ref_query_pairs:
+        fallback = run_dict.get('reference_name', '')
+        _add_pair(fallback, fallback)
+
+    # Cache loaded reference metadata/features/rules per distinct reference_name.
+    ref_cache: dict[str, tuple[int, str, int, list, list, list, set[str]]] = {}
+    all_features: list = []
+    all_rules: list = []
+    all_rule_feature_names: set[str] = set()
+    primary_organism = ''
+    references: list[ReferenceGroup] = []
+
+    for ref_name, query_name in ref_query_pairs:
+        if ref_name not in ref_cache:
+            ref_row = project_conn.execute(
+                'SELECT id, organism, length FROM reference WHERE name = ?',
+                (ref_name,),
+            ).fetchone()
+            if ref_row is not None:
+                ref_id = int(ref_row['id'])
+                organism = ref_row['organism'] or ''
+                ref_len = int(ref_row['length'] or 0)
+                _, ref_rules, ref_formulas, ref_rule_names, ref_features = load_reference_data(
+                    project_conn, ref_id,
+                )
+            else:
+                ref_id, organism, ref_len = 0, '', 0
+                ref_features, ref_rules, ref_formulas, ref_rule_names = [], [], [], set()
+
+            if not primary_organism:
+                primary_organism = organism
+            ref_cache[ref_name] = (
+                ref_id, organism, ref_len, ref_features, ref_rules, ref_formulas, ref_rule_names,
+            )
+            all_features.extend(ref_features)
+            all_rules.extend(ref_rules)
+            all_rule_feature_names |= ref_rule_names
+
+        ref_id, organism, ref_len, ref_features, ref_rules, ref_formulas, ref_rule_names = ref_cache[ref_name]
+        profiled_names = profiled_by_ref.get(ref_name) or sorted(ref_rule_names)
+        feature_by_name = {f.name: f for f in ref_features}
+        feature_matches = [
+            FeatureMatch(
+                feature=feature_by_name[fname],
+                identity=0.0,
+                cds_coverage=0.0,
+                query_coverage=0.0,
+                query_start=0,
+                query_end=0,
+                strand='+',
+                cigar='',
+            )
+            for fname in profiled_names
+            if fname in feature_by_name
+        ]
+        references.append(ReferenceGroup(
+            reference_name=ref_name,
+            reference_id=ref_id,
+            organism=organism,
+            reference_length_nt=ref_len,
+            query_name=query_name,
+            query_sequence='',
+            feature_matches=feature_matches,
+            features=ref_features,
+            rules=ref_rules,
+            formula_rules=ref_formulas,
+            rule_feature_names=ref_rule_names,
+        ))
+
+    return references, all_features, all_rules, all_rule_feature_names, primary_organism
 
 
-def _export_and_persist(
+def collect_reporting_scope(
+    result: ProfilingResult,
+    project_conn: sqlite3.Connection,
+) -> tuple[list, list, set[str]]:
+    """Collect deduplicated full features, rules, and rule feature names across all references."""
+    features: list = []
+    rules: list = []
+    rule_feature_names: set[str] = set()
+    seen_feature_ids: set[int] = set()
+    seen_ref_ids: set[int] = set()
+
+    for rg in result.references:
+        if rg.reference_id in seen_ref_ids:
+            continue
+        seen_ref_ids.add(rg.reference_id)
+        rules.extend(rg.rules)
+        rule_feature_names |= rg.rule_feature_names
+        for feature in load_all_features_for_reference(project_conn, rg.reference_id):
+            if feature.id not in seen_feature_ids:
+                seen_feature_ids.add(feature.id)
+                features.append(feature)
+    return features, rules, rule_feature_names
+
+
+def export_and_persist_result(
     result: ProfilingResult,
     *,
-    features: list,
-    rules: list,
-    rule_feature_names: set[str],
     project_conn: sqlite3.Connection,
     input_basename: str,
     output_target: Path,
     results_conn: sqlite3.Connection | None,
     project_path: Path,
-    logger: logging.Logger,
+    log: logging.Logger,
     extra_export_formats: set[str] | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> tuple[ProfilingResult, dict]:
-    """Export a profiling result to disk and optionally persist its run record.
-
-    Shared tail of :func:`_finalize_and_export` and
-    :func:`_finalize_and_export_multi`: derives a safe filename stem from
-    *input_basename*, resolves the HTML output path, calls
-    :func:`export_results` with the supplied feature/rule/rule_feature_names,
-    and saves the run to the results database when *results_conn* is provided.
-
-    :param result: assembled ProfilingResult to export and persist
-    :param features: feature records forwarded to :func:`export_results`
-    :param rules: resistance rules forwarded to :func:`export_results`
-    :param rule_feature_names: rule-backed feature names forwarded to
-        :func:`export_results`
-    :param project_conn: open project database connection
-    :param input_basename: filename of the input VCF or FASTA
-    :param output_target: output path option; interpreted as directory or explicit HTML file
-    :param results_conn: open results database connection, or None
-    :param project_path: path to the project database file
-    :param logger: logger instance
-    :param extra_export_formats: optional additional output formats ('json', 'pdf')
-    :return: (ProfilingResult, export path dict)
-    """
-    raw_stem = Path(input_basename).stem.strip() or 'profile'
-    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
-    html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
+    """Export an assembled ``ProfilingResult`` to disk and optionally persist to results DB."""
+    features, rules, rule_feature_names = collect_reporting_scope(result, project_conn)
+    html_output_path = resolve_output_file(output_target, f'{safe_report_stem(input_basename)}.report.html')
 
     outputs = export_results(
         result,
@@ -475,182 +463,19 @@ def _export_and_persist(
         similarity_moderate=cfg.similarity.moderate,
         cfg=cfg,
     )
-
     if results_conn is not None:
         run_id = save_run(results_conn, project_path.resolve(), project_conn, result)
-        logger.info('Run saved to results database with id %d', run_id)
-
+        log.info('Run saved to results database with id %d', run_id)
     return result, outputs
 
 
-def _finalize_and_export(
-    ctx: _ProfilingRunContext,
-    project_conn: sqlite3.Connection,
-    ref_id: int,
-    project_name: str,
-    ref_name: str,
-    sample: str,
-    input_basename: str,
-    output_target: Path,
-    results_conn: sqlite3.Connection | None,
-    project_path: Path,
-    logger: logging.Logger,
-    extra_export_formats: set[str] | None = None,
-    cfg: CliConfig = CLI_CONFIG,
-) -> tuple[ProfilingResult, dict]:
-    """
-    Apply rule matching and AF binning, build the result object, export, and optionally persist.
-
-    :param ctx: pipeline data assembled from the profiling run
-    :param project_conn: open project database connection
-    :param ref_id: internal reference id
-    :param project_name: project name for the report
-    :param ref_name: resolved reference name
-    :param sample: sample name
-    :param input_basename: filename of the input VCF or FASTA
-    :param output_target: output path option; interpreted as directory or explicit HTML file
-    :param results_conn: open results database connection, or None
-    :param project_path: path to the project database file
-    :param logger: logger instance
-    :param extra_export_formats: optional additional output formats ('json', 'pdf')
-    :return: (ProfilingResult, export path dict)
-    """
-    annotations = ctx.annotations
-    annotations = match_rules(annotations, ctx.rules)
-    formula_hits = match_formula_rules(
-        annotations,
-        ctx.formula_rules,
-        min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
-        eps=float(cfg.matching.frechet_epsilon),
-    )
-    annotations = assign_af_bins(annotations, bins=ctx.af_bins)
-
-    organism, reference_length_nt = load_reference_metadata(project_conn, ref_id)
-
-    reference_group = ReferenceGroup(
-        reference_name=ref_name,
-        reference_id=ref_id,
-        organism=organism,
-        reference_length_nt=reference_length_nt,
-        query_name=ref_name,
-        query_sequence=ctx.query_sequence,
-        feature_matches=ctx.feature_matches,
-        features=ctx.features,
-        rules=ctx.rules,
-        formula_rules=ctx.formula_rules,
-        rule_feature_names=ctx.rule_feature_names,
-    )
-
-    result = ProfilingResult(
-        project_name=project_name,
-        organism=organism,
-        sample_name=sample,
-        vcf_name=input_basename,
-        total_variants=ctx.total_variants,
-        variants_in_cds=ctx.variants_in_cds,
-        resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
-        is_fasta_mode=True,
-        annotations=annotations,
-        formula_hits=formula_hits,
-        coverage_gaps=ctx.coverage_gaps,
-        references=[reference_group],
-    )
-
-    return _export_and_persist(
-        result,
-        features=ctx.report_features,
-        rules=ctx.rules,
-        rule_feature_names=ctx.rule_feature_names,
-        project_conn=project_conn,
-        input_basename=input_basename,
-        output_target=output_target,
-        results_conn=results_conn,
-        project_path=project_path,
-        logger=logger,
-        extra_export_formats=extra_export_formats,
-        cfg=cfg,
-    )
-
-
-def _finalize_and_export_multi(
-    *,
-    result: ProfilingResult,
-    project_conn: sqlite3.Connection,
-    sample: str,
-    input_basename: str,
-    output_target: Path,
-    results_conn: sqlite3.Connection | None,
-    project_path: Path,
-    logger: logging.Logger,
-    extra_export_formats: set[str] | None = None,
-    cfg: CliConfig = CLI_CONFIG,
-) -> tuple[ProfilingResult, dict]:
-    """
-    Export and persist an already-assembled multi-reference :class:`ProfilingResult`.
-
-    Mirrors the export/save tail of :func:`_finalize_and_export` but derives the
-    feature/rule/rule_feature_names arguments from the union of all
-    :class:`ReferenceGroup`s on ``result`` (single-reference runs have one group,
-    so the union equals that group's data and behavior is identical to today).
-
-    :param result: assembled ProfilingResult with ``references`` populated
-    :param project_conn: open project database connection
-    :param sample: sample name (unused directly; kept for parity/logging)
-    :param input_basename: filename of the input VCF
-    :param output_target: output path option; interpreted as directory or explicit HTML file
-    :param results_conn: open results database connection, or None
-    :param project_path: path to the project database file
-    :param logger: logger instance
-    :param extra_export_formats: optional additional output formats ('json', 'pdf')
-    :return: (ProfilingResult, export path dict)
-    """
-    features: list = []
-    rules: list = []
-    rule_feature_names: set[str] = set()
-    seen_feature_ids: set[int] = set()
-    seen_reference_ids: set[int] = set()
-    for rg in result.references:
-        rules.extend(rg.rules)
-        rule_feature_names |= rg.rule_feature_names
-        # Reporting needs every feature of each matched reference (the genome overview
-        # draws ruleless CDS genes; mat_peptide panels resolve their parent CDS), while
-        # rg.features stays rule-backed for annotation. Load the full set per distinct
-        # reference_id: in the targeted case two ReferenceGroups share one reference_id.
-        if rg.reference_id in seen_reference_ids:
-            continue
-        seen_reference_ids.add(rg.reference_id)
-        for feature in load_all_features_for_reference(project_conn, rg.reference_id):
-            if feature.id in seen_feature_ids:
-                continue
-            seen_feature_ids.add(feature.id)
-            features.append(feature)
-
-    return _export_and_persist(
-        result,
-        features=features,
-        rules=rules,
-        rule_feature_names=rule_feature_names,
-        project_conn=project_conn,
-        input_basename=input_basename,
-        output_target=output_target,
-        results_conn=results_conn,
-        project_path=project_path,
-        logger=logger,
-        extra_export_formats=extra_export_formats,
-        cfg=cfg,
-    )
-
-
-def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
+def print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""
-    direct_rule_hit_total = sum(len(ann.non_formula_component_rule_matches) for ann in result.annotations)
-    hit_line = f'{direct_rule_hit_total} rule hit(s)'
+    direct_hits = sum(len(ann.non_formula_component_rule_matches) for ann in result.annotations)
+    hit_line = f'{direct_hits} rule hit(s)'
     if result.formula_hits:
         hit_line += f'  ·  {len(result.formula_hits)} formula rule hit(s)'
-    total_database_hits = direct_rule_hit_total + len(result.formula_hits)
-    total_hit_line = f'{total_database_hits} total database hits'
-
-    lines = [hit_line, total_hit_line, '']
+    lines = [hit_line, f'{direct_hits + len(result.formula_hits)} total database hits', '']
     for fmt, path in outputs.items():
         lines.append(f'[dim]{fmt}[/dim]   {path}')
     console.print(Panel('\n'.join(lines), title=f'[green]{title}[/green]', border_style='green'))

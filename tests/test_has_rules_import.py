@@ -195,7 +195,7 @@ class TestHasRulesOnImport:
         conn = open_project_db(db)
         try:
             conn.execute('SAVEPOINT import_test')
-            from respro.core.rules import import_rules_with_summary
+            from respro.db.rules.main import import_rules_with_summary
             import_rules_with_summary(
                 conn, 1, add_rules, additional_info=False,
             )

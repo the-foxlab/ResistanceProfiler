@@ -1020,3 +1020,26 @@ class TestMaintainedDbDownloadCommand:
         assert result.exit_code == 0
         call_kwargs = mock_init.call_args.kwargs
         assert call_kwargs['additional_info'] is False
+
+    def test_download_unwritable_output_parent_exits_cleanly(self, tmp_path: Path) -> None:
+        blocker = tmp_path / 'not_a_dir'
+        blocker.write_text('file', encoding='utf-8')
+        fake_gb = tmp_path / 'X04770.gb'
+        fake_gb.write_bytes(_GENBANK_CONTENT)
+        fake_files = {
+            'rules': tmp_path / 'rules.tsv',
+            'metadata': tmp_path / 'metadata.json',
+            'formula_rules': None,
+            'example': None,
+            'genbank': [fake_gb],
+        }
+
+        with patch('respro.cli.maintained_db.download_database_files', return_value=fake_files):
+            result = runner.invoke(app, [
+                'databases',
+                '--download', 'hsv_daehne_jaki',
+                '--output', str(blocker / 'custom.db'),
+            ])
+
+        assert result.exit_code != 0
+        assert isinstance(result.exception, SystemExit)

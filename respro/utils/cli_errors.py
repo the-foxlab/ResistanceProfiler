@@ -1,20 +1,4 @@
-"""
-User-facing CLI error rendering helpers.
-
-Typer >= 0.26 vendors Click internally as ``typer._click`` and its command
-``_main`` only catches the *vendored* ``typer._click.exceptions.ClickException``.
-A public ``click.ClickException`` raised inside a command callback is therefore no
-longer caught/rendered by Typer and surfaces as a raw traceback.
-
-Command callbacks render user-facing errors explicitly via :func:`cli_error`, which
-writes the standard ``Error: <message>`` line to stderr (matching Click's own
-``ClickException.show()`` formatting) and exits through ``typer.Exit`` — which
-Typer handles cleanly in every version. Lower-level helpers in
-``profile_helpers.py`` and ``sync.py`` keep raising ``click.ClickException`` because
-they are unit-tested directly with ``pytest.raises(click.ClickException)``; command
-callbacks catch those propagated exceptions and route them through
-:func:`render_click_exception` at the command boundary.
-"""
+"""User-facing CLI error rendering helpers bridging Click exceptions and Typer exits."""
 
 from __future__ import annotations
 
@@ -25,32 +9,14 @@ import typer
 
 
 def cli_error(message: str, exit_code: int = 1) -> NoReturn:
-    """Render a user-facing CLI error message and exit.
-
-    Writes ``Error: <message>`` to stderr (Click's standard error formatting) and
-    raises :class:`typer.Exit` so Typer terminates the process cleanly without a
-    traceback. Use this from command callbacks for validation failures and for
-    re-raising helper-propagated :class:`click.ClickException` instances.
-
-    Declared ``NoReturn`` so callers' control-flow narrowing (e.g. after a
-    validation ``except`` that delegates here) is sound: execution never
-    continues past a ``cli_error`` call.
-
-    :param message: human-readable error message
-    :param exit_code: process exit code (default 1)
-    """
+    """Write ``Error: <message>`` to stderr and exit cleanly via ``typer.Exit``."""
+    # Typer >= 0.26 vendors Click internally, so public click.ClickException is not
+    # caught by Typer's runner; exiting via typer.Exit works across all Typer versions.
     click.echo(f'Error: {message}', err=True)
     raise typer.Exit(exit_code)
 
 
-def render_click_exception(exc: click.ClickException) -> None:
-    """Render a propagated :class:`click.ClickException` and exit.
-
-    Thin adapter for command-boundary ``except click.ClickException`` clauses: it
-    preserves Click's own :meth:`ClickException.show` rendering (so ``UsageError``
-    still prints usage context) and exits with the exception's code.
-
-    :param exc: the propagated Click exception
-    """
+def render_click_exception(exc: click.ClickException) -> NoReturn:
+    """Render a propagated ``click.ClickException`` and terminate via ``typer.Exit``."""
     exc.show()
     raise typer.Exit(exc.exit_code) from exc

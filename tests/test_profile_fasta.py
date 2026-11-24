@@ -16,21 +16,21 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
-from respro.cli.profile_helpers import _load_reference_data
+from respro.cli.profile_helpers import load_reference_data as _load_reference_data
 from respro.core.alignment import match_query_to_features
 from respro.core.annotation import annotate_variants
+from respro.core.coordinates import build_query_to_cds_map as _build_query_to_cds_map
 from respro.core.fasta_to_vcf import (
-    _make_variant_from_coding_nt,
     _variants_from_alignment,
     fasta_to_vcf,
+)
+from respro.core.fasta_to_vcf import (
+    make_coding_variant as _make_variant_from_coding_nt,
 )
 from respro.core.query import (
     resolve_fasta_query,
 )
-from respro.core.vcf_remap import (
-    _build_query_to_cds_map,
-    remap_variants,
-)
+from respro.core.vcf_to_reference.main import map_vcf_to_matches as reconcile_variants_for_matches
 from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db
@@ -135,7 +135,18 @@ def feature_fwd() -> FeatureRecord:
     )
 
 def _split_feature(*, strand: str) -> FeatureRecord:
-    """Build a two-segment CDS with a non-coding envelope gap."""
+    """Build a two-segment CDS with a non-coding envelope gap (coding 5'->3' order)."""
+    segments = (
+        (
+            FeatureSegment(segment_index=0, start=0, end=6),
+            FeatureSegment(segment_index=1, start=12, end=18),
+        )
+        if strand == '+'
+        else (
+            FeatureSegment(segment_index=0, start=12, end=18),
+            FeatureSegment(segment_index=1, start=0, end=6),
+        )
+    )
     return FeatureRecord(
         id=99,
         reference_id=1,
@@ -146,10 +157,7 @@ def _split_feature(*, strand: str) -> FeatureRecord:
         strand=strand,
         codon_start=0,
         nt_sequence='ATGAAAGGGTCC',
-        segments=(
-            FeatureSegment(segment_index=0, start=0, end=6),
-            FeatureSegment(segment_index=1, start=12, end=18),
-        ),
+        segments=segments,
     )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -275,6 +283,10 @@ class TestSplitFeatureFastaProjection:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestRemapVariants:
+    """VCF calls reconciled against the internal reference (formerly the
+    event-level remap; the same coordinate expectations hold under the
+    reconciler)."""
+
     def test_exact_match_remaps_position(self, feature_fwd: FeatureRecord) -> None:
         """Variant at flanked query pos 8 remaps to internal pos 3."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
@@ -288,7 +300,7 @@ class TestRemapVariants:
                 allele_freq=0.9, depth=100,
             ),
         ]
-        remapped, warnings = remap_variants(variants, matches, query)
+        remapped, warnings = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(warnings) == 0
         assert len(remapped) == 1
@@ -297,7 +309,8 @@ class TestRemapVariants:
         assert remapped[0].alt == 'G'
 
     def test_variant_outside_cds_excluded(self, feature_fwd: FeatureRecord) -> None:
-        """Variant in flanking region should be silently excluded."""
+        """Variant in the flanking region is skipped with a warning (the
+        reconciler reports unmapped spans instead of silently dropping them)."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
         matches = match_query_to_features(query, [feature_fwd])
 
@@ -307,13 +320,13 @@ class TestRemapVariants:
                 allele_freq=0.5, depth=50,
             ),
         ]
-        remapped, warnings = remap_variants(variants, matches, query)
+        remapped, warnings = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 0
-        assert len(warnings) == 0
+        assert len(warnings) == 1
 
     def test_ref_base_mismatch_warns(self, feature_fwd: FeatureRecord) -> None:
-        """VCF REF disagreeing with FASTA should produce a warning."""
+        """VCF REF disagreeing with the supplied FASTA should produce a warning."""
         query = TINY_REF_SEQ
         matches = match_query_to_features(query, [feature_fwd])
 
@@ -324,7 +337,7 @@ class TestRemapVariants:
                 allele_freq=0.5, depth=50,
             ),
         ]
-        remapped, warnings = remap_variants(variants, matches, query)
+        remapped, warnings = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 0
         assert len(warnings) == 1
@@ -333,7 +346,7 @@ class TestRemapVariants:
     def test_multiple_variants_some_inside_some_outside(
         self, feature_fwd: FeatureRecord,
     ) -> None:
-        """Mixed set: one variant inside CDS, one outside."""
+        """Mixed set: one variant inside CDS, one outside (skipped with warning)."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
         matches = match_query_to_features(query, [feature_fwd])
 
@@ -341,10 +354,11 @@ class TestRemapVariants:
             VariantCall(chrom='c', pos=2, ref='N', alt='A', allele_freq=0.5, depth=50),
             VariantCall(chrom='c', pos=8, ref='A', alt='G', allele_freq=0.9, depth=100),
         ]
-        remapped, warnings = remap_variants(variants, matches, query)
+        remapped, warnings = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 1
         assert remapped[0].pos == 3
+        assert len(warnings) == 1
 
     def test_preserves_allele_freq_and_depth(self, feature_fwd: FeatureRecord) -> None:
         """AF and depth should be carried through from the original variant."""
@@ -357,27 +371,27 @@ class TestRemapVariants:
                 allele_freq=0.42, depth=999,
             ),
         ]
-        remapped, _ = remap_variants(variants, matches, query)
+        remapped, _ = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 1
         assert remapped[0].allele_freq == pytest.approx(0.42)
         assert remapped[0].depth == 999
 
     def test_snp_stores_query_ref_codon(self, feature_fwd: FeatureRecord) -> None:
-        """SNP remapping stores the query codon for downstream SNP annotation."""
+        """SNP reconciliation stores the supplied-reference codon for downstream annotation."""
         query = TINY_REF_SEQ
         matches = match_query_to_features(query, [feature_fwd])
 
         variants = [
             VariantCall(chrom='c', pos=3, ref='A', alt='G', allele_freq=0.4, depth=20),
         ]
-        remapped, _ = remap_variants(variants, matches, query)
+        remapped, _ = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == 'AAA'
 
     def test_snp_stores_query_ref_codon_for_reverse_match(self) -> None:
-        """Reverse-strand matches must reconstruct query codon in CDS orientation."""
+        """Reverse-strand matches must reconstruct the supplied codon in CDS orientation."""
         feature_rev = FeatureRecord(
             id=1,
             reference_id=1,
@@ -406,7 +420,7 @@ class TestRemapVariants:
         variants = [
             VariantCall(chrom='c', pos=5, ref='T', alt='C', allele_freq=0.8, depth=20),
         ]
-        remapped, _ = remap_variants(variants, matches, query)
+        remapped, _ = reconcile_variants_for_matches(variants, matches, query)
 
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == 'ATG'

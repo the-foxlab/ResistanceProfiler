@@ -10,12 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from respro.core.algorithms import (
+    compute_drug_assessment,
+    validate_interpretation_algorithms,
+)
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
-    compute_drug_assessment,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
-    validate_interpretation_algorithms,
 )
 from respro.db.project_metadata import load_metadata_json
 from respro.db.schema import create_schema
@@ -697,13 +699,84 @@ class TestComputeDrugAssessment:
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'susceptible'
 
-    def test_single_method_no_hits_defaults_to_susceptible(self):
+    def test_single_method_no_hits_uses_database_tier1_label(self):
+        """A zero-hit drug assesses with its database tier-1 label, not a constant."""
+        drug = self._drug(hit_count=0, tier1_label='sensitive')
+        configs = [{'method': 'by_phenotype'}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_no_tier1_label_defaults_to_canonical_susceptible(self):
+        """Without a tier-1 label (no project DB, legacy DB) the canonical
+        rank-1 label 'susceptible' is used."""
         drug = self._drug(hit_count=0)
         configs = [{'method': 'by_phenotype'}]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'susceptible'
-        assert len(methods) == 1
         assert methods[0]['assessment'] == 'susceptible'
+
+    def test_sensitive_tier1_zero_hit_across_all_methods(self):
+        """A 'sensitive'-tier-1 DB assesses a zero-hit drug 'sensitive' under
+        all four methods (numeric thresholds carry the same rank-1 key)."""
+        drug = self._drug(hit_count=0, tier1_label='sensitive')
+        configs = [
+            {'method': 'by_phenotype'},
+            {'method': 'by_score', 'thresholds': {'sensitive': 0, 'resistant': 5}},
+            {'method': 'by_ic50', 'thresholds': {
+                'sensitive': 0.0, 'intermediate': 3.0, 'resistant': 10.0}},
+            {'method': 'by_fold_ic50', 'thresholds': {
+                'sensitive': 0.0, 'intermediate': 3.0, 'resistant': 10.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert [m['assessment'] for m in methods] == ['sensitive'] * 4
+
+    def test_thresholds_rank1_key_precedes_tier1_label(self):
+        """Precedence (a): the resolved thresholds' rank-1 key wins over the
+        per-drug tier-1 label for numeric methods."""
+        drug = self._drug(hit_count=0, tier1_label='sensitive')
+        configs = [
+            {'method': 'by_ic50', 'thresholds': {
+                'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'susceptible'
+        assert methods[0]['assessment'] == 'susceptible'
+
+    def test_tier1_label_precedes_canonical_when_thresholds_lack_rank1(self):
+        """Precedence (b): by_score configured without a rank-1 key uses the
+        per-drug tier-1 label instead of the canonical 'susceptible'."""
+        drug = self._drug(hit_count=0, tier1_label='sensitive')
+        configs = [{'method': 'by_score', 'thresholds': {'resistant': 5}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_unmappable_hits_use_tier1_label(self):
+        """Hits with no rank-mappable label fall back to the drug's tier-1
+        label under by_phenotype."""
+        drug = self._drug(hit_count=1, tier1_label='sensitive')
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+
+    def test_score_below_breakpoints_uses_tier1_label_without_rank1_key(self):
+        """by_score hits below every breakpoint fall back to the drug's
+        tier-1 label when no rank-1 key is configured."""
+        drug = self._drug(hit_count=1, score_total=1.0, tier1_label='sensitive')
+        configs = [{'method': 'by_score', 'thresholds': {'resistant': 5}}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+
+    def test_ic50_below_breakpoints_without_rank1_key_uses_tier1_label(self):
+        """Legacy by_ic50 config without a rank-1 key: values below every
+        breakpoint fall back to the drug's tier-1 label."""
+        drug = self._drug(hit_count=1, ic50_values=[1.0], tier1_label='sensitive')
+        configs = [{'method': 'by_ic50', 'thresholds': {'resistant': 10.0}}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
 
     def test_two_methods_strongest_wins_resistant_over_intermediate(self):
         drug = self._drug(hit_count=2, resistant_count=1, score_total=3.0)
@@ -1290,3 +1363,20 @@ class TestApplyDrugAliasMappings:
         ).fetchone()
         assert row_a['alias'] == 'ACV'
         assert row_b['alias'] == ''
+
+    def test_validate_threshold_values_rejects_nan_negative_and_non_monotonic_score(self) -> None:
+        for bad in (
+            {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': float('nan'), 'resistant': 5.0}},
+            {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': -1.0, 'resistant': 5.0}},
+        ):
+            with pytest.raises(ValueError):
+                validate_interpretation_algorithms([bad])
+
+        non_mono_score = {
+            'name': 'drug_interpretation',
+            'method': 'by_score',
+            'thresholds': {'susceptible': 0, 'intermediate': 20, 'resistant': 10},
+        }
+        with pytest.raises(ValueError) as exc_info:
+            validate_interpretation_algorithms([non_mono_score])
+        assert 'integer' not in str(exc_info.value).lower()

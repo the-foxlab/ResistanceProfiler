@@ -31,10 +31,10 @@ sweep_frequency_seconds = 3600
 upload_rate_limit = '25/minute'
 api_rate_limit = '120/minute'
 max_batch_size = 25
-artifact_bundle_max_paths = 50
 # Upper bound for the --threads worker argument and max lengths for string/list
 # fields on API request models. These cap abuse surface area while staying well
-# above legitimate use.
+# above legitimate use. The artifact-bundle limit is derived from
+# max_batch_size x artifact kinds, not configured separately.
 profile_max_threads = 4
 sample_name_max_length = 128
 display_name_max_length = 128

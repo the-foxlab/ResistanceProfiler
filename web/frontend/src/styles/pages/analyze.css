@@ -126,7 +126,7 @@ button:disabled.analyze-primary {
 .analyze-submode-summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.75rem;
   min-width: 0;
 }
@@ -140,7 +140,7 @@ button:disabled.analyze-primary {
 
 .analyze-submode-progress {
   width: var(--analysis-progress-width);
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .analyze-submode-progress .upload-progress {
@@ -564,15 +564,7 @@ button:disabled.analyze-primary {
   grid-template-columns:
     minmax(180px, 1fr)
     minmax(225px, 1.25fr)
-    minmax(180px, 1fr)
-    minmax(185px, 1fr)
-    minmax(185px, 1fr);
-}
-
-@media (min-width: 981px) and (max-width: 1200px) {
-  .profile-upload-row-batch-vcf {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+    minmax(180px, 1fr);
 }
 
 .profile-upload-row label {

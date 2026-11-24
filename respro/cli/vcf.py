@@ -1,10 +1,9 @@
-"""
-VCF-based resistance profiling command — respro vcf.
-"""
+"""VCF-based resistance profiling command — ``respro vcf``."""
 
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Annotated
 
@@ -13,11 +12,11 @@ import typer
 from rich.console import Console
 
 from respro.cli.profile_helpers import (
-    _finalize_and_export_multi,
-    _init_results_db_connection,
-    _parse_export_formats,
-    _print_completion_panel,
     assemble_multi_reference_result,
+    export_and_persist_result,
+    init_results_db_connection,
+    parse_export_formats,
+    print_completion_panel,
 )
 from respro.config.cli_settings import load_config_with_overrides
 from respro.core.combined_snp import BamCooccurrence
@@ -26,104 +25,61 @@ from respro.core.query import (
     resolve_fasta_query_multi,
     select_matches_for_reference,
 )
-from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_remap import _build_query_to_cds_map, route_and_remap_variants
+from respro.core.vcf_coverage import (
+    build_bam_cooccurrence_by_chrom,
+    close_bam_cooccurrence_handles,
+    compute_coverage_gaps_from_bam_multi,
+)
+from respro.core.vcf_to_reference.main import REFERENCE_DERIVED, map_vcf_to_references
 from respro.db.schema import open_project_db
 from respro.io.reference import read_fasta
-from respro.io.vcf import collect_vcf_chroms, parse_vcf
+from respro.io.vcf import collect_vcf_chroms, collect_vcf_header_contigs, parse_vcf
 from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.utils.logging import err_console
 
 
-def _build_bam_cooccurrence_by_chrom(
-    bam_path: Path,
-    per_chrom: dict[str, tuple[str, str, list]],
-    min_mapq: int,
-    min_depth: int,
-) -> dict[str, BamCooccurrence]:
-    """Build a per-CHROM BamCooccurrence context for exact codon co-occurrence.
-
-    Opens the BAM once and, for each CHROM's narrowed feature matches, builds the
-    per-feature ``{cds_pos: query_pos}`` map via ``_build_query_to_cds_map``. The
-    returned dict is keyed by CHROM (== query_name) and passed through
-    ``assemble_multi_reference_result`` into ``annotate_variants``.
-
-    The caller is responsible for closing the BAM handles (each context holds an
-    open ``pysam.AlignmentFile``); use :func:`_close_bam_cooccurrence_handles`.
-    """
-    import pysam
-
-    by_chrom: dict[str, BamCooccurrence] = {}
-    for chrom, (query_name, query_sequence, matches) in per_chrom.items():
-        query_len = len(query_sequence)
-        if query_len == 0 or not matches:
-            continue
-        cds_to_query_by_feature: dict[str, dict[int, int]] = {}
-        for match in matches:
-            q2c = _build_query_to_cds_map(
-                match.cigar,
-                match.query_start,
-                match.query_end,
-                match.strand,
-                query_len,
-                match.cds_start,
-                match.intron_intervals,
-            )
-            cds_to_query = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
-            cds_to_query_by_feature[match.feature.name] = cds_to_query
-        bam = pysam.AlignmentFile(str(bam_path), 'rb')
-        # Resolve the BAM contig name for this query reference.
-        references = list(bam.references)
-        if query_name in references:
-            contig = query_name
-        elif len(references) == 1:
-            contig = references[0]
+def _resolve_vcf_chroms(vcf: Path, ref_fasta: Path) -> set[str]:
+    """Return observed VCF CHROMs (falling back to header/FASTA for 0-variant VCFs) and verify coverage."""
+    observed = collect_vcf_chroms(vcf)
+    fasta_headers = set(read_fasta(ref_fasta).keys())
+    if not observed:
+        header_contigs = collect_vcf_header_contigs(vcf) & fasta_headers
+        if len(fasta_headers) == 1:
+            observed = set(fasta_headers)
+        elif header_contigs:
+            observed = header_contigs
         else:
-            bam.close()
-            raise ValueError(
-                f'BAM reference {query_name!r} not found and BAM contains multiple references: {references}'
+            cli_error(
+                'VCF contains no variant records; nothing to profile. '
+                'Provide a VCF with at least one variant record.'
             )
-        by_chrom[chrom] = BamCooccurrence(
-            bam=bam,
-            contig=contig,
-            cds_to_query_by_feature=cds_to_query_by_feature,
-            min_mapq=min_mapq,
-            min_depth=min_depth,
+
+    missing = sorted(observed - fasta_headers)
+    if missing:
+        cli_error(
+            f'VCF CHROM(s) have no matching reference FASTA record: {", ".join(missing)}. '
+            f'VCF CHROMs={sorted(observed)}, FASTA records={sorted(fasta_headers)}. '
+            'Provide a reference FASTA whose record headers cover every VCF CHROM.'
         )
-    return by_chrom
-
-
-def _close_bam_cooccurrence_handles(by_chrom: dict[str, BamCooccurrence] | None) -> None:
-    """Close the BAM handles held by a BamCooccurrence dict."""
-    if not by_chrom:
-        return
-    for ctx in by_chrom.values():
-        try:
-            ctx.bam.close()
-        except Exception:
-            pass
+    return observed
 
 
 def _profile_vcf_command(
     project: Annotated[
-        Path,
-        typer.Option('--project', '-p', exists=True, help='Project database.')
+        Path, typer.Option('--project', '-p', exists=True, help='Project database.')
     ],
     vcf: Annotated[
-        Path,
-        typer.Option('--vcf', '-f', exists=True, help='Input VCF file.')
+        Path, typer.Option('--vcf', '-f', exists=True, help='Input VCF file.')
     ],
     ref_fasta: Annotated[
-        Path | None,
+        Path,
         typer.Option('--ref-fasta', '-r', exists=True, help='Reference FASTA the VCF was called against.')
     ],
     sample: Annotated[
-        str,
-        typer.Option('--sample', '-s', help='Sample name for the report.')
+        str, typer.Option('--sample', '-s', help='Sample name for the report.')
     ] = 'sample',
     output: Annotated[
-        Path,
-        typer.Option('--output', '-o', help='Output path (directory or HTML file path).')
+        Path, typer.Option('--output', '-o', help='Output path (directory or HTML file path).')
     ] = Path('output'),
     results_db: Annotated[
         Path | None,
@@ -164,11 +120,7 @@ def _profile_vcf_command(
     ] = None,
     input_display_name: Annotated[
         str | None,
-        typer.Option(
-            '--input-display-name',
-            hidden=True,
-            help='Optional display filename shown in exported reports.',
-        ),
+        typer.Option('--input-display-name', hidden=True, help='Optional display filename shown in exported reports.'),
     ] = None,
     config: Annotated[
         Path | None,
@@ -178,48 +130,27 @@ def _profile_vcf_command(
         ),
     ] = None,
 ) -> None:
-    """
-    Run resistance profiling on a VCF file.
-    """
+    """Run resistance profiling on a VCF file."""
     logger = logging.getLogger('respro')
     console = Console(highlight=False)
     project_conn = None
     results_conn = None
 
     try:
-        if ref_fasta is None:
-            cli_error('Missing option --ref-fasta.')
-        assert ref_fasta is not None  # cli_error raises typer.Exit above
-
-        export_formats = _parse_export_formats(export)
-
+        export_formats = parse_export_formats(export)
         cfg = load_config_with_overrides(config)
         if config is not None:
             logger.info('Loaded configuration overrides from %s', config)
+
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
             cli_error('No project found in the database')
 
-        results_conn = _init_results_db_connection(
+        results_conn = init_results_db_connection(
             str(results_db) if results_db else None, project_conn, logger,
         )
-
-        # Preflight: every VCF CHROM observed in variant records must have an exact
-        # FASTA record header. Extra FASTA records are allowed (ignored in VCF mode),
-        # but a VCF CHROM without a supplied reference cannot be remapped and indicates
-        # the wrong reference file was provided — a hard failure rather than a silent drop.
-        observed_chroms = collect_vcf_chroms(vcf)
-        fasta_headers = set(read_fasta(ref_fasta).keys())
-        missing = sorted(observed_chroms - fasta_headers)
-        if missing:
-            cli_error(
-                'VCF CHROM(s) have no matching reference FASTA record: '
-                f'{", ".join(missing)}. '
-                f'VCF CHROMs={sorted(observed_chroms)}, '
-                f'FASTA records={sorted(fasta_headers)}. '
-                'Provide a reference FASTA whose record headers cover every VCF CHROM.'
-            )
+        observed_chroms = _resolve_vcf_chroms(vcf, ref_fasta)
 
         with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
             query_records = resolve_fasta_query_multi(
@@ -227,8 +158,6 @@ def _profile_vcf_command(
                 selected_query_names=observed_chroms, cfg=cfg,
             )
 
-        # Parse all CHROMs (expected_query_name=None) so multi-chrom VCFs are retained;
-        # route_and_remap_variants pairs each CHROM with its matching QueryRecord.
         variants = parse_vcf(vcf, expected_query_name=None)
         logger.info('Parsed %d variant(s)', len(variants))
         variants = [
@@ -237,29 +166,33 @@ def _profile_vcf_command(
         ]
         logger.info('%d variant(s) after AF/depth filtering', len(variants))
 
-        variants, remap_warnings, dropped_chroms = route_and_remap_variants(variants, query_records)
-        for warning in remap_warnings:
+        variants, map_warnings, _ = map_vcf_to_references(variants, query_records)
+        for warning in map_warnings:
             logger.warning(warning)
-        for chrom in dropped_chroms:
+        logger.info('%d variant(s) after VCF reference comparison', len(variants))
+
+        ref_derived = sum(1 for v in variants if v.source == REFERENCE_DERIVED)
+        if ref_derived:
             logger.warning(
-                'Dropped VCF CHROM %r: its reference FASTA record has no usable internal '
-                'feature mapping; variants were not remapped',
-                chrom,
+                '%d variant(s) come from differences between the supplied reference and '
+                "the internal project reference (marked 'Reference derived' in the output)",
+                ref_derived,
             )
-        logger.info('%d variant(s) after FASTA remapping', len(variants))
 
         coverage_gaps = []
         bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None
         if bam is not None:
             with err_console.status('[dim]Projecting BAM depth to internal CDS coordinates…[/dim]'):
-                # Narrow each query record's matches to its best reference (same narrowing
-                # applied in route_and_remap_variants) so coverage is projected onto only
-                # the selected reference's features, avoiding cross-reference duplication.
-                per_chrom = {}
-                for rec in query_records:
-                    ref_id = pick_best_reference_id(rec.feature_matches)
-                    narrowed = select_matches_for_reference(rec.feature_matches, ref_id)
-                    per_chrom[rec.query_name] = (rec.query_name, rec.query_sequence, narrowed)
+                per_chrom = {
+                    rec.query_name: (
+                        rec.query_name,
+                        rec.query_sequence,
+                        select_matches_for_reference(
+                            rec.feature_matches, pick_best_reference_id(rec.feature_matches),
+                        ),
+                    )
+                    for rec in query_records
+                }
                 coverage_gaps = compute_coverage_gaps_from_bam_multi(
                     bam_path=bam,
                     per_chrom=per_chrom,
@@ -267,18 +200,13 @@ def _profile_vcf_command(
                     bam_base_quality_threshold=cfg.codon.bam_base_quality_threshold,
                 )
             if coverage_gaps:
-                total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
+                total_non_covered = sum(g.codon_end - g.codon_start + 1 for g in coverage_gaps)
                 logger.warning(
                     '%d codon position(s) could not be assessed due to missing/low BAM coverage '
                     '(%d stretch(es), threshold=min-depth=%d)',
-                    total_non_covered,
-                    len(coverage_gaps),
-                    min_depth,
+                    total_non_covered, len(coverage_gaps), min_depth,
                 )
-            # Build the BAM co-occurrence context for exact same-codon SNP
-            # co-occurrence measurement (replaces Fréchet lower bounds when a
-            # BAM is provided). Uses the same narrowed per-CHROM matches.
-            bam_cooccurrence_by_chrom = _build_bam_cooccurrence_by_chrom(
+            bam_cooccurrence_by_chrom = build_bam_cooccurrence_by_chrom(
                 bam_path=bam,
                 per_chrom=per_chrom,
                 min_mapq=cfg.codon.min_read_mapping_quality,
@@ -290,36 +218,35 @@ def _profile_vcf_command(
                 project_conn=project_conn,
                 query_records=query_records,
                 remapped_variants=variants,
-                coverage_gaps=coverage_gaps or [],
+                coverage_gaps=coverage_gaps,
                 project_name=project_row['name'],
                 sample=sample,
                 vcf_name=input_display_name or vcf.name,
                 total_variants=len(variants),
                 af_bins=cfg.af_bins.as_dict(),
+                coverage_assessed=bam is not None,
                 bam_cooccurrence_by_chrom=bam_cooccurrence_by_chrom,
                 cfg=cfg,
             )
         finally:
-            _close_bam_cooccurrence_handles(bam_cooccurrence_by_chrom)
+            close_bam_cooccurrence_handles(bam_cooccurrence_by_chrom)
 
-        result, outputs = _finalize_and_export_multi(
-            result=result,
+        result, outputs = export_and_persist_result(
+            result,
             project_conn=project_conn,
-            sample=sample,
             input_basename=input_display_name or vcf.name,
             output_target=output,
             results_conn=results_conn,
             project_path=project,
-            logger=logger,
+            log=logger,
             extra_export_formats=export_formats,
             cfg=cfg,
         )
-
-        _print_completion_panel(console, '✓ Profiling complete', result, outputs)
+        print_completion_panel(console, '✓ Profiling complete', result, outputs)
 
     except click.ClickException as exc:
         render_click_exception(exc)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if project_conn is not None:
@@ -329,5 +256,5 @@ def _profile_vcf_command(
 
 
 def register(app: typer.Typer) -> None:
-    """Register the vcf command on the given Typer app."""
+    """Register the ``vcf`` command on *app*."""
     app.command('vcf')(_profile_vcf_command)

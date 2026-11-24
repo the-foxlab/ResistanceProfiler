@@ -4,16 +4,23 @@ Canonical VCF remap/annotation orientation tests (E1-E7).
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 
 import pytest
+from _sequence_oracle import (
+    OracleHaplotype,
+    OracleRead,
+    apply_sequence_edits,
+    oracle_bam_codon_frequencies,
+    oracle_codon_mixture_frequencies,
+    reverse_complement_dna,
+)
 from Bio import SeqIO
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 
 from respro.core.annotation import annotate_variants, reverse_complement
-from respro.core.vcf_remap import _transform_allele, remap_variants
+from respro.core.vcf_to_reference.main import map_vcf_to_matches as reconcile_variants_for_matches
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 
 
@@ -104,19 +111,36 @@ def _assert_aa_token(ann, expected: str) -> None:
     assert ann.alt_aa == alt_aa
 
 
-class TestTransformAllele:
-    """Keep direct allele transformation helper checks."""
+class TestStrandComplementViaReconciler:
+    """Allele strand transformation is exercised end-to-end through the
+    reconciler's minus-strand cases (the former ``_transform_allele`` unit
+    helper was removed with the event-level remap pipeline)."""
 
-    def test_snp_need_comp_false(self) -> None:
-        assert _transform_allele('A', need_comp=False) == 'A'
+    def test_snp_complement_on_minus_match(self) -> None:
+        """A minus-strand match complements the called base into coding orientation."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = _variant_from_token('T13C')
 
-    def test_snp_need_comp_true(self) -> None:
-        assert _transform_allele('A', need_comp=True) == 'T'
-        assert _transform_allele('C', need_comp=True) == 'G'
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    def test_indel_need_comp_true(self) -> None:
-        assert _transform_allele('AGGG', need_comp=True) == 'TCCC'
-        assert _transform_allele('CTGG', need_comp=True) == 'GCCA'
+        assert not warnings
+        assert len(remapped) == 1
+        assert _token_from_variant(remapped[0]) == 'A4G'
+
+    def test_indel_payload_reverse_complemented_on_minus_match(self) -> None:
+        """A minus-strand insertion payload is reverse-complemented into coding orientation."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = _variant_from_token('C11CAAA')
+
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
+
+        assert not warnings
+        assert len(remapped) == 1
+        assert _token_from_variant(remapped[0]) == 'A5ATTT'
 
 
 @pytest.mark.parametrize(
@@ -153,7 +177,7 @@ def test_examples_e1_to_e4(
     match = _make_match(feature, match_strand=match_strand, query=query_seq, cigar='18M')
     var = _variant_from_token(query_token)
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
     assert len(remapped) == 1
@@ -173,58 +197,91 @@ def test_examples_e1_to_e4(
 
 
 def test_example_e5_query_deletion_rc_orientation() -> None:
-    """E5: query has deletion vs reference and query aligns as reverse-complement."""
+    """E5: query has deletion vs reference and query aligns as reverse-complement.
+
+    The reconciler additionally emits the baseline deletion (the sample lacks
+    three internal bases); the SNP still projects onto the internal reference
+    with the same amino-acid consequence as before reconciliation existed."""
     feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCTTGCAT'
     match = _make_match(feature, match_strand='-', query=query_seq, cigar='6M3D9M')
     var = _variant_from_token('C8T')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G9A'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert 'G9A' in tokens
+    assert 'AGTC5A' in tokens  # baseline: sample deletion of internal GTC
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'G3R')
+    missense = [a for a in anns if a.consequence == 'missense']
+    assert len(missense) == 1
+    _assert_aa_token(missense[0], 'G3R')
+    assert any(a.consequence == 'deletion' for a in anns)
 
 
 def test_example_e6_query_insertion_projection_and_no_projection() -> None:
-    """E6: one SNP projects through insertion, one SNP in insertion has no projection."""
+    """E6: one SNP projects through an insertion, one SNP inside the insertion
+    modifies the insertion haplotype.
+
+    Under reconciliation a call inside a supplied-only insertion has no CDS
+    projection but is not lost: it changes the insertion allele carried by the
+    call's sample state (at the call AF), while the plain supplied insertion
+    remains at the residual frequency mass."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAATTTGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='6M3I12M')
     projected = _variant_from_token('G9A')
     non_projected = _variant_from_token('T7C')
 
-    remapped, warnings = remap_variants([projected, non_projected], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([projected], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G6A'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert 'G6A' in tokens
+    assert 'A5ATTT' in tokens  # baseline: sample insertion of TTT
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'V2I')
+    missense = [a for a in anns if a.consequence == 'missense']
+    assert len(missense) == 1
+    _assert_aa_token(missense[0], 'V2I')
+
+    remapped_in, warnings_in = reconcile_variants_for_matches(
+        [non_projected], [match], query_seq,
+    )
+
+    assert not warnings_in
+    states = {(v.ref, v.pos, v.alt, round(v.allele_freq, 2)) for v in remapped_in}
+    # The call's base sits inside the inserted TTT: the call state carries the
+    # substituted insertion at the call AF, the plain insertion at the residual.
+    assert ('A', 5, 'ATCT', 0.9) in states
+    assert ('A', 5, 'ATTT', 0.1) in states
 
 
 def test_example_e7_mismatch_column_projection() -> None:
-    """E7: SNP at mismatch column still projects and annotates correctly."""
+    """E7: SNP at a mismatch column still projects and annotates correctly.
+
+    Reconciled alleles are relative to the internal reference (A5T, not the
+    supplied G5T); the second supplied-vs-internal difference is emitted as a
+    reference-derived baseline event."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAGGTCGGAAGCTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     var = _variant_from_token('G5T')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G5T'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert tokens == {'A5T', 'A5G', 'A13G'}
+    sources = {v.source for v in remapped}
+    assert 'reference_derived' in sources
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'Q1H')
+    q_anns = [a for a in anns if a.alt_aa == 'H']
+    assert len(q_anns) == 1
+    _assert_aa_token(q_anns[0], 'Q1H')
 
 
 def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
@@ -260,7 +317,7 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
         _make_match(feature_b, match_strand='+', query=query_seq, cigar='9M'),
     ]
 
-    remapped, warnings = remap_variants([var], matches, query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], matches, query_seq)
 
     assert not warnings
     assert len(remapped) == 2
@@ -268,16 +325,18 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
 
 
 def test_anchor_ref_mismatch_produces_warning() -> None:
-    """VCF REF anchor mismatch to query emits warning and excludes the variant."""
+    """VCF REF block mismatching the supplied reference emits a warning and
+    excludes the variant (baseline retained)."""
     feature = _make_feature(strand='+')
     query = 'ATGCAAGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query, cigar='18M')
     var = VariantCall(chrom='c', pos=3, ref='T', alt='G', allele_freq=0.9, depth=100)
 
-    remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
     assert len(remapped) == 0
     assert len(warnings) == 1
+    assert 'does not match the supplied reference' in warnings[0]
 
 
 def test_split_feature_remap_projects_second_segment_coordinates() -> None:
@@ -287,7 +346,7 @@ def test_split_feature_remap_projects_second_segment_coordinates() -> None:
     match = _make_match(feature, match_strand='+', query=query, cigar='12M')
     var = VariantCall(chrom='c', pos=6, ref='G', alt='A', allele_freq=0.9, depth=50)
 
-    remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
     assert not warnings
     assert len(remapped) == 1
@@ -305,22 +364,22 @@ def test_split_feature_envelope_gap_is_treated_as_non_coding() -> None:
     assert annotations[0].feature_name == ''
 
 
-def test_split_feature_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.LogCaptureFixture) -> None:
-    """Split-feature envelope gaps should emit a debug skip reason during remap."""
+def test_split_feature_envelope_gap_call_modifies_insertion_haplotype() -> None:
+    """A call anchored on an inserted base (split-feature envelope gap) has no
+    CDS projection but modifies the insertion haplotype: the call state carries
+    the substituted insertion at the call AF, the plain supplied insertion at
+    the residual frequency mass."""
     feature = _make_split_feature(strand='+')
     query = 'ATGAAATTTTTTGGGTCC'
     match = _make_match(feature, match_strand='+', query=query, cigar='6M6I6M')
     var = VariantCall(chrom='c', pos=6, ref='T', alt='G', allele_freq=0.9, depth=50)
 
-    with caplog.at_level(logging.DEBUG, logger='respro.core.vcf_remap'):
-        remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
-    assert not remapped
     assert not warnings
-    assert any(
-        'query pos 6' in message and 'no match / outside mapped CDS' in message
-        for message in caplog.messages
-    )
+    states = {(v.ref, v.pos, v.alt, round(v.allele_freq, 2)) for v in remapped}
+    assert ('A', 5, 'AGTTTTT', 0.9) in states
+    assert ('A', 5, 'ATTTTTT', 0.1) in states
 
 
 def test_minus_feature_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:
@@ -329,16 +388,16 @@ def test_minus_feature_reference_sequence_is_reverse_complement_of_coding_sequen
 
 
 def test_anchor_changed_indel_is_split_forward_orientation() -> None:
-    """Non-canonical indel with changed anchor is split into SNP + indel before remap."""
+    """Non-canonical indel with changed anchor preserves both SNP and indel signal."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAAGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     # Encodes A->G at anchor plus 3-nt deletion payload in one record.
     var = _variant_from_token('AAGT4G')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    assert any('Split' in w for w in warnings)
+    assert not warnings
     assert len(remapped) == 2
     tokens = {_token_from_variant(v) for v in remapped}
     assert 'A4G' in tokens
@@ -351,15 +410,18 @@ def test_anchor_changed_indel_is_split_forward_orientation() -> None:
 
 
 def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
-    """Reverse-orientation remap preserves both SNP and indel from changed-anchor record."""
+    """Reverse-orientation reconciliation preserves both SNP and indel from a
+    changed-anchor record."""
     feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCGACTTGCAT'
     match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
-    var = _variant_from_token('CAAA11G')
+    # REF block matches the supplied reference at pos 8 (query[8:12] = CGAC);
+    # the anchor base is changed (C -> G) alongside a 3-nt deletion payload.
+    var = _variant_from_token('CGAC8G')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    assert any('Split' in w for w in warnings)
+    assert not warnings
     assert len(remapped) == 2
     snp_count = sum(1 for v in remapped if len(v.ref) == 1 and len(v.alt) == 1)
     indel_count = sum(1 for v in remapped if len(v.ref) != len(v.alt))
@@ -384,7 +446,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -403,7 +465,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=13, ref='T', alt='C', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -424,7 +486,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=11, ref='C', alt='CAAA', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -443,9 +505,9 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=4, ref='AAGT', alt='G', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-        assert any('Split' in w for w in warnings)
+        assert not warnings
         assert len(remapped) == 2
         for out in remapped:
             assert out.user_chrom == 'userchr'
@@ -456,7 +518,7 @@ class TestUserRefCoordsPreserved:
 
 def test_fasta_emitted_variant_has_empty_user_ref_coords() -> None:
     """FASTA-emitted variants leave user-ref coords empty (no supplied user reference)."""
-    from respro.core.fasta_to_vcf import _make_variant_from_coding_nt
+    from respro.core.fasta_to_vcf import make_coding_variant as _make_variant_from_coding_nt
 
     feature = _make_feature(strand='+')
     var = _make_variant_from_coding_nt(feature, coding_nt_idx=3, ref='A', alt='G')
@@ -618,7 +680,7 @@ class TestFormulaEpsilonOverride:
             encoding='utf-8',
         )
         html_strict = _run(boundary, 'out_strict')
-        assert 'combodrug' not in html_strict.lower()
+        assert 'No database hits found for this sample.' in html_strict
 
         loosened = tmp_path / 'loosened.toml'
         loosened.write_text(
@@ -628,6 +690,7 @@ class TestFormulaEpsilonOverride:
             encoding='utf-8',
         )
         html_loose = _run(loosened, 'out_loose')
+        assert 'No database hits found for this sample.' not in html_loose
         assert 'combodrug' in html_loose.lower()
 
     def test_default_run_matches_no_config_run(self, tmp_path: Path) -> None:
@@ -662,3 +725,177 @@ class TestFormulaEpsilonOverride:
         html_empty = _run(empty, 'out_empty')
         assert 'combodrug' in html_plain.lower()
         assert 'combodrug' in html_empty.lower()
+
+
+class TestVcfCliBamCooccurrenceOrientation:
+    """V5/V6: `_build_bam_cooccurrence_by_chrom` populates match_strand_by_feature."""
+
+    def test_build_bam_cooccurrence_populates_match_strand_and_annotates_rc_query(
+        self, tmp_path: Path,
+    ) -> None:
+        import pysam
+
+        from respro.core.vcf_coverage import (
+            build_bam_cooccurrence_by_chrom as _build_bam_cooccurrence_by_chrom,
+        )
+        from respro.core.vcf_coverage import (
+            close_bam_cooccurrence_handles as _close_bam_cooccurrence_handles,
+        )
+        from respro.core.vcf_to_reference.main import (
+            map_vcf_to_matches as reconcile_variants_for_matches,
+        )
+
+        internal_coding = 'ATGAAATTTGGGCCC'
+        query_seq = reverse_complement_dna(internal_coding)  # codon 1 (AAA) at forward 9..11 (TTT)
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=len(internal_coding), strand='+', codon_start=0,
+            nt_sequence=internal_coding, aa_sequence='MKFGP',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=len(query_seq), strand='-',
+            cigar=f'{len(internal_coding)}M', cds_start=0,
+        )
+
+        # In query_seq = GGGCCCAAATTTCAT:
+        # CDS pos 3 (codon 1 pos 0) = query pos 11 ('T') -> T>A
+        # CDS pos 4 (codon 1 pos 1) = query pos 10 ('T') -> T>A
+        # Spanning reads carry 'AA' at query pos 10..11 (i.e. 'TAA' at 9..11 -> coding 'TTA'/L).
+        read_seq = query_seq[:9] + 'TAA' + query_seq[12:]
+        bam_path = tmp_path / 'rc_query.bam'
+        header = {'HD': {'VN': '1.0'}, 'SQ': [{'SN': 'q', 'LN': len(query_seq)}]}
+        with pysam.AlignmentFile(str(bam_path), 'wb', header=header) as bam:
+            for i in range(10):
+                seg = pysam.AlignedSegment()
+                seg.query_name = f'r{i}'
+                seg.query_sequence = read_seq
+                seg.flag = 0
+                seg.reference_id = 0
+                seg.reference_start = 0
+                seg.mapping_quality = 60
+                seg.cigar = ((0, len(read_seq)),)
+                seg.query_qualities = pysam.qualitystring_to_array('I' * len(read_seq))
+                seg.next_reference_id = -1
+                seg.template_length = 0
+                bam.write(seg)
+        pysam.index(str(bam_path))
+
+        calls = [
+            VariantCall(chrom='q', pos=11, ref='T', alt='A', allele_freq=1.0, depth=10),
+            VariantCall(chrom='q', pos=10, ref='T', alt='A', allele_freq=1.0, depth=10),
+        ]
+        reconciled, warnings = reconcile_variants_for_matches(calls, [match], query_seq)
+        assert warnings == []
+
+        by_chrom = _build_bam_cooccurrence_by_chrom(
+            bam_path=bam_path,
+            per_chrom={'q': ('q', query_seq, [match])},
+            min_mapq=20,
+            min_depth=5,
+        )
+        try:
+            ctx = by_chrom['q']
+            assert ctx.match_strand_by_feature == {'gag': '-'}
+            anns = annotate_variants(reconciled, [feature], bam_cooccurrence=ctx)
+        finally:
+            _close_bam_cooccurrence_handles(by_chrom)
+
+        oracle_freqs = oracle_bam_codon_frequencies(
+            reads=[OracleRead(qname=f'r{i}', seq=read_seq, start=0) for i in range(10)],
+            ref_codon='AAA',
+            codon_query_positions=[(0, 11), (1, 10)],
+            complement_bases=True,
+            min_mapq=20,
+            min_depth=5,
+        )
+        assert oracle_freqs == {'TTA': pytest.approx(1.0)}
+        assert len(anns) == 2
+        assert all(a.alt_codon == 'TTA' and a.alt_aa == 'L' for a in anns)
+        assert all(a.single_exchange_aa_freq == pytest.approx(1.0) for a in anns)
+
+
+class TestVcfBlockSubstitutionEndToEndV3:
+    """V3/V6: parse_vcf -> reconcile_variants_for_matches -> annotate_variants -> JSON/DB round-trip."""
+
+    def test_multiallelic_block_sub_vcf_pipeline_and_persistence(self, tmp_path: Path) -> None:
+        import uuid
+
+        from conftest import make_profiling_result
+
+        from respro.db.results import (
+            load_run,
+            load_run_from_json,
+            reconstruct_annotations,
+            save_run,
+        )
+        from respro.db.schema import create_schema, init_results_db
+        from respro.io.vcf import parse_vcf
+        from respro.report.non_html_exports import write_json
+
+        internal = 'ATGAAATTT'
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence=internal,
+        )
+        match = _make_match(feature, match_strand='+', query=internal, cigar='9M')
+
+        vcf_path = tmp_path / 'block.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="DP">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'c\t4\t.\tAA\tCG,CT\t100\tPASS\tAF=0.5,0.3;DP=100\n',
+            encoding='utf-8',
+        )
+        parsed = parse_vcf(vcf_path)
+        assert [(v.record_index, v.alt_index) for v in parsed] == [(0, 0), (0, 1)]
+
+        reconciled, warnings = reconcile_variants_for_matches(parsed, [match], internal)
+        assert warnings == []
+        anns = annotate_variants(reconciled, [feature])
+
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(apply_sequence_edits(internal, [(3, 'AA', 'CG')]), 0.5),
+                OracleHaplotype(apply_sequence_edits(internal, [(3, 'AA', 'CT')]), 0.3),
+                OracleHaplotype(internal, 0.2),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+        by_pos_alt = {(a.variant.pos, a.variant.alt): a for a in anns}
+        assert by_pos_alt[(3, 'C')].alt_codon == 'CGA'
+        assert by_pos_alt[(3, 'C')].single_exchange_aa_freq == pytest.approx(oracle_mix['CGA'][1])
+        assert by_pos_alt[(4, 'T')].alt_codon == 'CTA'
+        assert by_pos_alt[(4, 'T')].single_exchange_aa_freq == pytest.approx(oracle_mix['CTA'][1])
+
+        # Persist and reload from SQLite and JSON
+        project_db = tmp_path / 'proj.db'
+        proj_conn = create_schema(project_db)
+        proj_conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('T', 6, str(uuid.uuid4())),
+        )
+        proj_conn.commit()
+        result = make_profiling_result(
+            project_name='T', reference_name='c', reference_length_nt=9,
+            sample_name='S', vcf_name='block.vcf', is_fasta_mode=False,
+            total_variants=len(reconciled), variants_in_cds=len(reconciled), resistance_hits=0,
+            annotations=anns, query_sequence=internal, feature_matches=[match],
+        )
+        results_db = tmp_path / 'res.db'
+        rconn = init_results_db(results_db)
+        run_id = save_run(rconn, project_db, proj_conn, result)
+        _rr, db_rows = load_run(rconn, run_id)
+        db_anns = reconstruct_annotations(db_rows)
+        assert db_anns[0].variant.haplotype_links == anns[0].variant.haplotype_links
+        rconn.close()
+
+        json_path = tmp_path / 'res.results.json'
+        write_json(result, json_path, project_conn=proj_conn, project_db_path=project_db)
+        _jr, jrows, _jg, _jf, _jc = load_run_from_json(json_path)
+        json_anns = reconstruct_annotations(jrows)
+        assert json_anns[0].variant.haplotype_links == anns[0].variant.haplotype_links
+        proj_conn.close()

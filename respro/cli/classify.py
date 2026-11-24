@@ -1,115 +1,51 @@
-"""
-`respro classify` command — set a manual sample classification for a stored run.
-"""
+"""``respro classify`` command — store a manual sample classification on a saved run."""
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 
-from respro.db._rules_normalize import normalize_phenotype_label
-from respro.db.results import (
-    load_run,
-    save_classification,
-)
+from respro.core.phenotype_ranks import normalize_phenotype_label
+from respro.db.results import load_run, save_classification
 from respro.db.schema import open_results_db
 from respro.utils.cli_errors import cli_error
 
 
 def classify(
-    result_db: Annotated[
-        Path,
-        typer.Option(
-            '--results-db',
-            '-d',
-            exists=True,
-            help='Results database.',
-        ),
-    ],
-    run_id: Annotated[
-        int,
-        typer.Option(
-            '--run-id',
-            '-i',
-            help='Run ID to classify.',
-        ),
-    ],
-    drug: Annotated[
-        str,
-        typer.Option(
-            '--drug',
-            help='Drug name this classification applies to.',
-        ),
-    ],
+    result_db: Annotated[Path, typer.Option('--results-db', '-d', exists=True, help='Results database.')],
+    run_id: Annotated[int, typer.Option('--run-id', '-i', help='Run ID to classify.')],
+    drug: Annotated[str, typer.Option('--drug', help='Drug name this classification applies to.')],
     phenotype: Annotated[
         str | None,
         typer.Option(
             '--phenotype',
-            help=(
-                'Resistance phenotype label (e.g. susceptible / intermediate / '
-                'resistant / low-level resistance / unknown) or a bare rank 1–5.'
-            ),
+            help='Resistance phenotype label (e.g. susceptible / intermediate / resistant / '
+                 'low-level resistance / unknown) or a bare rank 1–5.',
         ),
     ] = None,
     clinical_phenotype: Annotated[
         str | None,
         typer.Option(
             '--clinical-phenotype',
-            help=(
-                'Externally verified clinical phenotype label (same vocabulary '
-                'as --phenotype) or a bare rank 1–5.'
-            ),
+            help='Externally verified clinical phenotype label (same vocabulary as --phenotype) or a bare rank 1–5.',
         ),
     ] = None,
-    ic50: Annotated[
-        str,
-        typer.Option(
-            '--ic50',
-            help='IC50 value string.',
-        ),
-    ] = '',
-    fold_ic50: Annotated[
-        str,
-        typer.Option(
-            '--fold-ic50',
-            help='Fold-IC50 value string.',
-        ),
-    ] = '',
-    note: Annotated[
-        str,
-        typer.Option(
-            '--note',
-            help='Free-text note.',
-        ),
-    ] = '',
-    source: Annotated[
-        str,
-        typer.Option(
-            '--source',
-            help='Source or reference for this classification.',
-        ),
-    ] = '',
+    ic50: Annotated[str, typer.Option('--ic50', help='IC50 value string.')] = '',
+    fold_ic50: Annotated[str, typer.Option('--fold-ic50', help='Fold-IC50 value string.')] = '',
+    note: Annotated[str, typer.Option('--note', help='Free-text note.')] = '',
+    source: Annotated[str, typer.Option('--source', help='Source or reference for this classification.')] = '',
 ) -> None:
-    """
-    Set a manual sample classification for a stored run in a local results database.
-
-    If the result is regenerated from the same results DB later, this classification will be preserved and
-    shown in the report html.
-    """
+    """Set a manual sample classification for a stored run in a local results database."""
     if not any([phenotype, clinical_phenotype, ic50, fold_ic50]):
-        cli_error(
-            'At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.'
-        )
+        cli_error('At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.')
 
-    # Strictly normalize phenotype labels via the rank vocabulary.
     try:
-        phenotype = normalize_phenotype_label(phenotype) if phenotype else ''
-        clinical_phenotype = (
-            normalize_phenotype_label(clinical_phenotype) if clinical_phenotype else ''
-        )
+        norm_phenotype = normalize_phenotype_label(phenotype) if phenotype else ''
+        norm_clinical = normalize_phenotype_label(clinical_phenotype) if clinical_phenotype else ''
     except ValueError as exc:
         cli_error(str(exc))
 
@@ -117,23 +53,14 @@ def classify(
     results_conn = None
     try:
         results_conn = open_results_db(result_db)
-        # Verify run exists.
         load_run(results_conn, run_id)
         save_classification(
-            results_conn,
-            run_id,
-            drug=drug,
-            phenotype=phenotype,
-            clinical_phenotype=clinical_phenotype,
-            ic50=ic50,
-            fold_ic50=fold_ic50,
-            note=note,
-            source=source,
+            results_conn, run_id,
+            drug=drug, phenotype=norm_phenotype, clinical_phenotype=norm_clinical,
+            ic50=ic50, fold_ic50=fold_ic50, note=note, source=source,
         )
-        console.print(
-            f'[green]✓[/green] Classification saved for run #{run_id}.'
-        )
-    except (FileNotFoundError, ValueError) as exc:
+        console.print(f'[green]✓[/green] Classification saved for run #{run_id}.')
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:
@@ -141,5 +68,5 @@ def classify(
 
 
 def register(app: typer.Typer) -> None:
-    """Register the classify command on the given Typer app."""
+    """Register the ``classify`` command on *app*."""
     app.command()(classify)

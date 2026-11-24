@@ -191,7 +191,7 @@ respro vcf \
 | `--output PATH`, `-o` | Output path (directory or HTML file path). Default: `output`. |
 | `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
 | `--min-af FLOAT`, `-ma` | Minimum allele frequency filter. Default: `0.01`. |
-| `--min-depth INT`, `-md` | Minimum read depth filter (used with `--bam`). Default: `10`. |
+| `--min-depth INT`, `-md` | Minimum read depth filter for VCF calls (via `DP`/`AD`) and, when `--bam` is provided, for BAM codon coverage and spanning-molecule co-occurrence. Default: `10`. |
 | `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`, and — when combined SNPs share a codon — to measure the **exact co-occurrence frequency** of each combined codon state directly from spanning reads (replacing the conservative lower-bound estimate used without a BAM). Combined-codon frequencies are then tagged `observed` in the report. |
 | `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
 | `--cache` / `--no-cache` | Reuse/store the FASTA reference mapping cache in the project database (default: off). |
@@ -222,6 +222,20 @@ run.
   (e.g. HSV-1 `UL23` and HSV-2 `UL23`), profiling fails because resistance-relevant
   mutations cannot be attributed to a single species unambiguously. Same-species
   shared gene names are always allowed.
+- **Reference comparison and variant provenance.** Resistance rules are defined
+  against the stored internal project reference, while VCF variants are called
+  against `--ref-fasta`. ResPro aligns the supplied reference against the internal
+  reference: any mismatch between the two is emitted as `Reference derived`
+  (assumed AF `1.0`, or the remaining uncalled fraction `1 − Σ AF_vcf` when a
+  sub-1.0 VCF call overlaps that position), while in-cutoff VCF calls are mapped
+  onto the internal reference as `VCF derived`. Calls failing `--min-af` or
+  `--min-depth` are removed first, leaving any underlying reference mismatch at AF
+  `1.0`. VCF deletions overlapping or touching a reference deletion are skipped
+  with a warning, retaining the reference deletion. When `--bam` is provided, one deferred
+  coverage gate removes any candidate (whether `VCF derived` or
+  `Reference derived`) whose codon/span fails the coverage threshold before
+  rule matching. For best results, call variants against a reference FASTA
+  that is identical or highly similar to the stored internal project reference.
 
 ### Allele-frequency source (VCF mode)
 

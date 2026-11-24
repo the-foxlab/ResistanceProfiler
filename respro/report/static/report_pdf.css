@@ -54,7 +54,7 @@ body {
 
 .header-title {
   margin: 0;
-  font-size: 14;
+  font-size: 14px;
   font-family: 'DejaVu Sans', sans-serif;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -171,7 +171,7 @@ body {
 
 .feature-name {
   font-weight: 400;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .feature-cov {
@@ -179,6 +179,10 @@ body {
   font-weight: 400;
   white-space: nowrap;
   text-align: left;
+}
+
+.feature-cov--na {
+  font-style: italic;
 }
 
 .feature-muts {

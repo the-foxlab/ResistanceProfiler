@@ -1,6 +1,4 @@
-"""
-Cache helpers for query-reference mappings stored in the project database.
-"""
+"""Privacy-minimal query-reference alignment cache stored in the project database."""
 
 from __future__ import annotations
 
@@ -9,48 +7,35 @@ import json
 import logging
 import sqlite3
 
-from respro.db.features import load_feature_segments_by_feature_id
-from respro.db.models import FeatureMatch, FeatureRecord, IntronInterval
+from respro.db.features import feature_from_row, load_feature_segments_by_feature_id
+from respro.db.models import FeatureMatch, IntronInterval
 
 logger = logging.getLogger(__name__)
 
 
 def sequence_checksum(sequence: str) -> str:
-    """
-    Compute a SHA-256 hex digest for a nucleotide sequence.
-
-    :param sequence: nucleotide string
-    :return: hex digest
-    """
+    """Compute a case-insensitive SHA-256 hex digest for a nucleotide sequence."""
     return hashlib.sha256(sequence.upper().encode()).hexdigest()
 
 
 def _serialize_intron_intervals(intervals: tuple[IntronInterval, ...]) -> str:
-    """Serialize intron intervals to a compact JSON array string."""
-    return json.dumps(
-        [
-            {
-                'cds_junction_pos': iv.cds_junction_pos,
-                'query_start': iv.query_start,
-                'length': iv.length,
-            }
-            for iv in intervals
-        ]
-    )
+    return json.dumps([
+        {
+            'cds_junction_pos': iv.cds_junction_pos,
+            'query_start': iv.query_start,
+            'length': iv.length,
+        }
+        for iv in intervals
+    ])
 
 
 def _deserialize_intron_intervals(blob: str | None) -> tuple[IntronInterval, ...]:
-    """Deserialize intron intervals from a JSON array string.
-
-    Tolerates ``None`` or malformed blobs (legacy rows) by returning an empty
-    tuple so that unspliced-feature mappings load without intron spans.
-    """
     if not blob:
-        return tuple()
+        return ()
     try:
         records = json.loads(blob)
     except (json.JSONDecodeError, TypeError):
-        return tuple()
+        return ()
     return tuple(
         IntronInterval(
             cds_junction_pos=int(rec['cds_junction_pos']),
@@ -65,13 +50,7 @@ def load_cached_mappings(
     conn: sqlite3.Connection,
     checksum: str,
 ) -> list[FeatureMatch] | None:
-    """
-    Load previously stored feature mappings for a query reference checksum.
-
-    :param conn: project database connection
-    :param checksum: SHA-256 of the query sequence (sequence only, header excluded)
-    :return: list of FeatureMatch objects, or None if no cache entry exists
-    """
+    """Load cached ``FeatureMatch`` rows for ``checksum``, or ``None`` on cache miss."""
     qref = conn.execute(
         'SELECT id FROM query_reference WHERE checksum = ?',
         (checksum,),
@@ -84,36 +63,27 @@ def load_cached_mappings(
         'qgm.cds_start, qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
         'qgm.intron_intervals, '
         'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS feature_strand, '
-        'g.codon_start, g.nt_sequence, g.aa_sequence, '
+        'g.codon_start, g.nt_sequence, g.aa_sequence, g.feature_type, g.parent_feature_name, '
         'r.accession AS reference_accession '
         'FROM query_feature_mapping qgm '
         'JOIN feature g ON g.id = qgm.feature_id '
         'JOIN reference r ON r.id = g.reference_id '
-        'WHERE qgm.query_ref_id = ? AND g.has_rules = 1',
+        'WHERE qgm.query_ref_id = ? AND g.has_rules = 1 '
+        'ORDER BY g.reference_id, g.start, g.id',
         (qref['id'],),
     ).fetchall()
 
-    feature_ids = [int(row['feature_id']) for row in rows]
-    segments_by_feature = load_feature_segments_by_feature_id(conn, feature_ids)
-
-    matches: list[FeatureMatch] = []
-    for row in rows:
-        feature = FeatureRecord(
-            id=row['feature_id'],
-            reference_id=row['reference_id'],
-            name=row['name'],
-            protein=row['protein'] or '',
-            start=row['start'],
-            end=row['end'],
-            strand=row['feature_strand'],
-            codon_start=row['codon_start'],
-            nt_sequence=row['nt_sequence'] or '',
-            aa_sequence=row['aa_sequence'] or '',
-            reference_accession=row['reference_accession'] or '',
-            segments=segments_by_feature.get(int(row['feature_id']), tuple()),
-        )
-        matches.append(FeatureMatch(
-            feature=feature,
+    segments_by_feature = load_feature_segments_by_feature_id(
+        conn, [int(row['feature_id']) for row in rows],
+    )
+    matches = [
+        FeatureMatch(
+            feature=feature_from_row(
+                row,
+                segments_by_feature.get(int(row['feature_id']), ()),
+                id_column='feature_id',
+                strand_column='feature_strand',
+            ),
             identity=row['identity'],
             cds_coverage=row['cds_coverage'],
             query_coverage=row['query_coverage'],
@@ -123,10 +93,17 @@ def load_cached_mappings(
             strand=row['strand'],
             cigar=row['cigar'],
             intron_intervals=_deserialize_intron_intervals(row['intron_intervals']),
-        ))
-
+        )
+        for row in rows
+    ]
     logger.info('Loaded %d cached mapping(s) for checksum %s…', len(matches), checksum[:12])
     return matches
+
+
+def clear_cached_mappings(conn: sqlite3.Connection) -> None:
+    """Invalidate all cached query-to-feature alignments (e.g. after ``respro add``)."""
+    conn.execute('DELETE FROM query_feature_mapping')
+    conn.execute('DELETE FROM query_reference')
 
 
 def store_mappings(
@@ -134,45 +111,37 @@ def store_mappings(
     checksum: str,
     matches: list[FeatureMatch],
 ) -> None:
-    """
-    Cache feature mappings for a query reference in the project database.
+    """Persist sequence checksum and CIGAR feature mappings (never headers or raw sequence)."""
+    with conn:
+        conn.execute('INSERT OR IGNORE INTO query_reference (checksum) VALUES (?)', (checksum,))
+        qref_row = conn.execute(
+            'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
+        ).fetchone()
+        if qref_row is None:
+            raise ValueError(f'Failed to persist query_reference row for checksum {checksum[:12]}')
+        qref_id = qref_row['id']
 
-    Privacy-minimal: only the sequence checksum and the per-feature CIGAR
-    mappings are persisted — never the FASTA header, the sequence itself, or
-    any timestamp.
-
-    :param conn: project database connection
-    :param checksum: SHA-256 of the query sequence (sequence only, header excluded)
-    :param matches: accepted FeatureMatch results to store
-    """
-    conn.execute(
-        'INSERT OR IGNORE INTO query_reference (checksum) VALUES (?)',
-        (checksum,),
-    )
-    qref_id = conn.execute(
-        'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
-    ).fetchone()['id']
-
-    for match in matches:
-        conn.execute(
+        conn.execute('DELETE FROM query_feature_mapping WHERE query_ref_id = ?', (qref_id,))
+        conn.executemany(
             'INSERT OR REPLACE INTO query_feature_mapping '
             '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, '
             'cds_start, query_start, query_end, strand, cigar, intron_intervals) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (
-                qref_id,
-                match.feature.id,
-                match.identity,
-                match.cds_coverage,
-                match.query_coverage,
-                match.cds_start,
-                match.query_start,
-                match.query_end,
-                match.strand,
-                match.cigar,
-                _serialize_intron_intervals(match.intron_intervals),
-            ),
+            [
+                (
+                    qref_id,
+                    m.feature.id,
+                    m.identity,
+                    m.cds_coverage,
+                    m.query_coverage,
+                    m.cds_start,
+                    m.query_start,
+                    m.query_end,
+                    m.strand,
+                    m.cigar,
+                    _serialize_intron_intervals(m.intron_intervals),
+                )
+                for m in matches
+            ],
         )
-
-    conn.commit()
     logger.info('Cached %d mapping(s) for checksum %s…', len(matches), checksum[:12])

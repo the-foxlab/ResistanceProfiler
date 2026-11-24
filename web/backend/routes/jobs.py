@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -11,6 +12,7 @@ from rq.results import Result
 from rq.serializers import JSONSerializer
 from slowapi import Limiter
 
+from web.backend.artifact_kinds import ARTIFACT_MEDIA_TYPES, ARTIFACT_RESULT_FIELDS
 from web.backend.models import JobStatusResponse
 from web.backend.queue import get_queue
 from web.backend.services.session import (
@@ -119,16 +121,6 @@ def build_jobs_router(
     return router
 
 
-# Mapping of result dict keys that carry artifact paths to the artifact media
-# type used when recording them for ownership tracking.
-_ARTIFACT_PATH_FIELDS = {
-    'report_html_path': 'text/html',
-    'report_json_path': 'application/json',
-    'report_pdf_path': 'application/pdf',
-    'report_tsv_path': 'text/tab-separated-values',
-}
-
-
 def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
     """Replace absolute artifact paths in a job result with opaque artifact IDs.
 
@@ -136,36 +128,47 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
     session and the job record is updated with the resulting IDs. Subsequent
     fetches reuse the stored IDs. The absolute paths are never returned to the
     client.
+
+    ``artifact_ids`` is returned in registry order so clients can bundle every
+    artifact without enumerating the per-type fields themselves.
     """
     record = fetch_owned_record('job', job_id)
-    if record is None:
-        return result
+    if not owner_matches(record, session_hash):
+        raise HTTPException(status_code=404, detail='Job not found.')
+    fields = [field for field in ARTIFACT_RESULT_FIELDS if result.get(field)]
     stored_ids = record.fields.get('artifact_ids', '')
     if stored_ids:
-        artifact_ids = [value for value in stored_ids.split(',') if value]
+        artifact_ids = stored_ids.split(',')
+        if len(artifact_ids) != len(fields):
+            raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+        for field, artifact_id in zip(fields, artifact_ids, strict=True):
+            if not re.fullmatch(r'[A-Za-z0-9_-]+', artifact_id):
+                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+            artifact = fetch_owned_record('artifact', artifact_id)
+            if artifact is None:
+                raise HTTPException(status_code=404, detail='Job artifacts unavailable.')
+            if (
+                not owner_matches(artifact, session_hash)
+                or artifact.canonical_path != str(result[field])
+                or artifact.fields.get('media_type') != ARTIFACT_MEDIA_TYPES[field]
+            ):
+                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
     else:
         artifact_ids = []
-        for field, media_type in _ARTIFACT_PATH_FIELDS.items():
-            path = result.get(field)
-            if not path:
-                continue
+        for field in fields:
             artifact_id = record_artifact(
                 session_hash=session_hash,
-                canonical_path=path,
-                media_type=media_type,
+                canonical_path=result[field],
+                media_type=ARTIFACT_MEDIA_TYPES[field],
             )
             artifact_ids.append(artifact_id)
         # Persist the IDs on the job record so later polls don't re-record.
         _store_job_artifact_ids(job_id, artifact_ids)
 
     redacted = dict(result)
-    id_iter = iter(artifact_ids)
-    for field in _ARTIFACT_PATH_FIELDS:
-        if field in redacted and redacted[field]:
-            try:
-                redacted[field] = next(id_iter)
-            except StopIteration:  # pragma: no cover - defensive mismatch
-                break
+    for field, artifact_id in zip(fields, artifact_ids, strict=True):
+        redacted[field] = artifact_id
+    redacted['artifact_ids'] = artifact_ids
     return redacted
 
 

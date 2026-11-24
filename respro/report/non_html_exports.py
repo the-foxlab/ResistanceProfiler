@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 
 from jinja2 import BaseLoader, Environment
@@ -18,6 +19,7 @@ except ImportError:
 
 from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG, CliConfig
+from respro.core.phenotype_ranks import label_to_rank
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,
@@ -26,23 +28,58 @@ from respro.db.models import (
     ResistanceRule,
     ResistanceRuleSet,
 )
-from respro.db.phenotype_ranks import label_to_rank
-from respro.db.results import project_fingerprint, project_updated_at
-from respro.report._row_helpers import (
+from respro.db.results import (
+    project_fingerprint,
+    project_updated_at,
+    serialize_combined_states,
+    serialize_haplotype_links,
+)
+from respro.report.html.main import build_report_context, write_html
+from respro.report.plots import render_lollipop_plot_bytes
+from respro.report.row_helpers import (
     build_feature_display_names,
     build_reference_name_by_chrom,
+    collect_formula_hit_annotation_ids,
+    display_consequence,
+    format_aa_effects,
     nt_change_stored,
     nt_change_user,
     select_effect_as_resistant_rules,
+    variant_source_label,
 )
-from respro.report.html import (
-    build_report_context,
-    display_consequence,
-    write_html,
-)
-from respro.report.plots import render_lollipop_plot_bytes
 
 logger = logging.getLogger(__name__)
+
+_REPORT_DIR = Path(__file__).resolve().parent
+
+TSV_COLUMNS: tuple[str, ...] = (
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
+    'in_database', 'rule_type',
+    'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
+    'source', 'publications',
+)
+
+_TSV_PLACEHOLDER = 'n/a'
+_TSV_VCF_ONLY_COLUMNS: frozenset[str] = frozenset({'reference', 'nt_mut_user', 'depth', 'variant_source'})
+_TSV_CONDITIONAL_COLUMNS: frozenset[str] = frozenset({
+    'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score', 'publications',
+})
+_TSV_UNKNOWN_IS_ABSENT_COLUMNS: frozenset[str] = frozenset({'phenotype', 'clinical_phenotype'})
+
+_PDF_VALID_BADGE_CLASSES: frozenset[str] = frozenset({
+    'is-susceptible', 'is-potential', 'is-low-level',
+    'is-intermediate', 'is-resistant', 'is-unknown', 'is-contradictory',
+})
+_PDF_BADGE_BY_RANK: dict[int, str] = {
+    1: 'is-susceptible',
+    2: 'is-potential',
+    3: 'is-low-level',
+    4: 'is-intermediate',
+    5: 'is-resistant',
+    0: 'is-unknown',
+    -1: 'is-contradictory',
+}
 
 
 def export_results(
@@ -59,23 +96,7 @@ def export_results(
     similarity_moderate: int = 0,
     cfg: CliConfig = CLI_CONFIG,
 ) -> dict[str, Path]:
-    """
-    Write all report outputs to a directory and return a format-to-path mapping.
-
-    :param result: ProfilingResult object
-    :param output_dir: directory to write outputs to
-    :param features: optional list of features for plotting
-    :param rule_feature_names: optional set of rule-backed feature names for focused plotting
-    :param project_conn: optional project DB connection for drug overview in reports
-    :param rules: optional resistance rules for potential effects analysis
-    :param extra_export_formats: optional set of additional output formats ('json', 'pdf')
-    :param project_db_path: optional path to project database used for this run
-    :param output_html_path: explicit HTML output file path; HTML is written exactly to this
-        path and JSON files use its basename stem
-    :param similarity_high: BLOSUM62 score threshold for high similarity
-    :param similarity_moderate: BLOSUM62 score threshold for moderate similarity
-    :return: dict mapping format names to output file paths
-    """
+    """Write HTML and any requested extra outputs (JSON, PDF, TSV), returning format -> path."""
     if output_html_path is None:
         raise ValueError('output_html_path is required for export_results().')
 
@@ -90,18 +111,25 @@ def export_results(
         stem = html_path.name
 
     requested_formats = set(extra_export_formats or set())
-    unknown_formats = requested_formats - {'json', 'pdf', 'tsv'}
-    if unknown_formats:
+    if unknown_formats := requested_formats - {'json', 'pdf', 'tsv'}:
         raise ValueError(f'Unsupported export format(s): {", ".join(sorted(unknown_formats))}')
 
-    plot_svg_data: bytes | None = None
-    if features:
-        plot_svg_data = render_lollipop_plot_bytes(
-            result,
-            features,
-            fmt='svg',
-            rule_feature_names=rule_feature_names,
-        )
+    plot_svg_data = (
+        render_lollipop_plot_bytes(result, features, fmt='svg', rule_feature_names=rule_feature_names)
+        if features
+        else None
+    )
+
+    # Build report context once so HTML and PDF share identical data without recomputing.
+    report_context = build_report_context(
+        result,
+        project_conn=project_conn,
+        rules=rules,
+        features=features,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
+        cfg=cfg,
+    )
 
     write_html(
         result,
@@ -113,49 +141,38 @@ def export_results(
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
         cfg=cfg,
+        context=report_context,
     )
-
     outputs: dict[str, Path] = {'html': html_path}
 
-    context: dict | None = None
     if 'json' in requested_formats:
-        json_path = output_dir / f'{stem}.results.json'
-        write_json(
-            result,
-            json_path,
-            project_conn=project_conn,
-            project_db_path=project_db_path,
+        outputs['json'] = write_json(
+            result, output_dir / f'{stem}.results.json',
+            project_conn=project_conn, project_db_path=project_db_path,
         )
-        outputs['json'] = json_path
 
     if 'pdf' in requested_formats:
-        pdf_path = output_dir / f'{stem}.report.pdf'
-        write_pdf(
+        outputs['pdf'] = write_pdf(
             result,
-            pdf_path,
+            output_dir / f'{stem}.report.pdf',
             project_conn=project_conn,
             rules=rules,
-            context=context,
+            context=report_context,
             plot_svg_data=plot_svg_data,
             features=features,
             similarity_high=similarity_high,
             similarity_moderate=similarity_moderate,
+            cfg=cfg,
         )
-        outputs['pdf'] = pdf_path
 
     if 'tsv' in requested_formats:
-        tsv_path = output_dir / f'{stem}.results.tsv'
-        # Forward display names + the chrom->reference map so the TSV gene column
-        # matches the HTML Database Hits table (FeatureRecord.display_name) and the
-        # reference column is sourced from the same map as the HTML/JSON paths.
-        write_tsv(
+        outputs['tsv'] = write_tsv(
             result,
-            tsv_path,
+            output_dir / f'{stem}.results.tsv',
             project_conn=project_conn,
             display_names=build_feature_display_names(features),
             reference_name_by_chrom=build_reference_name_by_chrom(result),
         )
-        outputs['tsv'] = tsv_path
 
     logger.info('Exported report to %s', html_path)
     return outputs
@@ -167,16 +184,8 @@ def write_json(
     project_conn: sqlite3.Connection | None = None,
     project_db_path: Path | None = None,
 ) -> Path:
-    """Write one-run JSON with the same information model as results.db rows."""
-    # Map chrom (== ReferenceGroup.query_name, unique per ReferenceGroup) -> reference_name
-    # so per-row reference_name can be serialised (mirrors save_run). Keying by chrom (not
-    # feature_name) is unambiguous even when two references share a feature name.
-    reference_name_by_chrom: dict[str, str] = {
-        rg.query_name: rg.reference_name for rg in result.references
-    }
-
-    def _reference_name_for_chrom(chrom: str) -> str:
-        return reference_name_by_chrom.get(chrom, '')
+    """Write a single-run JSON document mirroring the ``results.db`` schema."""
+    ref_by_chrom = build_reference_name_by_chrom(result)
 
     run_payload = {
         'project_name': result.project_name,
@@ -193,12 +202,13 @@ def write_json(
         'status': 'complete',
         'created_at': result.run_timestamp,
         'is_fasta_mode': int(result.is_fasta_mode),
+        'coverage_assessed': int(result.coverage_assessed),
     }
 
     variant_rows = []
     for ann in result.annotations:
         v = ann.variant
-        variant_rows.append({
+        row = {
             'id': None,
             'chrom': v.chrom,
             'pos': v.pos,
@@ -207,7 +217,7 @@ def write_json(
             'allele_freq': v.allele_freq,
             'depth': v.depth,
             'feature_name': ann.feature_name,
-            'reference_name': _reference_name_for_chrom(v.chrom),
+            'reference_name': ref_by_chrom.get(v.chrom, ''),
             'codon_pos': ann.codon_pos,
             'ref_codon': ann.ref_codon,
             'alt_codon': ann.alt_codon,
@@ -216,50 +226,41 @@ def write_json(
             'consequence': ann.consequence,
             'af_bin': ann.af_bin,
             'rule_match': int(ann.is_resistance_hit),
-            'drug_hits': json.dumps(ann.drug_hits_json()),
+            'drug_hits': json.dumps(ann.drug_hits_json(), sort_keys=True),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
             'single_exchange_aa_freq': ann.single_exchange_aa_freq,
-            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
-            'rule_effect_alt': json.dumps(ann.rule_effect_alt),
+            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq, sort_keys=True),
+            'rule_effect_alt': json.dumps(ann.rule_effect_alt, sort_keys=True),
             'freq_method': ann.freq_method,
-            'combined_states': json.dumps([
-                {
-                    'alt_codon': s.alt_codon,
-                    'alt_aa': s.alt_aa,
-                    'lower': s.lower,
-                    'upper': s.upper,
-                    'forced_fraction': s.forced_fraction,
-                    'accepted': s.accepted,
-                    'member_indices': list(s.member_indices),
-                }
-                for s in ann.combined_states
-            ]),
-        })
+            'haplotype_links': serialize_haplotype_links(v.haplotype_links),
+            'combined_states': serialize_combined_states(ann.combined_states),
+        }
+        if not result.is_fasta_mode:
+            row['variant_source'] = v.source
+        variant_rows.append(row)
 
     coverage_rows = [
         {
             'id': None,
             'feature_name': gap.feature_name,
-            'reference_name': _reference_name_for_chrom(gap.chrom),
+            'reference_name': ref_by_chrom.get(gap.chrom, ''),
             'chrom': gap.chrom,
             'codon_start': gap.codon_start,
             'codon_end': gap.codon_end,
         }
         for gap in result.coverage_gaps
     ]
-
-    combo_rows = []
-    for hit in result.formula_hits:
-        hit_chrom = ''
-        if hit.matched_variants:
-            hit_chrom = hit.matched_variants[0].variant.chrom
-        combo_rows.append({
+    combo_rows = [
+        {
             'id': None,
-            'reference_name': _reference_name_for_chrom(hit_chrom),
-            'hit_json': json.dumps(hit.to_dict()),
-        })
-
+            'reference_name': ref_by_chrom.get(
+                hit.matched_variants[0].variant.chrom if hit.matched_variants else '', ''
+            ),
+            'hit_json': json.dumps(hit.to_dict(), sort_keys=True),
+        }
+        for hit in result.formula_hits
+    ]
     classification_rows = [
         {
             'id': row.get('id'),
@@ -274,13 +275,6 @@ def write_json(
         }
         for row in result.sample_classifications
     ]
-
-    # Serialise the per-reference groups so regenerate --json can reconstruct
-    # multiple ReferenceGroups without re-querying the project DB for reference names.
-    # ``profiled_feature_names`` persists the set of feature names that aligned to
-    # the query for this reference; regenerate uses it to pre-populate the summary
-    # drug interpretation table's in-scope drug set (including zero-hit/susceptible
-    # drugs) without relying on the project DB feature-mapping cache.
     references_payload = [
         {
             'reference_name': rg.reference_name,
@@ -288,9 +282,7 @@ def write_json(
             'organism': rg.organism,
             'reference_length_nt': rg.reference_length_nt,
             'query_name': rg.query_name,
-            'profiled_feature_names': sorted(
-                {m.feature.name for m in rg.feature_matches}
-            ),
+            'profiled_feature_names': sorted({m.feature.name for m in rg.feature_matches}),
         }
         for rg in result.references
     ]
@@ -303,192 +295,86 @@ def write_json(
         'sample_classification': classification_rows,
         'references': references_payload,
     }
-
     output_path = Path(output_path)
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
     logger.info('JSON report written to %s', output_path)
     return output_path
 
 
-# Canonical column order for the TSV results export. One row is emitted per
-# (annotated variant × matched rule); non-hit variants also appear with empty
-# rule columns. See write_tsv for the row-emission rules.
-TSV_COLUMNS: tuple[str, ...] = (
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
-    'aa_frequency', 'depth', 'consequence', 'aa_effects',
-    'in_database', 'rule_type',
-    'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'source', 'publications',
-)
-
-# Placeholder for empty categorical rule columns; numeric metric columns stay
-# empty so downstream parsers can treat them as missing.
-_TSV_PLACEHOLDER = 'n/a'
-
-# Columns only meaningful in VCF mode: ``reference`` is the matched internal
-# reference name (useful for multi-species VCF runs), ``nt_mut_user`` is the
-# nucleotide change on the user-supplied reference (VCF coords before remap),
-# and ``depth`` is read depth from sequencing reads. In FASTA mode (consensus
-# input, no reads, single reference) none of these carries useful information,
-# so they are omitted entirely — mirroring the HTML's
-# ``has_user_ref_column`` (= ``not is_fasta_mode``) and the multi-species
-# Reference column gate.
-_TSV_VCF_ONLY_COLUMNS: frozenset[str] = frozenset({'reference', 'nt_mut_user', 'depth'})
-
-# Rule-derived columns that are only emitted when at least one row carries a
-# real value for them, mirroring the HTML Database Hits table's has_*_metrics
-# flags (a column is displayed only when some row has a non-empty value for it).
-# Structural per-variant columns (reference, gene, nt_mut, ...) are always kept
-# (subject to the VCF-only drop above). phenotype and clinical_phenotype are
-# independent here (the HTML gates them via separate has_phenotype_metrics /
-# has_clinical_phenotype_metrics flags), so each is dropped on its own when no
-# row carries a real value for it.
-_TSV_CONDITIONAL_COLUMNS: frozenset[str] = frozenset({
-    'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'publications',
-})
-
-# Fields whose ``unknown`` value is treated as absent (mirrors _build_rule_metrics,
-# which only emits a Phenotype/Clinical phenotype chip for non-unknown values).
-_TSV_UNKNOWN_IS_ABSENT_COLUMNS: frozenset[str] = frozenset({'phenotype', 'clinical_phenotype'})
-
-
 def _is_real_tsv_value(column: str, value: str) -> bool:
-    """Return whether a cell carries a real (displayable) value for its column.
-
-    A value is real when it is non-empty and not the placeholder em-dash; for the
-    phenotype fields an ``unknown`` value is also treated as absent (mirrors
-    ``_build_rule_metrics`` which only emits a Phenotype/Clinical phenotype chip
-    for non-unknown values).
-    """
+    """Return True when a TSV cell carries a non-placeholder displayable value."""
     if not value or value == _TSV_PLACEHOLDER:
         return False
-    if column in _TSV_UNKNOWN_IS_ABSENT_COLUMNS and value.lower() == 'unknown':
-        return False
-    return True
+    return not (column in _TSV_UNKNOWN_IS_ABSENT_COLUMNS and value.lower() == 'unknown')
 
 
 def _present_tsv_columns(rows: list[dict[str, str]], *, is_fasta_mode: bool = False) -> tuple[str, ...]:
-    """Return the column tuple to emit, dropping conditional columns with no real value.
-
-    Structural columns are always kept (subject to the VCF-only drop in FASTA
-    mode). Each conditional column is kept independently when at least one row
-    has a real value for it, mirroring the HTML Database Hits table's independent
-    ``has_*_metrics`` flags. In FASTA mode the VCF-only columns
-    (``reference``, ``nt_mut_user``, ``depth``) are omitted entirely.
-    """
-    dropped = set(_TSV_CONDITIONAL_COLUMNS)
-    if is_fasta_mode:
-        dropped |= _TSV_VCF_ONLY_COLUMNS
-    present: set[str] = set()
-    for row in rows:
-        for column in _TSV_CONDITIONAL_COLUMNS:
-            if column in present:
-                continue
-            if _is_real_tsv_value(column, row.get(column, '')):
-                present.add(column)
-    return tuple(c for c in TSV_COLUMNS if c not in dropped or c in present)
+    """Return TSV columns to emit, omitting empty conditional columns and VCF-only columns in FASTA mode."""
+    dropped = set(_TSV_CONDITIONAL_COLUMNS) | (_TSV_VCF_ONLY_COLUMNS if is_fasta_mode else set())
+    present = {
+        column
+        for row in rows
+        for column in _TSV_CONDITIONAL_COLUMNS
+        if _is_real_tsv_value(column, row.get(column, ''))
+    }
+    return tuple(col for col in TSV_COLUMNS if col not in dropped or col in present)
 
 
 def _format_publications_tsv(publications: list[Publication]) -> str:
-    """Join publication identifiers with ';', preferring DOI then PubMed id."""
-    ids: list[str] = []
-    for pub in publications:
-        if pub.doi:
-            ids.append(pub.doi)
-        elif pub.pubmed_id:
-            ids.append(pub.pubmed_id)
-    return '|'.join(ids)
+    """Join publication identifiers with ``|``, preferring DOI then PubMed ID."""
+    return '|'.join(pub.doi or pub.pubmed_id for pub in publications if pub.doi or pub.pubmed_id)
 
 
-def _aa_effects(ann: AnnotatedVariant) -> str:
-    """Format all amino-acid effects (single + combined) for TSV/JSON export.
-
-    Each effect is rendered as ``<ref><pos><alt> (<lower>)`` and joined with
-    ``; ``. The single-exchange effect is listed first (when its amino-acid
-    frequency ``single_exchange_aa_freq`` is > 0), followed by every accepted
-    combined-state effect. For a single-SNP variant this is just the single
-    effect at the variant frequency. For a combined member whose single is
-    Fréchet-impossible (lower=0) only the combined states are shown. A combined
-    state that produces the same amino acid as the single-exchange is omitted to
-    avoid duplicate entries.
-    """
-    parts: list[str] = []
-    single_label = ''
-    freq_tag = 'observed' if ann.freq_method == 'observed' else 'lower bound'
-    # Gate on the *rounded* value: a real but sub-precision frequency
-    # (e.g. 1 molecule in ~6000 -> 0.000165) must not be rendered as
-    # ``... | 0.0 | ...``. The raw value is still used for rule matching.
-    if ann.alt_aa and round(ann.single_exchange_aa_freq, 3) > 0:
-        single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-        parts.append(f'{single_label} | {round(ann.single_exchange_aa_freq, 3)} | {freq_tag}')
-    for state in ann.combined_states:
-        if not state.accepted:
-            continue
-        if round(state.lower, 3) <= 0:
-            continue
-        combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa}'
-        if combined_label == single_label:
-            continue
-        parts.append(f'{combined_label} | {round(state.lower, 3)} | {freq_tag}')
-    return '; '.join(parts)
-
-
-def _build_strand_by_feature(result: ProfilingResult) -> dict[str, str]:
-    """Map feature_name -> strand from all ReferenceGroup features."""
-    strand_by_feature: dict[str, str] = {}
+def _build_strand_by_feature(result: ProfilingResult) -> dict[tuple[str, str], str]:
+    """Map ``(chrom, feature_name)`` (and fallback ``('', feature_name)``) to strand."""
+    strand_by_key: dict[tuple[str, str], str] = {}
     for rg in result.references:
         for feature in rg.features:
-            strand_by_feature.setdefault(feature.name, feature.strand)
-    return strand_by_feature
+            if rg.query_name:
+                strand_by_key.setdefault((rg.query_name, feature.name), feature.strand)
+            strand_by_key.setdefault(('', feature.name), feature.strand)
+    return strand_by_key
 
 
-def _effect_as_resistant_tsv_rows(
-    result: ProfilingResult,
-    project_conn: sqlite3.Connection | None,
+def _lookup_strand(strand_by_key: dict[tuple[str, str], str], ann: AnnotatedVariant) -> str:
+    return strand_by_key.get((ann.variant.chrom, ann.feature_name)) or strand_by_key.get(('', ann.feature_name), '')
+
+
+def _base_tsv_row(
+    ann: AnnotatedVariant,
     ref_by_chrom: dict[str, str],
-    strand_by_feature: dict[str, str],
-    display_names: dict[str, str] | None = None,
-) -> list[dict[str, str]]:
-    """Build ``rule_type=single`` rows for metadata-only effect-as-resistant hits.
+    strand_by_key: dict[tuple[str, str], str],
+    display_names: dict[str, str],
+) -> dict[str, str]:
+    """Build the per-annotation structural columns shared by all TSV row types."""
+    return {
+        'reference': ref_by_chrom.get(ann.variant.chrom, ''),
+        'gene': display_names.get(ann.feature_name, ann.feature_name),
+        'nt_mut': nt_change_stored(ann),
+        'nt_mut_user': nt_change_user(ann),
+        'strand': _lookup_strand(strand_by_key, ann),
+        'variant_source': variant_source_label(ann),
+        'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
+        'depth': str(ann.variant.depth),
+        'consequence': display_consequence(ann),
+        'aa_effects': format_aa_effects(ann),
+    }
 
-    Rule selection is shared via :func:`select_effect_as_resistant_rules` so the
-    HTML and TSV paths cannot drift apart; this function only shapes the selected
-    matches into flat TSV rows (drug, phenotype='resistant', empty numeric
-    metrics). Returns an empty list when no project DB or no matching rules.
-    """
-    matches = select_effect_as_resistant_rules(result, project_conn)
-    if not matches:
-        return []
 
-    rows: list[dict[str, str]] = []
-    for match in matches:
-        ann = match.annotation
-        rule = match.rule
-        drug_name = (rule.get('drug') or '').strip()
-        gene = (display_names or {}).get(ann.feature_name, ann.feature_name)
-        rows.append({
-            'reference': ref_by_chrom.get(ann.variant.chrom, ''),
-            'gene': gene,
-            'nt_mut': nt_change_stored(ann),
-            'nt_mut_user': nt_change_user(ann),
-            'strand': strand_by_feature.get(ann.feature_name, ''),
-            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
-            'depth': str(ann.variant.depth),
-            'consequence': display_consequence(ann),
-            'aa_effects': _aa_effects(ann),
-            'in_database': 'yes',
-            'rule_type': 'single',
-            'drug': drug_name,
-            'phenotype': 'resistant',
-            'clinical_phenotype': _TSV_PLACEHOLDER,
-            'ic50': '',
-            'fold_ic50': '',
-            'score': '',
-            'source': 'Metadata algorithm',
-            'publications': '',
-        })
-    return rows
+def _empty_rule_fields(in_database: str, rule_type: str) -> dict[str, str]:
+    """Return placeholder rule columns for non-hit or formula-member rows."""
+    return {
+        'in_database': in_database,
+        'rule_type': rule_type,
+        'drug': _TSV_PLACEHOLDER,
+        'phenotype': _TSV_PLACEHOLDER,
+        'clinical_phenotype': _TSV_PLACEHOLDER,
+        'ic50': '',
+        'fold_ic50': '',
+        'score': '',
+        'source': _TSV_PLACEHOLDER,
+        'publications': '',
+    }
 
 
 def write_tsv(
@@ -498,137 +384,54 @@ def write_tsv(
     display_names: dict[str, str] | None = None,
     reference_name_by_chrom: dict[str, str] | None = None,
 ) -> Path:
-    """
-    Write a denormalized TSV of all annotated variants and their matched rules.
-
-    One row is emitted per (annotated variant × matched rule), plus one row per
-    non-hit variant. Single rules produce one row each (a variant matching two
-    drugs yields two rows). Each fired formula (combinatorial) rule produces one
-    combined row with its member mutations joined by ';'; member-only variants
-    also get a ``formula-member`` row. Effect-as-resistant synthetic rows are
-    included as ``single`` rows when a project DB supplies the algorithm config.
-
-    :param result: profiling result
-    :param output_path: path to write the TSV file to
-    :param project_conn: optional project DB connection for effect-as-resistant rows
-    :param display_names: optional feature display-name overrides
-    :param reference_name_by_chrom: optional chrom -> reference_name map; built from
-        ``result.references`` when not supplied
-    :return: path to the written TSV file
-    """
+    """Write a denormalized TSV of all CDS annotations and their matched resistance rules."""
+    names = display_names or {}
     ref_by_chrom = reference_name_by_chrom or build_reference_name_by_chrom(result)
     strand_by_feature = _build_strand_by_feature(result)
-
-    # Annotations participating in fired formula hits (by identity) so member-only
-    # variants can be flagged as in_database=yes with rule_type=formula-member.
-    formula_member_ann_ids: set[int] = set()
-    for hit in result.formula_hits:
-        for ann in hit.matched_variants:
-            formula_member_ann_ids.add(id(ann))
+    formula_member_ids = collect_formula_hit_annotation_ids(result)
 
     rows: list[dict[str, str]] = []
-
-    def _gene(ann: AnnotatedVariant) -> str:
-        return (display_names or {}).get(ann.feature_name, ann.feature_name)
-
-    def _reference(ann: AnnotatedVariant) -> str:
-        return ref_by_chrom.get(ann.variant.chrom, '')
-
-    # Per-annotation shared columns, with per-rule fields filled by the caller.
-    def _base_row(ann: AnnotatedVariant) -> dict[str, str]:
-        return {
-            'reference': _reference(ann),
-            'gene': _gene(ann),
-            'nt_mut': nt_change_stored(ann),
-            'nt_mut_user': nt_change_user(ann),
-            'strand': strand_by_feature.get(ann.feature_name, ''),
-            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
-            'depth': str(ann.variant.depth),
-            'consequence': display_consequence(ann),
-            'aa_effects': _aa_effects(ann),
-        }
-
-    def _rule_row(
-        ann: AnnotatedVariant, rule: ResistanceRule
-    ) -> dict[str, str]:
-        row = _base_row(ann)
-        row.update({
-            'in_database': 'yes',
-            'rule_type': 'single',
-            'drug': rule.drug_name,
-            'phenotype': rule.phenotype,
-            'clinical_phenotype': rule.clinical_phenotype,
-            'ic50': rule.ic50,
-            'fold_ic50': rule.fold_ic50,
-            'score': rule.score,
-            'source': rule.source,
-            'publications': _format_publications_tsv(rule.publications),
-        })
-        return row
-
     for ann in result.cds_annotations:
+        base = _base_tsv_row(ann, ref_by_chrom, strand_by_feature, names)
         matches = ann.non_formula_component_rule_matches
         if matches:
             for rule in matches:
-                rows.append(_rule_row(ann, rule))
-        elif id(ann) in formula_member_ann_ids:
-            # Member-only variant (no single rule of its own) but part of a fired formula.
-            row = _base_row(ann)
-            row.update({
-                'in_database': 'yes',
-                'rule_type': 'formula-member',
-                'drug': _TSV_PLACEHOLDER,
-                'phenotype': _TSV_PLACEHOLDER,
-                'clinical_phenotype': _TSV_PLACEHOLDER,
-                'ic50': '',
-                'fold_ic50': '',
-                'score': '',
-                'source': _TSV_PLACEHOLDER,
-                'publications': '',
-            })
-            rows.append(row)
+                eff_af = ann.rule_effect_aa_freq.get(rule.id, ann.variant.allele_freq)
+                rows.append({
+                    **base,
+                    'aa_frequency': repr(round(eff_af, 3)),
+                    'in_database': 'yes',
+                    'rule_type': 'single',
+                    'drug': rule.drug_name,
+                    'phenotype': rule.phenotype,
+                    'clinical_phenotype': rule.clinical_phenotype,
+                    'ic50': rule.ic50,
+                    'fold_ic50': rule.fold_ic50,
+                    'score': rule.score,
+                    'source': rule.source,
+                    'publications': _format_publications_tsv(rule.publications),
+                })
+        elif id(ann) in formula_member_ids:
+            rows.append({**base, **_empty_rule_fields('yes', 'formula-member')})
         else:
-            # Non-hit variant: rule columns empty/placeholder.
-            row = _base_row(ann)
-            row.update({
-                'in_database': 'no',
-                'rule_type': _TSV_PLACEHOLDER,
-                'drug': _TSV_PLACEHOLDER,
-                'phenotype': _TSV_PLACEHOLDER,
-                'clinical_phenotype': _TSV_PLACEHOLDER,
-                'ic50': '',
-                'fold_ic50': '',
-                'score': '',
-                'source': _TSV_PLACEHOLDER,
-                'publications': '',
-            })
-            rows.append(row)
+            rows.append({**base, **_empty_rule_fields('no', _TSV_PLACEHOLDER)})
 
-    # One combined row per fired formula rule, members joined with ';'.
     for hit in result.formula_hits:
         rs: ResistanceRuleSet = hit.rule_set
         members = hit.matched_variants
         if not members:
             continue
-        genes = ';'.join(_gene(a) for a in members)
-        nt_muts = ';'.join(nt_change_stored(a) for a in members)
-        nt_users = ';'.join(nt_change_user(a) for a in members)
-        aa_effects = ';'.join(_aa_effects(a) for a in members)
-        strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
-        first_chrom = members[0].variant.chrom
-        # The hit frequency of a formula row is the Fréchet lower bound: the
-        # guaranteed minimum co-occurrence frequency of the combination, not
-        # the individual members' variant allele frequencies.
         rows.append({
-            'reference': ref_by_chrom.get(first_chrom, ''),
-            'gene': genes,
-            'nt_mut': nt_muts,
-            'nt_mut_user': nt_users,
-            'strand': strands,
+            'reference': ref_by_chrom.get(members[0].variant.chrom, ''),
+            'gene': ';'.join(names.get(a.feature_name, a.feature_name) for a in members),
+            'nt_mut': ';'.join(nt_change_stored(a) for a in members),
+            'nt_mut_user': ';'.join(nt_change_user(a) for a in members),
+            'strand': ';'.join(_lookup_strand(strand_by_feature, a) for a in members),
+            'variant_source': ';'.join(variant_source_label(a) for a in members),
             'aa_frequency': repr(round(hit.frechet_lower, 3)),
-            'depth': '',  # combined row spans multiple variants; no single depth
-            'consequence': ';'.join(a.consequence for a in members),
-            'aa_effects': aa_effects,
+            'depth': '',
+            'consequence': ';'.join(display_consequence(a) for a in members),
+            'aa_effects': ';'.join(format_aa_effects(a) for a in members),
             'in_database': 'yes',
             'rule_type': 'formula',
             'drug': rs.drug_name,
@@ -641,27 +444,44 @@ def write_tsv(
             'publications': _format_publications_tsv(rs.publications),
         })
 
-    # Metadata-only effect-as-resistant synthetic rows (rule_type=single), emitted when
-    # a project DB supplies the effect_as_resistant algorithm config.
-    rows.extend(_effect_as_resistant_tsv_rows(
-        result, project_conn, ref_by_chrom, strand_by_feature, display_names,
-    ))
+    for match in select_effect_as_resistant_rules(result, project_conn):
+        base = _base_tsv_row(match.annotation, ref_by_chrom, strand_by_feature, names)
+        rows.append({
+            **base,
+            'in_database': 'yes',
+            'rule_type': 'single',
+            'drug': (match.rule.get('drug') or '').strip(),
+            'phenotype': 'resistant',
+            'clinical_phenotype': _TSV_PLACEHOLDER,
+            'ic50': '',
+            'fold_ic50': '',
+            'score': '',
+            'source': 'Metadata algorithm',
+            'publications': '',
+        })
 
     output_path = Path(output_path)
-    # Drop rule-derived columns that carry no real value in any row, mirroring the
-    # HTML Database Hits table's has_*_metrics flags. In FASTA mode also drop the
-    # VCF-only columns (reference, nt_mut_user, depth).
     fieldnames = _present_tsv_columns(rows, is_fasta_mode=result.is_fasta_mode)
     with output_path.open('w', encoding='utf-8', newline='') as fh:
         writer = csv.DictWriter(
-            fh, fieldnames=fieldnames, delimiter='\t',
-            lineterminator='\n', extrasaction='ignore',
+            fh, fieldnames=fieldnames, delimiter='\t', lineterminator='\n', extrasaction='ignore',
         )
         writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+        writer.writerows(rows)
     logger.info('TSV report written to %s', output_path)
     return output_path
+
+
+@lru_cache(maxsize=1)
+def _load_pdf_template_text() -> str:
+    """Load the PDF Jinja template from package resources."""
+    return (_REPORT_DIR / 'templates' / 'report_pdf.j2').read_text(encoding='utf-8')
+
+
+@lru_cache(maxsize=1)
+def _load_pdf_css_text() -> str:
+    """Load the PDF stylesheet from package resources."""
+    return (_REPORT_DIR / 'static' / 'report_pdf.css').read_text(encoding='utf-8')
 
 
 def write_pdf(
@@ -674,19 +494,10 @@ def write_pdf(
     features: list[FeatureRecord] | None = None,
     similarity_high: int = 1,
     similarity_moderate: int = 0,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> Path:
-    """
-    Render and write a dedicated PDF report to a file.
-
-    :param result: ProfilingResult object
-    :param output_path: path to write PDF file to
-    :param project_conn: optional project DB connection for report context
-    :param rules: optional list of resistance rules for potential effects analysis
-    :param context: optional prebuilt report context
-    :param plot_svg_data: optional SVG bytes for the mutation overview plot
-    :param features: optional list of features for context
-    :return: path to written PDF file
-    """
+    """Render and write a summary PDF report via WeasyPrint."""
+    del plot_svg_data
     if HTML is None:
         raise ValueError('PDF export requested but WeasyPrint is not installed.')
 
@@ -698,36 +509,17 @@ def write_pdf(
         features=features,
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
+        cfg=cfg,
     )
-    # autoescape=True: PDF HTML is also user-facing output built from user-controlled
-    # sample/filename values; the | safe block (context.summary.narrative) already escapes.
     env = Environment(loader=BaseLoader(), autoescape=True)
-    template = env.from_string(_load_pdf_template_text())
-
-    pdf_html = template.render(
+    pdf_html = env.from_string(_load_pdf_template_text()).render(
         context=report_context,
         print_css=_load_pdf_css_text(),
     )
-
     output_path = Path(output_path)
-    HTML(
-        string=pdf_html,
-        base_url=str(Path(__file__).resolve().parent),
-    ).write_pdf(str(output_path))
+    HTML(string=pdf_html, base_url=str(_REPORT_DIR)).write_pdf(str(output_path))
     logger.info('PDF report written to %s', output_path)
     return output_path
-
-
-def _load_pdf_template_text() -> str:
-    """Load the PDF-specific Jinja template text from package resources."""
-    template_path = Path(__file__).resolve().parent / 'templates' / 'report_pdf.j2'
-    return template_path.read_text(encoding='utf-8')
-
-
-def _load_pdf_css_text() -> str:
-    """Load the PDF-specific CSS text from package resources."""
-    css_path = Path(__file__).resolve().parent / 'static' / 'report_pdf.css'
-    return css_path.read_text(encoding='utf-8')
 
 
 def _build_pdf_summary_context(
@@ -738,17 +530,9 @@ def _build_pdf_summary_context(
     features: list[FeatureRecord] | None,
     similarity_high: int = 1,
     similarity_moderate: int = 0,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
-    """
-    Build PDF context from the existing HTML report context.
-
-    :param result: profiling result
-    :param context: optional full HTML context
-    :param project_conn: optional project DB connection
-    :param rules: optional rules for compatibility with existing call sites
-    :param features: optional feature records for compatibility with existing call sites
-    :return: summary-focused context for the PDF template
-    """
+    """Project the full report context into the summary-focused PDF layout."""
     if context is None:
         context = build_report_context(
             result,
@@ -757,21 +541,17 @@ def _build_pdf_summary_context(
             features=features,
             similarity_high=similarity_high,
             similarity_moderate=similarity_moderate,
+            cfg=cfg,
         )
 
     summary = context.get('summary', {})
     header = context.get('header', {})
-    sequence_items = _build_pdf_sequence_items(summary.get('sequence_assessment', {}))
-    database_items = _build_pdf_database_items(summary.get('db_hits_summary', {}))
     drug_table = summary.get('drug_table', {})
     drug_rows = _build_pdf_drug_rows(drug_table)
-    has_drug_class = any((row.get('drug_class', '') or '').strip() for row in drug_rows)
-    has_assessment = bool(drug_table.get('has_assessment'))
-    has_final_assessment = bool(drug_table.get('has_final_assessment'))
-    method_labels = drug_table.get('method_labels', [])
 
     return {
         'title': context.get('title', 'Resistance profile summary'),
+        'is_multi_species': bool(context.get('is_multi_species')),
         'header': {
             'title': header.get('title', 'Resistance profile summary'),
             'meta_primary': header.get('meta_primary', ''),
@@ -781,173 +561,90 @@ def _build_pdf_summary_context(
         'summary': {
             'sequence_assessment': summary.get('sequence_assessment', {}),
             'db_hits_summary': summary.get('db_hits_summary', {}),
-            'sequence_items': sequence_items,
-            'database_items': database_items,
+            'sequence_items': _build_pdf_sequence_items(summary.get('sequence_assessment', {})),
+            'database_items': _build_pdf_database_items(summary.get('db_hits_summary', {})),
             'mutation_profile': summary.get('mutation_profile', []),
             'has_coverage': bool(summary.get('has_coverage')),
+            'coverage_not_assessed': bool(summary.get('coverage_not_assessed')),
+            'has_narrative': bool(summary.get('has_narrative')),
             'drug_rows': drug_rows,
-            'has_drug_class': has_drug_class,
-            'has_assessment': has_assessment,
-            'has_final_assessment': has_final_assessment,
-            'method_labels': method_labels,
+            'has_drug_class': any((row.get('drug_class', '') or '').strip() for row in drug_rows),
+            'has_assessment': bool(drug_table.get('has_assessment')),
+            'has_final_assessment': bool(drug_table.get('has_final_assessment')),
+            'method_labels': drug_table.get('method_labels', []),
             'narrative': _condense_pdf_narrative(summary.get('narrative', '')),
         },
     }
 
 
 def _build_pdf_sequence_items(sequence_assessment: dict) -> list[dict]:
-    """
-    Build compact sequence summary items for the PDF layout.
-
-    :param sequence_assessment: sequence assessment from summary context
-    :return: ordered list of sequence summary key/value rows
-    """
-    total = int(sequence_assessment.get('total_mutations', 0) or 0)
-    non_synonymous = int(sequence_assessment.get('non_synonymous_count', 0) or 0)
-    high_impact = int(sequence_assessment.get('high_impact_count', 0) or 0)
-    high_impact_types = (sequence_assessment.get('high_impact_types', '') or '').strip()
-
+    """Build compact sequence-summary key/value rows for the PDF layout."""
     items = [
-        {'label': 'Total mutations', 'value': str(total)},
-        {'label': 'Non-synonymous variants', 'value': str(non_synonymous)},
-        {'label': 'High-impact variants', 'value': str(high_impact)},
+        {'label': 'Total mutations', 'value': str(int(sequence_assessment.get('total_mutations', 0) or 0))},
+        {'label': 'Non-synonymous variants', 'value': str(int(sequence_assessment.get('non_synonymous_count', 0) or 0))},
+        {'label': 'High-impact variants', 'value': str(int(sequence_assessment.get('high_impact_count', 0) or 0))},
     ]
-    if high_impact_types:
+    if high_impact_types := (sequence_assessment.get('high_impact_types', '') or '').strip():
         items.append({'label': 'High-impact composition', 'value': high_impact_types})
     return items
 
 
 def _build_pdf_database_items(db_hits_summary: dict) -> list[dict]:
-    """
-    Build compact database-hit summary items for the PDF layout.
-
-    :param db_hits_summary: database hits summary from summary context
-    :return: ordered list of database summary key/value rows
-    """
-    total = int(db_hits_summary.get('total', 0) or 0)
-    single_rule = int(db_hits_summary.get('single_rule_hits', 0) or 0)
-    formula_rule = int(db_hits_summary.get('formula_rule_hits', 0) or 0)
-
+    """Build compact database-hit summary key/value rows for the PDF layout."""
     return [
-        {'label': 'Total database hits', 'value': str(total)},
-        {'label': 'Single-rule hits', 'value': str(single_rule)},
-        {'label': 'Formula-rule hits', 'value': str(formula_rule)},
+        {'label': 'Total database hits', 'value': str(int(db_hits_summary.get('total', 0) or 0))},
+        {'label': 'Single-rule hits', 'value': str(int(db_hits_summary.get('single_rule_hits', 0) or 0))},
+        {'label': 'Formula-rule hits', 'value': str(int(db_hits_summary.get('formula_rule_hits', 0) or 0))},
     ]
 
 
 def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
-    """
-    Build clinician-facing drug rows from the existing summary drug table.
-
-    :param drug_table: summary drug table context from HTML builder
-    :return: ordered rows with drug, count and assessment
-    """
-    flattened_rows: list[dict] = []
+    """Flatten grouped or ungrouped summary drug-table rows for the PDF table."""
     grouped_rows = drug_table.get('groups', {})
-
-    if grouped_rows:
-        for class_name, rows in grouped_rows.items():
-            for row in rows:
-                flattened_rows.append(
-                    {
-                        'drug_class': class_name or '',
-                        'name': row.get('name', ''),
-                        'assessment': row.get('assessment', ''),
-                        'assessment_badge_class': _normalize_assessment_badge_class(
-                            row.get('assessment_badge_class', ''),
-                            row.get('assessment', ''),
-                        ),
-                        'hit_count': int(row.get('hit_count', 0)),
-                        'method_assessments_by_method': {
-                            ma['method']: ma['assessment']
-                            for ma in row.get('method_assessments', [])
-                        },
-                        'method_badge_classes_by_method': {
-                            ma['method']: _normalize_assessment_badge_class(
-                                ma.get('assessment_badge_class', ''),
-                                ma.get('assessment', ''),
-                            )
-                            for ma in row.get('method_assessments', [])
-                        },
-                        'ic50_display': row.get('ic50_display', '—'),
-                        'fold_ic50_display': row.get('fold_ic50_display', '—'),
-                    }
+    source_pairs = (
+        [(class_name or '', row) for class_name, rows in grouped_rows.items() for row in rows]
+        if grouped_rows
+        else [('', row) for row in drug_table.get('rows', [])]
+    )
+    return [
+        {
+            'drug_class': drug_class,
+            'name': row.get('name', ''),
+            'assessment': row.get('assessment', ''),
+            'assessment_badge_class': _normalize_assessment_badge_class(
+                row.get('assessment_badge_class', ''), row.get('assessment', ''),
+            ),
+            'hit_count': int(row.get('hit_count', 0)),
+            'method_assessments_by_method': {
+                ma['method']: ma['assessment'] for ma in row.get('method_assessments', [])
+            },
+            'method_badge_classes_by_method': {
+                ma['method']: _normalize_assessment_badge_class(
+                    ma.get('assessment_badge_class', ''), ma.get('assessment', ''),
                 )
-    else:
-        for row in drug_table.get('rows', []):
-            flattened_rows.append(
-                {
-                    'drug_class': '',
-                    'name': row.get('name', ''),
-                    'assessment': row.get('assessment', ''),
-                    'assessment_badge_class': _normalize_assessment_badge_class(
-                        row.get('assessment_badge_class', ''),
-                        row.get('assessment', ''),
-                    ),
-                    'hit_count': int(row.get('hit_count', 0)),
-                    'method_assessments_by_method': {
-                        ma['method']: ma['assessment']
-                        for ma in row.get('method_assessments', [])
-                    },
-                    'method_badge_classes_by_method': {
-                        ma['method']: _normalize_assessment_badge_class(
-                            ma.get('assessment_badge_class', ''),
-                            ma.get('assessment', ''),
-                        )
-                        for ma in row.get('method_assessments', [])
-                    },
-                    'ic50_display': row.get('ic50_display', '—'),
-                    'fold_ic50_display': row.get('fold_ic50_display', '—'),
-                }
-            )
-    return flattened_rows
+                for ma in row.get('method_assessments', [])
+            },
+            'ic50_display': row.get('ic50_display', '—'),
+            'fold_ic50_display': row.get('fold_ic50_display', '—'),
+        }
+        for drug_class, row in source_pairs
+    ]
 
 
 def _normalize_assessment_badge_class(existing_class: str, assessment: str) -> str:
-    """Normalize assessment class names to the PDF CSS variant names.
-
-    Maps the HTML ``phenotype--<rank>`` badge class (or the assessment label
-    directly) to the PDF ``is-<rank>`` CSS variant via the rank vocabulary.
-    """
-    # Prefer the HTML badge class when it carries rank information.
-    normalized_class = (existing_class or '').strip().lower()
-    if normalized_class.startswith('phenotype--'):
-        rank_suffix = normalized_class.removeprefix('phenotype--')
-        pdf_class = f'is-{rank_suffix}'
-        if pdf_class in {
-            'is-susceptible', 'is-potential', 'is-low-level',
-            'is-intermediate', 'is-resistant', 'is-unknown', 'is-contradictory',
-        }:
+    """Convert an HTML ``phenotype--<rank>`` class or assessment label to a PDF ``is-<rank>`` class."""
+    normalized = (existing_class or '').strip().lower()
+    if normalized.startswith('phenotype--'):
+        pdf_class = f"is-{normalized.removeprefix('phenotype--')}"
+        if pdf_class in _PDF_VALID_BADGE_CLASSES:
             return pdf_class
-    # Fall back to inferring the rank from the assessment label.
-    return _assessment_label_to_class(assessment)
-
-
-def _assessment_label_to_class(assessment: str) -> str:
-    """Map an assessment label to a PDF CSS variant name via its inferred rank."""
     rank = label_to_rank((assessment or '').strip())
-    if rank is None:
-        return 'is-unknown'
-    return {
-        1: 'is-susceptible',
-        2: 'is-potential',
-        3: 'is-low-level',
-        4: 'is-intermediate',
-        5: 'is-resistant',
-        0: 'is-unknown',
-        -1: 'is-contradictory',
-    }.get(rank, 'is-unknown')
+    return _PDF_BADGE_BY_RANK.get(rank, 'is-unknown') if rank is not None else 'is-unknown'
 
 
 def _condense_pdf_narrative(narrative: str) -> str:
-    """
-    Remove detailed per-drug list sentences from the summary narrative for compact PDF output.
-
-    :param narrative: full narrative text from summary context
-    :return: condensed narrative text
-    """
-    text = str(narrative or '')
+    """Strip per-drug list sections from the HTML narrative for compact PDF output."""
+    text = str(narrative or '').split('<br><br>', 1)[0]
     text = re.sub(r'\s*List of drugs with[^.]*\.', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s*List of drugs without[^.]*\.', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s{2,}', ' ', text)
-    return text.strip()
+    return re.sub(r'\s{2,}', ' ', text).strip()

@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import pytest
 
-from respro.db._rules_formula import (
-    _canonicalize_formula_ast,
-    _formula_ast_to_string,
-    _formula_sort_key,
-    _parse_formula_expression,
-    _tokenize_formula_expression,
+from respro.core.formula import (
+    canonicalize_formula_ast as _canonicalize_formula_ast,
+)
+from respro.core.formula import (
+    formula_ast_to_string as _formula_ast_to_string,
+)
+from respro.core.formula import (
+    formula_sort_key as _formula_sort_key,
+)
+from respro.core.formula import (
+    parse_formula_expression as _parse_formula_expression,
+)
+from respro.core.formula import (
+    tokenize_formula_expression as _tokenize_formula_expression,
 )
 
 
@@ -414,3 +422,11 @@ class TestFormulaSortKey:
         a_key = _formula_sort_key(('ATOM', 'A'))
         b_key = _formula_sort_key(('ATOM', 'B'))
         assert a_key < b_key
+
+    def test_tokenize_preserves_operator_prefixed_identifiers(self):
+        """Identifiers like NOT-1 or OR.2 must stay single tokens."""
+        from respro.core.formula import tokenize_formula_expression
+
+        assert tokenize_formula_expression('NOT-1 AND (OR.2 OR A1)') == [
+            'NOT-1', 'AND', '(', 'OR.2', 'OR', 'A1', ')',
+        ]

@@ -13,15 +13,29 @@ Covers: respro/db/_rules_normalize.py
 
 from __future__ import annotations
 
-from respro.db._rules_normalize import (
-    _CONTRADICTORY_COMMENT,
-    _append_contradictory_comment,
-    _get_value,
-    _normalize_fold_ic50_from_row,
-    _normalize_ic50_from_row,
-    _normalize_score_from_row,
-    _parse_ic50_value,
-    _parse_single_ic50,
+from respro.db.rules.normalize import (
+    CONTRADICTORY_COMMENT as _CONTRADICTORY_COMMENT,
+)
+from respro.db.rules.normalize import (
+    append_contradictory_comment as _append_contradictory_comment,
+)
+from respro.db.rules.normalize import (
+    get_value as _get_value,
+)
+from respro.db.rules.normalize import (
+    normalize_fold_ic50_from_row as _normalize_fold_ic50_from_row,
+)
+from respro.db.rules.normalize import (
+    normalize_ic50_from_row as _normalize_ic50_from_row,
+)
+from respro.db.rules.normalize import (
+    normalize_score_from_row as _normalize_score_from_row,
+)
+from respro.db.rules.normalize import (
+    parse_ic50_value as _parse_ic50_value,
+)
+from respro.db.rules.normalize import (
+    parse_single_ic50 as _parse_single_ic50,
 )
 
 

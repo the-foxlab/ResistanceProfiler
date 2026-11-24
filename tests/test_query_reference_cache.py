@@ -10,7 +10,6 @@ timestamp is written, and legacy databases are purged of those columns.
 from __future__ import annotations
 
 import sqlite3
-import uuid
 from pathlib import Path
 
 import pytest
@@ -55,56 +54,6 @@ def _make_match(feature_id: int = 1) -> FeatureMatch:
     )
 
 
-def _make_legacy_db(db_path: Path) -> None:
-    """Create a project DB carrying the pre-migration query_reference shape.
-
-    Starts from the current schema and re-adds the legacy columns with data,
-    which is equivalent to a database created by an older release.
-    """
-    conn = create_schema(db_path)
-    conn.execute(
-        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
-        ('Legacy Project', 3, str(uuid.uuid4())),
-    )
-    conn.execute(
-        'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
-        (1, 'tiny_ref', len(QUERY_SEQ)),
-    )
-    conn.execute(
-        'INSERT INTO feature (reference_id, name, start, end, strand, has_rules) '
-        'VALUES (?, ?, ?, ?, ?, 1)',
-        (1, 'gag', 0, len(QUERY_SEQ), '+'),
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN name TEXT NOT NULL DEFAULT ''"
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN sequence TEXT NOT NULL DEFAULT ''"
-    )
-    conn.execute(
-        'ALTER TABLE query_reference ADD COLUMN length INTEGER NOT NULL DEFAULT 0'
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN created_at TEXT NOT NULL DEFAULT ''"
-    )
-    checksum = sequence_checksum(QUERY_SEQ)
-    conn.execute(
-        'INSERT INTO query_reference (checksum, name, sequence, length) VALUES (?, ?, ?, ?)',
-        (checksum, 'patient_42|sample_1', QUERY_SEQ, len(QUERY_SEQ)),
-    )
-    qref_id = conn.execute(
-        'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
-    ).fetchone()['id']
-    conn.execute(
-        'INSERT INTO query_feature_mapping '
-        '(query_ref_id, feature_id, identity, cds_coverage, query_start, query_end, '
-        "strand, cigar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (qref_id, 1, 0.99, 1.0, 0, len(QUERY_SEQ), '+', f'{len(QUERY_SEQ)}M'),
-    )
-    conn.commit()
-    conn.close()
-
-
 class TestMinimalQueryReferenceSchema:
     def test_fresh_db_query_reference_has_only_id_and_checksum(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'fresh.db'
@@ -127,59 +76,6 @@ class TestMinimalQueryReferenceSchema:
                 ('patient_42', sequence_checksum(QUERY_SEQ)),
             )
         conn.close()
-
-
-class TestLegacyQueryReferenceMigration:
-    def test_open_project_db_drops_legacy_pii_columns(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-
-        conn = open_project_db(db_path)
-        cols = _query_reference_columns(conn)
-        conn.close()
-
-        assert cols == {'id', 'checksum'}
-
-    def test_migration_preserves_checksum_and_mapping_rows(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        checksum = sequence_checksum(QUERY_SEQ)
-
-        conn = open_project_db(db_path)
-        qref_rows = conn.execute('SELECT id, checksum FROM query_reference').fetchall()
-        mapping_rows = conn.execute(
-            'SELECT qgm.identity, qgm.cigar FROM query_feature_mapping qgm '
-            'JOIN query_reference qr ON qr.id = qgm.query_ref_id '
-            'WHERE qr.checksum = ?',
-            (checksum,),
-        ).fetchall()
-        conn.close()
-
-        assert [(row['checksum'],) for row in qref_rows] == [(checksum,)]
-        assert [(row['identity'], row['cigar']) for row in mapping_rows] == [(0.99, f'{len(QUERY_SEQ)}M')]
-
-    def test_migrated_cache_loads_mappings_by_checksum(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        checksum = sequence_checksum(QUERY_SEQ)
-
-        conn = open_project_db(db_path)
-        matches = load_cached_mappings(conn, checksum)
-        conn.close()
-
-        assert matches is not None
-        assert len(matches) == 1
-        assert matches[0].cigar == f'{len(QUERY_SEQ)}M'
-
-    def test_open_project_db_fails_fast_on_sqlite_without_drop_column(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        monkeypatch.setattr(sqlite3, 'sqlite_version', '3.31.0')
-
-        with pytest.raises(ValueError, match='SQLite'):
-            open_project_db(db_path)
 
 
 class TestChecksumOnlyStoreLoad:
@@ -425,3 +321,55 @@ class TestPrivacyRegression:
             raw += wal.read_bytes()
 
         assert b'patient_42|sample_1' not in raw
+
+    def test_nondefault_alignment_skips_cache_and_add_to_project_invalidates(self, tmp_path: Path) -> None:
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        from conftest import TINY_REF_NAME, TINY_REF_SEQ, write_genbank
+
+        from respro.cli.init import add_to_project, init_project
+        from respro.config.cli_settings import CLI_CONFIG
+        from respro.core.query import resolve_fasta_query_multi
+
+        gb = write_genbank(
+            tmp_path / 'ref.gb',
+            [{
+                'id': TINY_REF_NAME,
+                'accession': TINY_REF_NAME,
+                'sequence': TINY_REF_SEQ,
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': len(TINY_REF_SEQ), 'strand': '+'}],
+            }],
+        )
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            f'gag\t{TINY_REF_NAME}\t2\tK\tE\tDrugA\tresistant\n',
+            encoding='utf-8',
+        )
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='CacheTest', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = open_project_db(db)
+        try:
+            qref = tmp_path / 'q.fasta'
+            qref.write_text(f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n', encoding='utf-8')
+            recs1 = resolve_fasta_query_multi(conn, qref)
+            assert len(recs1) == 1
+            assert conn.execute('SELECT COUNT(*) FROM query_feature_mapping').fetchone()[0] == 1
+
+            custom_cfg = replace(CLI_CONFIG, alignment=replace(CLI_CONFIG.alignment, k=11))
+            with patch('respro.core.query.load_cached_mappings') as mock_load:
+                recs2 = resolve_fasta_query_multi(conn, qref, cfg=custom_cfg)
+                assert len(recs2) == 1
+                mock_load.assert_not_called()
+        finally:
+            conn.close()
+
+        add_to_project(db_path=db, rules_tsv=tsv, additional_info=False)
+        conn2 = open_project_db(db)
+        try:
+            assert conn2.execute('SELECT COUNT(*) FROM query_feature_mapping').fetchone()[0] == 0
+            assert conn2.execute('SELECT COUNT(*) FROM query_reference').fetchone()[0] == 0
+        finally:
+            conn2.close()

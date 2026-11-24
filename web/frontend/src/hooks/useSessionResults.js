@@ -32,26 +32,19 @@ export function useSessionResults() {
   };
 
   const addResultArtifactPaths = (result) => {
-    [
-      result.report_html_path,
-      result.report_json_path,
-      result.report_pdf_path,
-      result.report_tsv_path,
-    ].forEach((path) => {
-      if (path) {
-        addReportPath(path);
+    (result.artifact_ids || []).forEach((artifactId) => {
+      if (artifactId) {
+        addReportPath(artifactId);
       }
     });
   };
 
   const downloadAllSessionArtifacts = async (setStatusError) => {
-    const artifactPaths = sessionResults.flatMap((result) =>
-      [result.report_html_path, result.report_pdf_path, result.report_json_path, result.report_tsv_path].filter(Boolean)
-    );
-    if (artifactPaths.length === 0) return;
+    const artifactIds = sessionResults.flatMap((result) => result.artifact_ids || []);
+    if (artifactIds.length === 0) return;
     setIsSessionDownloadBusy(true);
     try {
-      await downloadArtifactBundle(artifactPaths, 'respro-session-artifacts.zip');
+      await downloadArtifactBundle(artifactIds, 'respro-session-artifacts.zip');
     } catch (error) {
       if (setStatusError) {
         setStatusError(formatUserError(error.message));
@@ -65,12 +58,10 @@ export function useSessionResults() {
     const selectedResults = [...selectedResultIndices]
       .map((i) => sessionResults[i])
       .filter(Boolean);
-    const artifactPaths = selectedResults.flatMap((r) =>
-      [r.report_html_path, r.report_pdf_path, r.report_json_path, r.report_tsv_path].filter(Boolean)
-    );
-    if (artifactPaths.length === 0) return;
+    const artifactIds = selectedResults.flatMap((result) => result.artifact_ids || []);
+    if (artifactIds.length === 0) return;
     try {
-      await downloadArtifactBundle(artifactPaths, 'respro-selected-artifacts.zip');
+      await downloadArtifactBundle(artifactIds, 'respro-selected-artifacts.zip');
     } catch (error) {
       if (setStatusError) {
         setStatusError(formatUserError(error.message));

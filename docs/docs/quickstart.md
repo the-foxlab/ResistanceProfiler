@@ -41,7 +41,7 @@ respro init \
     --output myrespro.db
 ```
 
-For faster setup with less network-dependent enrichment, add `--no-additional-info` to skip PubChem/PubMed lookups.
+For faster setup with less network-dependent enrichment, add `--no-additional-info` to skip PubChem/PubMed/Wikipedia lookups. Drug descriptions for antibody drugs (which have no PubChem compound record) are sourced from PubChem substance records and, failing that, Wikipedia (CC BY-SA) — see [Database Preparation](database-preparation.md#drug-metadata-enrichment-fallback-chain).
 
 See [Database Preparation](database-preparation.md) for metadata options and [Rules TSV Format](rules-format.md) for rule file details.
 

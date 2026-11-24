@@ -1,26 +1,22 @@
-"""Load bundled CLI/core configuration defaults."""
+"""Load bundled TOML configuration defaults with optional user override merging."""
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 
 
 @dataclass(frozen=True)
 class CliTimeoutConfig:
-    """Network timeout defaults (seconds) for external metadata lookups."""
+    """Network timeout and retry defaults (seconds) for external metadata lookups."""
 
     pubchem: int
     pubmed: int
     crossref: int
-    # GenBank/NCBI nuccore efetch timeout, retry count, exponential-backoff
-    # base (seconds; doubled each retry), and inter-request pacing interval
-    # (seconds; keeps bulk downloads under NCBI's 3 req/s rate limit).
-    # Promoted from respro/io/maintained_db.py module constants so they join
-    # the overridable config surface.
     genbank_timeout: int
     genbank_max_retries: int
     genbank_backoff_base: float
@@ -29,13 +25,17 @@ class CliTimeoutConfig:
 
 @dataclass(frozen=True)
 class CliUrlConfig:
-    """External URL templates used by CLI/core metadata integrations."""
+    """External URL templates used by metadata and maintained-DB lookups."""
 
     pubchem_compound_page: str
     pubchem_structure_png: str
     pubchem_cid_lookup: str
     pubchem_description: str
     pubchem_title: str
+    pubchem_substance_sids: str
+    pubchem_substance_record: str
+    pubchem_substance_page: str
+    wikipedia_summary: str
     ncbi_pubmed_esummary: str
     ncbi_pmc_idconv: str
     crossref_works: str
@@ -53,19 +53,9 @@ class CliParsingConfig:
 
 @dataclass(frozen=True)
 class CliMatchingConfig:
-    """Matching defaults shared by combination evaluation paths."""
+    """Fréchet acceptance policy for boolean formula (combination) rules."""
 
-    # Fréchet forced-fraction acceptance threshold for formula (combination)
-    # rules. Numerically equal to the codon-path default but a separate,
-    # independently tunable policy knob: the codon path infers nucleotide
-    # states within one codon, the formula path gates curated member rules
-    # (potentially across features). Decoupled so one policy can be relaxed
-    # or tightened without touching the other.
     min_cooccurrence_combination_fraction: float
-    # Numerical tolerance for Fréchet-bound acceptance on the formula
-    # (combination) path (member lower > eps, forced_fraction >=
-    # min_fraction - eps). Independent of [codon] frechet_epsilon so the two
-    # paths can be tuned separately.
     frechet_epsilon: float
 
 
@@ -79,36 +69,24 @@ class CliSimilarityConfig:
 
 @dataclass(frozen=True)
 class CliCodonConfig:
-    """Conservative same-codon SNP combination policy (Fréchet intersection)."""
+    """Same-codon SNP co-occurrence and BAM read-quality thresholds."""
 
     min_cooccurrence_codon_fraction: float
     min_read_mapping_quality: int
-    # Minimum base quality for a read to contribute to BAM depth counts. 0 means
-    # accept all bases (preserves pre-promotion behaviour). Raising it drops
-    # low-quality bases from per-position depth. Promoted from
-    # respro/core/vcf_coverage.py (hardcoded quality_threshold=0).
     bam_base_quality_threshold: int
-    # Numerical tolerance for Fréchet-bound acceptance (lower > eps). Promoted
-    # from respro/core/combined_snp.py module constant _FRECHET_EPS. Small enough
-    # that mathematically exact boundary cases (lower == 0) are stable.
     frechet_epsilon: float
 
 
 @dataclass(frozen=True)
 class CliAfBinsConfig:
-    """Allele-frequency classification bin boundaries (lower_inclusive, upper_inclusive)."""
+    """Allele-frequency bin boundaries as ``(lower_inclusive, upper_inclusive)``."""
 
     high: tuple[float, float]
     intermediate: tuple[float, float]
     low: tuple[float, float]
 
     def as_dict(self) -> dict[str, tuple[float, float]]:
-        """Return bins as a label → (lo, hi) dict for use with assign_af_bins."""
-        return {
-            'high': self.high,
-            'intermediate': self.intermediate,
-            'low': self.low,
-        }
+        return {'high': self.high, 'intermediate': self.intermediate, 'low': self.low}
 
 
 @dataclass(frozen=True)
@@ -130,7 +108,7 @@ class CliAlignmentConfig:
 
 @dataclass(frozen=True)
 class CliConfig:
-    """Bundled CLI/core configuration loaded from defaults.toml."""
+    """Immutable configuration tree loaded from bundled ``defaults.toml``."""
 
     timeouts: CliTimeoutConfig
     urls: CliUrlConfig
@@ -143,197 +121,119 @@ class CliConfig:
     alignment: CliAlignmentConfig
 
 
-def _build_cli_config(payload: dict) -> CliConfig:
-    """Construct a frozen :class:`CliConfig` from a parsed TOML payload.
-
-    Shared construction path used by both the bundled-defaults loader
-    (:func:`_load_cli_config`) and the override-aware loader
-    (:func:`load_config_with_overrides`). The payload is assumed to have already
-    been validated for the expected sections/keys and value types by the caller.
-    """
-    timeouts = payload['timeouts']
-    urls = payload['urls']
-    parsing = payload['parsing']
-    matching = payload['matching']
-    similarity = payload['similarity']
-    codon = payload['codon']
-
-    alignment = payload['alignment']
-
-    def _bins(section: dict) -> CliAfBinsConfig:
-        return CliAfBinsConfig(
-            high=tuple(section['high']),
-            intermediate=tuple(section['intermediate']),
-            low=tuple(section['low']),
-        )
-
-    return CliConfig(
-        timeouts=CliTimeoutConfig(
-            pubchem=int(timeouts['pubchem']),
-            pubmed=int(timeouts['pubmed']),
-            crossref=int(timeouts['crossref']),
-            genbank_timeout=int(timeouts['genbank_timeout']),
-            genbank_max_retries=int(timeouts['genbank_max_retries']),
-            genbank_backoff_base=float(timeouts['genbank_backoff_base']),
-            genbank_request_interval=float(timeouts['genbank_request_interval']),
-        ),
-        urls=CliUrlConfig(
-            pubchem_compound_page=str(urls['pubchem_compound_page']),
-            pubchem_structure_png=str(urls['pubchem_structure_png']),
-            pubchem_cid_lookup=str(urls['pubchem_cid_lookup']),
-            pubchem_description=str(urls['pubchem_description']),
-            pubchem_title=str(urls['pubchem_title']),
-            ncbi_pubmed_esummary=str(urls['ncbi_pubmed_esummary']),
-            ncbi_pmc_idconv=str(urls['ncbi_pmc_idconv']),
-            crossref_works=str(urls['crossref_works']),
-            ncbi_protein_page=str(urls['ncbi_protein_page']),
-            ncbi_nuccore_efetch=str(urls['ncbi_nuccore_efetch']),
-            github_respro_db_raw=str(urls['github_respro_db_raw']),
-        ),
-        parsing=CliParsingConfig(
-            doi_prefixes=tuple(str(item) for item in parsing['doi_prefixes']),
-        ),
-        matching=CliMatchingConfig(
-            min_cooccurrence_combination_fraction=float(
-                matching['min_cooccurrence_combination_fraction']
-            ),
-            frechet_epsilon=float(matching['frechet_epsilon']),
-        ),
-        similarity=CliSimilarityConfig(
-            high=int(similarity['high']),
-            moderate=int(similarity['moderate']),
-        ),
-        codon=CliCodonConfig(
-            min_cooccurrence_codon_fraction=float(codon['min_cooccurrence_codon_fraction']),
-            min_read_mapping_quality=int(codon['min_read_mapping_quality']),
-            bam_base_quality_threshold=int(codon['bam_base_quality_threshold']),
-            frechet_epsilon=float(codon['frechet_epsilon']),
-        ),
-        af_bins=_bins(payload['af_bins']),
-        af_bins_fasta=_bins(payload['af_bins_fasta']),
-        alignment=CliAlignmentConfig(
-            preset=str(alignment['preset']),
-            k=int(alignment['k']),
-            w=int(alignment['w']),
-            best_n=int(alignment['best_n']),
-            gap_open_penalty=int(alignment['gap_open_penalty']),
-            match_score=int(alignment['match_score']),
-            mismatch_penalty=int(alignment['mismatch_penalty']),
-            gap_extension_penalty_1=int(alignment['gap_extension_penalty_1']),
-            gap_open_penalty_2=int(alignment['gap_open_penalty_2']),
-            gap_extension_penalty_2=int(alignment['gap_extension_penalty_2']),
-            intron_junction_tolerance=int(alignment['intron_junction_tolerance']),
-        ),
-    )
-
-
-def _load_cli_config() -> CliConfig:
-    """Load the bundled ``defaults.toml`` and build the singleton :class:`CliConfig`."""
-    defaults_path = files('respro.config').joinpath('defaults.toml')
-    payload = tomllib.loads(defaults_path.read_text(encoding='utf-8'))
-    return _build_cli_config(payload)
-
-
-# Map each CliConfig section field to its sub-dataclass type. This is the
-# authoritative source of the overridable section/key surface: any section or
-# key not reachable through this tree is rejected by the override loader.
-# get_type_hints resolves the string annotations produced by
-# ``from __future__ import annotations`` into actual dataclass types.
-_SECTION_DATACLASSES: dict[str, type] = {
-    name: hint for name, hint in get_type_hints(CliConfig).items()
+# Authoritative section/key schema derived from CliConfig type hints so TOML override
+# validation and dataclass construction stay in lockstep.
+_SECTION_DATACLASSES: dict[str, type] = get_type_hints(CliConfig)
+_SECTION_FIELD_HINTS: dict[str, dict[str, Any]] = {
+    name: get_type_hints(cls) for name, cls in _SECTION_DATACLASSES.items()
 }
 
 
-def _expected_toml_type(section: str, key: str) -> Any:
-    """Return the TOML-level expected type for a section/key pair.
-
-    Tuple-of-str/tuple-of-float dataclass fields are represented as TOML lists,
-    so they validate against ``list`` here (element type checks happen in
-    ``_build_cli_config`` via the per-field constructors).
-    """
-    sub_cls = _SECTION_DATACLASSES[section]
-    field_type: Any = get_type_hints(sub_cls)[key]
-    # Tuple dataclass fields are TOML lists.
-    type_origin = getattr(field_type, '__origin__', None)
-    if type_origin in (tuple, list):
-        return list
-    return field_type
+def _coerce_field(value: Any, field_type: Any) -> Any:
+    """Cast a validated TOML value into its dataclass field representation."""
+    if get_origin(field_type) is tuple:
+        args = get_args(field_type)
+        if len(args) == 2 and args[1] is Ellipsis:
+            elem_type = args[0]
+            return tuple(elem_type(item) for item in value)
+        return tuple(t(item) for t, item in zip(args, value, strict=True))
+    return field_type(value)
 
 
-def _deep_merge(base: dict, override: dict, section: str) -> dict:
-    """Deep-merge ``override`` onto ``base`` for one section (user wins on collision).
+def _build_cli_config(payload: dict[str, Any]) -> CliConfig:
+    """Construct a frozen ``CliConfig`` from a validated TOML payload dict."""
+    sections = {
+        section: cls(**{
+            key: _coerce_field(payload[section][key], hint)
+            for key, hint in _SECTION_FIELD_HINTS[section].items()
+        })
+        for section, cls in _SECTION_DATACLASSES.items()
+    }
+    return CliConfig(**sections)
 
-    Nested dicts are merged recursively; lists and scalars are replaced wholesale.
-    Unknown keys raise :class:`ValueError`. Type mismatches raise :class:`ValueError`.
-    """
+
+def _read_bundled_defaults() -> dict[str, Any]:
+    defaults_path = files('respro.config').joinpath('defaults.toml')
+    return tomllib.loads(defaults_path.read_text(encoding='utf-8'))
+
+
+def _load_cli_config() -> CliConfig:
+    """Load the bundled ``defaults.toml`` into a ``CliConfig``."""
+    return _build_cli_config(_read_bundled_defaults())
+
+
+def _is_valid_scalar(value: Any, expected: Any) -> bool:
+    if isinstance(value, bool) and expected in (int, float):
+        return False
+    if expected is float:
+        return isinstance(value, (int, float)) and math.isfinite(value)
+    return isinstance(value, expected)
+
+
+def _validate_override_value(section: str, key: str, value: Any, field_type: Any) -> None:
+    """Validate *value* against the declared dataclass type hint for ``[section] key``."""
+    if get_origin(field_type) is tuple:
+        if not isinstance(value, list):
+            raise ValueError(
+                f'Type mismatch for config key {key!r} in section [{section}]: '
+                f'expected list, got {type(value).__name__}.'
+            )
+        args = get_args(field_type)
+        if len(args) == 2 and args[1] is Ellipsis:
+            elem_types = [args[0]] * len(value)
+        else:
+            if len(value) != len(args):
+                raise ValueError(
+                    f'Invalid length for config key {key!r} in section [{section}]: '
+                    f'expected {len(args)} item(s), got {len(value)}.'
+                )
+            elem_types = list(args)
+        for idx, (item, elem_type) in enumerate(zip(value, elem_types, strict=True)):
+            if not _is_valid_scalar(item, elem_type):
+                raise ValueError(
+                    f'Type mismatch for config key {key!r}[{idx}] in section [{section}]: '
+                    f'expected {elem_type.__name__}, got {type(item).__name__}.'
+                )
+        return
+
+    if not _is_valid_scalar(value, field_type):
+        raise ValueError(
+            f'Type mismatch for config key {key!r} in section [{section}]: '
+            f'expected {field_type.__name__}, got {type(value).__name__}.'
+        )
+
+
+def _merge_section(base: dict[str, Any], override: dict[str, Any], section: str) -> dict[str, Any]:
+    """Overlay user keys onto one default section, rejecting unknown keys and type mismatches."""
     merged = dict(base)
     for key, value in override.items():
         if key not in base:
-            allowed = sorted(base.keys())
-            raise ValueError(
-                f'Unknown config key {key!r} in section [{section}]. '
-                f'Allowed keys: {", ".join(allowed)}.'
-            )
-        expected = _expected_toml_type(section, key)
-        # bool is a subclass of int in Python; reject bools where int/float is expected
-        # so a literal `true` is not silently accepted as `1`.
-        if isinstance(value, bool) and expected in (int, float):
-            raise ValueError(
-                f'Type mismatch for config key {key!r} in section [{section}]: '
-                f'expected {expected.__name__}, got bool.'
-            )
-        if not isinstance(value, expected):
-            raise ValueError(
-                f'Type mismatch for config key {key!r} in section [{section}]: '
-                f'expected {expected.__name__}, got {type(value).__name__}.'
-            )
+            allowed = ', '.join(sorted(base))
+            raise ValueError(f'Unknown config key {key!r} in section [{section}]. Allowed keys: {allowed}.')
+        _validate_override_value(section, key, value, _SECTION_FIELD_HINTS[section][key])
         merged[key] = value
     return merged
 
 
 def load_config_with_overrides(override_path: Path | None = None) -> CliConfig:
-    """Load bundled ``defaults.toml`` and deep-merge a user override TOML on top.
-
-    (1) Parse the bundled ``defaults.toml`` into a dict. (2) If ``override_path``
-    is not None, parse it and deep-merge section-by-section (user dict wins on
-    key collision; nested dicts merged recursively; lists replaced wholesale,
-    not concatenated). (3) Validate the merged dict against the exact set of
-    known sections+keys derived from the :class:`CliConfig` dataclass tree;
-    unknown section or key → :class:`ValueError` listing the offending key and
-    the allowed keys. (4) Build the frozen :class:`CliConfig` via the shared
-    :func:`_build_cli_config` helper. Type-check each value and raise on type
-    mismatch. The module-level :data:`CLI_CONFIG` singleton is unchanged.
-
-    :param override_path: optional path to a user TOML file; None returns the
-        bundled defaults (field-equal to :data:`CLI_CONFIG`)
-    :return: a per-invocation :class:`CliConfig` with overrides applied
-    :raises ValueError: on an unknown section/key or a value type mismatch
-    """
-    defaults_path = files('respro.config').joinpath('defaults.toml')
-    payload = tomllib.loads(defaults_path.read_text(encoding='utf-8'))
-
+    """Return a ``CliConfig`` with optional user TOML overrides merged onto bundled defaults."""
     if override_path is None:
-        return _build_cli_config(payload)
+        return CLI_CONFIG
 
+    payload = _read_bundled_defaults()
     override = tomllib.loads(Path(override_path).read_text(encoding='utf-8'))
-
-    merged: dict[str, Any] = {}
-    for section, section_value in payload.items():
-        merged[section] = dict(section_value)
+    merged: dict[str, Any] = {section: dict(values) for section, values in payload.items()}
 
     for section, section_value in override.items():
         if section not in _SECTION_DATACLASSES:
-            allowed = sorted(_SECTION_DATACLASSES.keys())
-            raise ValueError(
-                f'Unknown config section [{section}]. '
-                f'Allowed sections: {", ".join(allowed)}.'
-            )
+            allowed = ', '.join(sorted(_SECTION_DATACLASSES))
+            raise ValueError(f'Unknown config section [{section}]. Allowed sections: {allowed}.')
         if not isinstance(section_value, dict):
             raise ValueError(
                 f'Config section [{section}] must be a table (dict), '
                 f'got {type(section_value).__name__}.'
             )
-        merged[section] = _deep_merge(payload[section], section_value, section)
+        merged[section] = _merge_section(payload[section], section_value, section)
 
     return _build_cli_config(merged)
 

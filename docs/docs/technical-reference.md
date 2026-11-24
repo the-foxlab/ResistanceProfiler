@@ -102,15 +102,24 @@ Key representation choices made at import time:
 
 ### 1.2 Coordinate spaces
 
-ResPro maintains three coordinate spaces and converts between them:
+ResPro maintains five 0-based coordinate spaces and converts explicitly between them:
 
-1. **Genomic coordinates** — 0-based positions on the internal reference's forward
-   strand. These are what the database stores for feature boundaries.
-2. **CDS coordinates** — 0-based offsets along the coding sequence (concatenated exons
-   in coding orientation). The first coding nucleotide after `codon_start` is CDS
-   position 0.
-3. **Query coordinates** — 0-based positions on the user-supplied input sequence
-   (FASTA consensus or VCF reference).
+1. **Internal genomic coordinates** — 0-based positions on the internal reference's
+   forward (`+`) strand. These are what the database stores for feature boundaries
+   and what emitted internal `VariantCall` positions use.
+2. **Internal CDS coordinates** — 0-based offsets along the concatenated internal
+   coding exons in coding 5'→3' orientation. Offset `0` is the first nucleotide of the
+   feature's concatenated segments (before `codon_start` if `codon_start > 0`);
+   complete reading-frame codons start at CDS offset `codon_start`.
+3. **Forward query coordinates** — 0-based positions on the user-supplied input sequence
+   (FASTA consensus or VCF/BAM reference forward strand).
+4. **Coding-orientation query region coordinates** — 0-based positions within the
+   aligned slice `[match.query_start, match.query_end)` oriented in coding 5'→3'
+   direction (reversed and complemented when `match.strand == '-'`). Introns are
+   still present in this space.
+5. **Exon-only coding-orientation region coordinates** — 0-based positions derived from
+   space 4 after removing classified `IntronInterval` spans in coding order; aligned
+   1:1 with the exon-only `FeatureMatch.cigar` and `IntronInterval.query_start`.
 
 The conversion between genomic and CDS coordinates is governed by the feature's
 strand and segment structure:
@@ -183,13 +192,7 @@ The normaliser accepts:
   resolved by fetching the preceding amino acid from the feature's stored
   protein sequence and constructing the canonical anchored form.
 
-**Anchor-changed indel rule splitting.** A rule like `GY50A` encodes both an
-anchor substitution (G→A at position 50) and an indel (deletion of Y). At import
-time, such tokens are **split** into two separate rule rows: a substitution
-(`G50A`) and a canonical indel (`G50G`), each with a derived `member_id` suffixed
-`__sub` and `__indel`. This mirrors the VCF-mode anchor-changed indel splitting
-(see [§4.3](#43-anchor-changed-indel-splitting)) and ensures both events are
-independently matchable.
+**Mixed anchor-changed indels.** Curated rule tokens must encode a single canonical event: an explicit substitution or an anchored insertion/deletion whose anchor residue matches the reference. Mixed rules that simultaneously substitute the anchor and insert or delete adjacent residues (e.g. `GY50A`) are rejected at import time and should be curated as separate substitution and canonical indel rows. (By contrast, VCF-mode anchor-changed indels are handled natively during sample reconciliation; see [§4.3](#43-anchor-changed-indels).)
 
 ### 1.5 Coordinate-base detection
 
@@ -322,12 +325,15 @@ allowing variant positions defined on the user's reference to be projected into
 internal CDS coordinates.
 
 For spliced features, the exon-only CIGAR (introns removed, see below) produces
-a map that ignores intron query spans. Each mapped query position is then
-**shifted past** the cumulative length of all introns whose coding-orientation
-start precedes it, so that exon-2 (and later) CDS positions land at the correct
-offset in the full unspliced query. Positions that fall inside an intron span
-after shifting are excluded (`None`), so variants inside introns are never
-remapped.
+a map in exon-only coding orientation. Because `IntronInterval.query_start` stores
+the 0-based exon-only coding-orientation offset, downstream mappers sort
+`intron_intervals` in coding order and accumulate preceding intron lengths
+$\sum_{r < j} \text{length}_r$ when deriving full-region intron spans
+`[full_start, full_end)`. Each exon-only position is then **shifted past** the
+sum of preceding intron lengths whose exon-only start satisfies `start <= qpos`,
+so exon-2 (and later) CDS positions land at their exact offset in the full
+unspliced query. Shifted positions falling inside any `[full_start, full_end)`
+span are excluded (`None`), so variants inside introns are never remapped.
 
 ### 3.3 Intron classification for spliced genes
 
@@ -344,17 +350,23 @@ ResPro classifies each `I` op as an **intron** when **both** conditions hold:
    exon-junction offset within a tolerance $\tau$ (default 5 nt).
 2. **Length guard**: the `I` op's length is strictly greater than $\tau$.
 
-Exon-junction offsets are derived from `feature.segments` in **genomic 5'→3'
-order** (not coding order), matching the normalised CIGAR's walking direction
-for both strands. The junction offset after exon $j$ is:
+Exon-junction offsets are computed by accumulating exon lengths in coding 5'→3'
+order (ascending genomic order for `'+'` strand features, descending genomic
+order for `'-'` strand features):
 
 $$J_j = \sum_{i \le j} (e_i - s_i)$$
 
-Classified intron `I` ops are **removed** from the CIGAR (producing an
-exon-only CIGAR) and recorded as `IntronInterval` entries carrying the CDS
-junction position, the query span, and the length. Real coding insertions —
+Because reverse-strand alignments also walk in coding 5'→3' order, the junction
+offsets align directly with normalised CIGAR CDS coordinates on both strands.
+
+Classified intron `I` ops are **removed** from the stored CIGAR (producing an
+exon-only CIGAR) and recorded as intron intervals storing each intron's 0-based
+exon-only coding-orientation start offset and length. Real coding insertions —
 any `I` op not near a junction within tolerance, or of length $\le \tau$ — are
-kept and emitted as variants.
+kept and emitted as variants. All downstream consumers (FASTA region stripping,
+VCF coordinate projection, and BAM coverage projection) convert exon-only
+offsets to full coding-orientation spans by sorting introns in coding order and
+accumulating preceding intron lengths.
 
 The length guard being derived from $\tau$ (rather than a separate parameter)
 ensures that an insertion of length $\le \tau$ can **never** be misclassified as
@@ -400,54 +412,177 @@ ops) and deletions (CDS bases with no query counterpart, i.e. `D` ops) are
 accumulated into single variant records using VCF anchor-base convention (the
 base preceding the indel is included in both REF and ALT).
 
-### 4.2 VCF mode: coordinate remapping
+### 4.2 VCF mode: reference comparison
 
-In VCF mode, variants are already called by an external variant caller and
-defined in the user's reference coordinates. ResPro **remaps** each variant into
-internal CDS coordinates using the inverted CIGAR map.
+VCF variants are called against the **supplied** reference FASTA, but rules are
+defined against the **internal project reference**. ResPro aligns each feature
+against the supplied reference and maps variants into internal coordinates in
+two clear paths:
 
-The remap pipeline performs, per variant:
+- **Identical regions (direct remap).** When the supplied reference matches the
+  internal CDS (across the whole feature or across a VCF call's local span),
+  validated VCF calls translate directly into internal coordinates with no
+  reference-mismatch processing.
+- **Regions with reference mismatches (surgical resolution).** When the supplied
+  reference differs from the internal CDS, ResPro identifies those reference
+  mismatches once, partitions VCF calls into non-overlapping calls (direct remap)
+  vs overlapping calls, and surgically resolves only the overlapping calls in a
+  local window — keeping untouched reference mismatches at AF 1.0 and partially
+  covered ones at their residual AF.
 
-1. **Position projection.** The variant's query position is looked up in the
-   query-to-CDS map. Positions outside any matched CDS region are skipped.
+#### Per-allele sample states
 
-2. **REF sanity check.** The VCF `REF` anchor base is compared to the
-   corresponding base in the user's query FASTA. A mismatch produces a warning
-   and the variant is skipped — this catches VCF/FASTA reference mismatches
-   early.
+Each in-cutoff VCF ALT defines its own local sample state: the supplied reference
+with the ALT substituted for the REF span (in coding orientation, reverse-
+complemented for minus-strand matches). The state is re-emitted against the
+internal reference at the call's allele frequency. The residual frequency mass
+$1 - \sum \text{AF}_{\text{alt}}$ at an affected position belongs to the plain
+supplied reference, so the baseline variant at that position is emitted at the
+residual frequency. Multi-allelic ALTs of one record are mutually exclusive
+states, never merged into one consensus. When the same internal allele is
+emitted by several states, its frequencies add up to the allele's total
+frequency.
 
-3. **Strand transformation.** When the alignment strand differs from the
-   feature strand, REF and ALT alleles are transformed to the internal forward
-   strand:
-   - **SNPs**: the single base is complemented.
-   - **Indels**: the anchor base is complemented and the payload is
-     reverse-complemented. The anchor also **switches side** (from leftmost to
-     rightmost or vice versa) because the VCF convention anchors the leftmost
-     base in genomic 5'→3' order, but the internal forward reference needs the
-     coding-preceding base as anchor.
+#### Source provenance
 
-4. **CDS-to-genomic conversion.** The CDS position is converted to an internal
-   genomic position via $\text{Genomic}(c)$.
+Every emitted variant carries a `source` label, shown in the All Mutations
+table (VCF mode only) and the TSV/JSON exports:
 
-5. **Query codon context.** The three-base query codon surrounding the variant
-   is extracted and stored on the remapped variant. For reverse-strand
-   alignments, the codon is complemented to coding orientation. This context
-   allows downstream annotation to use the **query** codon (which may carry
-   co-occurring variants) rather than the internal reference codon alone.
+- **`vcf_derived`** — the variant was called in the VCF and mapped onto the
+  internal reference.
+- **`reference_derived`** — the variant is a mismatch between the supplied
+  reference and the internal reference (assumed frequency $1.0$, or the remaining
+  uncalled fraction $1 - \sum \text{AF}_{\text{alt}}$ when a partial-AF VCF call
+  overlaps that position).
 
-### 4.3 Anchor-changed indel splitting
+#### Cutoffs and filtered calls
+
+Calls failing `--min-af`/`--min-depth` are removed **before** the comparison, so
+their positions revert to the pure baseline (`reference_derived`, AF 1.0).
+Reference-derived variants bypass the AF/depth cutoffs but pass the deferred BAM
+coverage gate like every other candidate. FILTER≠PASS calls participate like any
+other call — pass/fail decisions belong to the upstream pipeline.
+
+#### Unverified inputs
+
+The following are skipped with a warning instead of producing a false result:
+
+- Two separate records whose spans overlap — without phase, jointly applying
+  them assumes co-occurrence the input does not establish. (Sometimes the literal
+  edits would even be compatible, e.g. an insertion's anchor padding overlapping
+  a deletion; rejection is a conservative scope restriction, not a sequence
+  impossibility.)
+- A record's allele frequencies summing to more than 1.
+- A REF block that does not match the supplied reference. When several REF
+  blocks mismatch, one aggregate warning additionally states that the VCF was
+  probably called against a different reference.
+- A REF span that is outside the aligned region (alignment gap, intron, or
+  past the region's edge).
+- A VCF deletion that overlaps or touches a baseline (supplied-vs-internal)
+  deletion, or a multi-base REF span crossing a baseline deletion (call skipped
+  with a warning, baseline deletion retained at AF 1.0).
+- Baseline stretches containing `N` (no emission, one warning per stretch).
+
+#### Conventions
+
+These conventions pin the notation and normalization used by the worked
+examples below:
+
+- **Anchored REF/ALT notation.** Indel events are written as
+  `REF{pos}ALT` with the anchor base retained in both alleles (VCF
+  convention), e.g. `C2>CG` inserts `G` after position 2's `C`,
+  `CGT3del`-style deletions appear as `CGT3>C` (1-based position in prose,
+  0-based `VariantCall.pos` in tests). Insertion payloads attach **after** the
+  anchor base for `+`-strand features and before it for `-`-strand features —
+  the same anchor convention as the FASTA emission engine.
+- **Indel representation in repeats.** Events are emitted at the anchor their
+  gapped alignment state produced; they are **not** left-normalized to the
+  leftmost equivalent representation. In repeated bases several anchored forms
+  render the same sample sequence (inserting `A` into `AAAAAA` at any position
+  yields the same 7-A sample), but rule matching attributes events to codons:
+  normalizing across a codon boundary would move an insertion between codons
+  and change which rules it can fire. Every emitted event is sequence-valid —
+  applying it to the internal reference reconstructs the final sample.
+- **Decomposition of length-changing replacements.** When the supplied
+  reference replaces an internal span with a different-length span (e.g.
+  internal `...CATT` vs supplied `...CGGTT`, replacing `A` at position 2 with
+  `GG`), the alignment walk decomposes the difference into its column-level
+  substitution (`A2>G`) plus an anchored insertion on that column (`A2>AG`),
+  which together reconstruct `CGGTT` when applied to `CATT`. A VCF deletion
+  that removes the inserted base (`G2del` at AF 1.0) cancels the insertion
+  component and retains the substitution `A2>G` as `vcf_derived`; at partial
+  AF (e.g. `G2del` at AF 0.5) the substitution is present on both the call and
+  residual states (`A2>G` at 1.0, `vcf_derived`) while the insertion survives
+  at the residual frequency (`A2>AG` at 0.5, `reference_derived`).
+- **Record identity & block-substitution haplotype linkage.** The ALTs of one VCF
+  record are mutually exclusive states of that record (identified by
+  `(record_index, alt_index)` on `VariantCall`); two **separate** records at the
+  same position are distinct phase-unknown events and fall under the overlap
+  policy above. When a call (such as an equal-length block substitution / MNV)
+  decomposes into multiple atomic internal `VariantCall`s, every call-emitted
+  atom carries `haplotype_links = ((record_id, alt_id, af),)` pointing back to its
+  source allele group. When a baseline variant is covered by a single VCF
+  `record_id`, its surviving residual partitions into `(record_id, alt_id, af)`
+  entries for any sibling ALT spanning that column unchanged plus
+  `(record_id, -1, uncalled_mass)` for any remaining uncalled mass. When multiple
+  mutually exclusive haplotypes emit the same internal atom within a match,
+  emission aggregation sums `allele_freq` and merges their haplotype links
+  (summing frequencies per distinct `(record_id, alt_id)` pair).
+- **Call-state emission scope.** A call state emits only differences *it*
+  caused (its span plus columns changed by surgery or collapse). Trailing REF
+  columns are pre-marked as call-covered only for net deletions
+  (`len(ALT) < len(REF)`): equal-length block substitutions write their columns
+  in place without masking unchanged baseline-divergent positions. Differences
+  the call merely sits next to belong to the baseline pass, which emits them
+  once at full frequency mass — a baseline variant keeps AF 1.0 unless a
+  call's covered columns intersect it (e.g. a reversion or a merged deletion
+  absorbing it).
+
+#### Worked examples
+
+Complete frequencies at one position unless stated. Positions are 1-based for
+readability.
+
+| Internal | VCF reference | VCF call | Result relative to internal |
+| --- | --- | --- | --- |
+| A | G | none | A→G at 1.0 (baseline assumption, `reference_derived`) |
+| A | G | G→A at 1.0 | no variant |
+| A | G | G→A at 0.5 | A→G at 0.5 (residual baseline, `reference_derived`) |
+| A | G | G→C at 0.3 | A→G at 0.7 (`reference_derived`) and A→C at 0.3 (`vcf_derived`) |
+| A | G | G→A at 0.1, min-AF 0.5 | A→G at 1.0 (call below cutoff removed; `reference_derived`) |
+| A | GG | none | A→GG at 1.0 (decomposed as `A>G`@1.0 + `A>AG`@1.0, `reference_derived`) |
+| A | GG | G2del at 1.0 | A→G at 1.0 (insertion component countered by the deletion; `vcf_derived`) |
+| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (emitted as `A>G`@1.0 `vcf_derived` + `A>AG`@0.5 `reference_derived`) |
+
+Non-canceling indel interactions (Tier 2 local windows; anchored REF/ALT
+notation, 1-based positions):
+
+| Internal | Supplied ref | Baseline vs internal | VCF call (supplied coords) | Expected result vs internal |
+| --- | --- | --- | --- | --- |
+| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | unverified: VCF deletion overlaps/touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
+| ACGTT | ACTT | `G3del`@1.0 | `T4del`@1.0 | unverified: VCF deletion touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
+| AT | ACGT | `A1>ACG`@1.0 (insertion) | `C2>CG`@1.0 | sample `ACGGT`; net `A1>ACGG`@1.0 — two insertions merge into one insertion (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@1.0 | sample `ACGGT`; net `C2>CG`@1.0 (left-aligned) — baseline deletion fully countered, net new insertion (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: `C2>CG`@0.4 (`vcf_derived`, left-aligned) and residual `G3del`@0.6 (`reference_derived`) |
+| ACGTACGT | ACGTACGT (identical) | none | separate records `C2del`@1.0 and `C6del`@1.0 | each emitted independently, no merge (`vcf_derived`) |
+| ACGT | ACGT (identical) | none | separate records `C2>G`@1.0 and `C2>A`@1.0 | unverified: no variants for the span + warning |
+| ACGT | ACGT (identical) | none | separate records `C2>CA`@1.0 and `C2del`@1.0 | unverified by policy: baseline-only + warning (insertion anchor overlaps the deletion without phase) |
+| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | unverified: VCF deletion touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
+
+Reverse-complement orientation: when the supplied reference maps reverse-complement
+against a feature, emitted genomic alleles are converted into genomic orientation
+according to the internal feature strand (an axis separate from the supplied↔internal
+match strand). An exact reverse-complement pair (e.g. internal `AAA` vs supplied
+`TTT`) yields zero baseline events.
+
+### 4.3 Anchor-changed indels
 
 Some variant callers encode a base substitution at the VCF anchor together with
-an indel, e.g. `ATTT → G` (anchor `A` changed to `G`, plus a deletion of
-`TTT`). Left as one event, the anchor substitution signal would be lost during
-strand-aware remap. ResPro **splits** such records deterministically into two
-events:
-
-1. **Anchor SNP**: `A → G` at the same query position.
-2. **Canonical indel**: `ATTT → A` (anchor reset to the REF anchor base).
-
-Both split events inherit the original record's allele frequency, depth, and
-filter status, and preserve the original user-reference coordinates for display.
+an indel, e.g. `ATTT → G`. The slot model handles such records
+natively: the REF span's four slots receive the ALT's single base plus deletions,
+so the state emits the anchor substitution and the deletion as separate events at
+the record's allele frequency — the substitution signal is preserved without a
+pre-splitting step.
 
 ---
 
@@ -462,15 +597,20 @@ representation is identical by design.
 
 For a SNP at CDS position $c$ within a feature:
 
-1. The **codon index** is $i = \lfloor (c - \text{codon_start}) / 3 \rfloor$
-   and the **position within the codon** is $p = (c - \text{codon_start}) \bmod 3$.
-2. The **reference codon** is extracted from the internal CDS. If a valid
-   query codon context is available (from VCF remap), it is used as the
-   reference for amino-acid derivation; otherwise the internal CDS codon is used.
-3. The **alternate codon** is constructed by replacing position $p$ with the
+1. **Frame start guard.** If $c < \text{codon_start}$ (leading partial overhang
+   before the first complete reading frame), no coding codon or amino-acid change
+   is emitted for that base.
+2. Otherwise ($c \ge \text{codon_start}$), the **codon index** is
+   $i = \lfloor (c - \text{codon_start}) / 3 \rfloor$ and the **position within
+   the codon** is $p = (c - \text{codon_start}) \bmod 3$.
+3. The **reference codon** is extracted from the internal CDS. When a complete
+   3-base supplied-reference codon is available from VCF remapping (none of its
+   three bases unmapped), it is used as the reference codon for amino-acid
+   derivation; otherwise the internal CDS codon is used.
+4. The **alternate codon** is constructed by replacing position $p$ with the
    ALT base (in coding orientation — reverse-complemented for `'-'` strand
    features).
-4. Both codons are translated via the [standard genetic code](https://en.wikipedia.org/wiki/DNA_codon_table)
+5. Both codons are translated via the [standard genetic code](https://en.wikipedia.org/wiki/DNA_codon_table)
    (Biopython's `Seq.translate`), and the consequence is classified:
 
     | Condition | Consequence |
@@ -478,7 +618,7 @@ For a SNP at CDS position $c$ within a feature:
     | `ref_aa == alt_aa` | synonymous |
     | `codon_idx == 0` and `ref_aa == 'M'` | start_lost |
     | `alt_aa == '*'` and `ref_aa != '*'` | stop_gained |
-    | `ref_aa == '*'` | stop_loss |
+    | `ref_aa == '*'` | stop_lost |
     | otherwise | missense |
 
 ### 5.2 Indel annotation
@@ -565,6 +705,36 @@ $$\boxed{U(S) = \min_{i=1}^{k} q_i}$$
 These bounds are **sharp**: there exist joint distributions achieving both
 extremes, so no tighter bounds can be derived from the marginals alone.
 
+#### 5.3.1a Disjoint phase-factor generalisation (block substitutions & haplotype links)
+
+When multiple variants in one codon originate from the same physical haplotype
+(e.g. an equal-length block substitution / MNV decomposed into atomic SNPs, or
+multi-ALT haplotypes on one VCF record), treating their positions as
+unlinked independent marginals would lose their shared phase and assign nonzero
+or split mass to impossible chimeric codons. Instead, the Fréchet evaluator
+partitions the $k$ variant-bearing positions into $m \le k$ **disjoint phase
+factors** $G_1, \dots, G_m$ using connected components over shared source-record
+haplotype links:
+
+- **Linked multi-position factor ($|G_j| \ge 2$):** positions sharing a
+  `record_id` are evaluated jointly. For candidate $S$, every explicit
+  haplotype `(record_id, alt_id, af)` within that record contributes `af` iff its
+  alleles agree across every position in $G_j$; uncalled reference-everywhere
+  mass $\max(0, 1 - \sum_{a \ge 0} \text{af}_{r,a})$ accrues to the all-REF
+  state unless explicit residual links `(record_id, -1, residual_af)` govern it.
+- **Singleton factor ($|G_j| = 1$):** an unlinked position retains its marginal
+  probability $q_j(S) = f_{\text{ALT}_a}$ (or $1 - \sum_a f_{\text{ALT}_a}$ for REF).
+
+Sharp Fréchet inequalities are then applied across the $m$ disjoint factors:
+
+$$L(S) = \max\!\left(0,\; \sum_{j=1}^{m} q_j(S) - (m - 1)\right), \qquad U(S) = \min_{j=1}^{m} q_j(S)$$
+
+When all altered positions in a codon come from one block substitution ($m = 1$),
+$L(S) = U(S) = q_1(S)$ and $F(S) = 1.0$: the linked mutant codon keeps exact
+frequency `AF` while impossible solo-exchange chimeras receive $L = 0$. When
+`haplotype_links` is omitted, every position stays a singleton factor ($m = k$),
+reducing exactly to §5.3.1.
+
 #### 5.3.2 State enumeration
 
 ResPro enumerates all $2^k$ candidate codon states (the Cartesian product of
@@ -620,7 +790,7 @@ For each member SNP, ResPro emits one annotation carrying:
 - A `combined_states` list of the Fréchet-accepted codon states that include
   this member, deduplicated by amino acid (summing `lower` for duplicates).
 
-The `single_exchange_lower` field records the guaranteed minimum population
+The `single_exchange_aa_freq` field records the guaranteed minimum population
 share of the exact single codon displayed in that row. When the single state is
 Fréchet-impossible ($L = 0$), the single-exchange effect is gated to zero in
 rule matching — only combined states can fire.
@@ -638,10 +808,10 @@ guaranteed to sit on the same background. The promoted state is dropped from
 
 #### 5.3.6 Fallback
 
-When the Fréchet helper returns no states (multiallelic same-position inputs,
-where two ALTs at the same codon position cannot form valid combined states)
-or no accepted state exists for any member, ResPro falls back to plain
-single-SNP annotation with no `combined_states`.
+When the Fréchet helper returns no states (e.g. only one variant-bearing
+position exists after filtering, or no candidate achieves $L(S) > \varepsilon$
+and $F(S) \ge \mu - \varepsilon$) or no accepted state exists for any member,
+ResPro falls back to plain single-SNP annotation with no `combined_states`.
 
 ### 5.4 BAM-based exact co-occurrence
 
@@ -653,18 +823,21 @@ an observed frequency.
 
 #### 5.4.1 Shared candidate-state enumeration
 
-Both paths share the same candidate-state enumeration
-(`enumerate_candidate_codon_states`). For every variant-bearing nucleotide
-position in the codon, the enumerator builds the cartesian product of
-{reference base, each ALT}. Each resulting `CandidateCodon` carries the
-combined alt codon, its amino acid, the member indices it spans, the per-base
-choice encoding, and the per-base VCF quality values. This shared state space
-keeps the two paths numerically comparable.
+Both paths share the same candidate-state enumeration. For every variant-bearing
+nucleotide position in the codon, the enumerator builds the Cartesian product of
+{reference base, each ALT}, producing each candidate codon, its translated amino
+acid, and its participating variant members. Sharing this state space keeps the
+two paths numerically comparable.
 
 #### 5.4.2 Spanning-molecule counting
 
-For each candidate codon state, `compute_codon_cooccurrence` counts reads that
-span all variant-bearing positions of the codon:
+For each candidate codon state, ResPro counts reads that span all variant-bearing
+positions of the codon. Because BAM reads align to the **forward query reference**
+whereas candidate codon alleles live in **coding orientation**, read bases are
+complemented into coding orientation whenever the feature alignment sits on the
+reverse strand (`'-'`) before matching against candidate states.
+
+Steps for each aligned read overlapping the codon's query span:
 
 1. **Primary-alignment filter.** Only primary alignments are assessed;
    secondary (`0x100`) and supplementary (`0x800`) records are skipped. This
@@ -809,7 +982,7 @@ At profiling time, each formula rule is evaluated against the set of matched ato
 | 0.60, 0.60 | 0.20 | 0.60 | 0.333 | rejected (0.333 < 2/3) |
 | 0.95, 0.02 | 0.00 | 0.02 | 0.000 | rejected (lower bound 0) |
 
-**Equivalence with the codon policy.** The formula AND bound is the same Fréchet-intersection computation the combined-codon path uses (`_compute_codon_frechet_states`): at equal thresholds both paths accept exactly the same q-vectors (asserted by cross-validation test). The thresholds and numerical tolerances are decoupled — the codon policy uses `[codon] min_cooccurrence_codon_fraction` with `[codon] frechet_epsilon`, formula gating uses `[matching] min_cooccurrence_combination_fraction` with `[matching] frechet_epsilon` — so the two sensitivities can be tuned independently.
+**Equivalence with the codon policy.** The formula AND bound uses the same Fréchet-intersection computation as the combined-codon path: at equal thresholds both paths accept exactly the same frequency vectors. The thresholds and numerical tolerances are decoupled — the codon policy uses `[codon] min_cooccurrence_codon_fraction` with `[codon] frechet_epsilon`, while formula gating uses `[matching] min_cooccurrence_combination_fraction` with `[matching] frechet_epsilon` — so the two sensitivities can be tuned independently.
 
 **Reported-frequency semantics.** The frequency reported for a formula hit is the joint Fréchet lower bound — a guaranteed minimum on how often the members co-occur, not a point estimate of the true combination frequency. The AF bin shown in the report reflects this lower bound, so a fired formula can show an `intermediate` or `low` bin even though every member individually fired at a `high` frequency.
 
@@ -832,7 +1005,7 @@ consequence type:
 | `INS_any` wildcard | `ann.consequence == 'insertion'` |
 
 **Fréchet gating.** For combined codon events, the single-exchange effect is
-gated by `single_exchange_lower > 0`. A combined member whose single state is
+gated by `single_exchange_aa_freq > 0`. A combined member whose single state is
 Fréchet-impossible cannot match a single-amino-acid rule — only its
 Fréchet-accepted combined states can fire. Each accepted combined state adds
 its own `alt_aa` candidate, gated by its Fréchet `lower` bound. A
@@ -860,8 +1033,7 @@ exclusively on `has_rules = 1` features.
 A VCF CHROM whose reference FASTA record aligns to no rule-backed feature is an
 **orphan**: its record is dropped at query resolution with a warning, its
 variants are not remapped, and the CHROM is reported as dropped rather than
-profiled. A run in which no matched reference carries rules fails with a
-`ClickException`.
+profiled. A run in which no matched reference carries rules fails with an error.
 
 Because ruleless features are never aligned, no annotation from a ruleless
 feature can enter the pipeline — there is no suppression step and no risk of a
@@ -1024,7 +1196,9 @@ emit expanded IUPAC variants normally.
 
 When a [BAM](https://samtools.github.io/hts-specs/SAMv1.pdf) file is provided
 (aligned against the same query reference as the VCF), per-base depth is
-extracted and projected through the CIGAR map onto internal CDS coordinates.
+extracted and projected through the intron-aware CIGAR map onto internal CDS
+coordinates, so spliced exons map past intervening introns without mistaking
+0-depth intron regions for coding coverage gaps.
 A codon is reported as a coverage gap when **any** of its three nucleotides
 has depth below the minimum depth threshold (default 10):
 
@@ -1035,6 +1209,15 @@ CDS-to-query coordinate map. CDS positions that map to `None` (deletions in the
 query) are treated as non-covered.
 
 Contiguous non-covered codons are merged into single `CoverageGap` entries.
+
+#### Deferred assessability mask
+
+Variant emission and the reference comparison are **never** gated on coverage. The full
+candidate set is emitted and annotated first; then, before final single-rule and
+formula-rule matching, one BAM-derived mask removes every candidate whose
+position falls inside a non-covered codon. Combined-codon states are recomputed
+from the retained members, so an excluded SNP cannot contribute to another
+member's hit. Coverage gaps themselves are preserved for reporting.
 
 ---
 
@@ -1050,13 +1233,13 @@ summarised here.
 
 Phenotype labels are resolved to integer ranks via a fixed vocabulary:
 
-| Rank | Meaning |
+| Rank | Canonical meaning |
 |---|---|
-| 5 | resistant |
-| 4 | high-level resistance |
-| 3 | intermediate resistance |
+| 5 | resistant (incl. high-level resistance / HRI) |
+| 4 | intermediate (incl. reduced inhibition / RI) |
+| 3 | low-level resistance (incl. reduced susceptibility) |
 | 2 | potential low-level resistance |
-| 1 | susceptible |
+| 1 | susceptible (incl. sensitive / normal inhibition) |
 | 0 | unknown |
 | −1 | contradictory |
 
@@ -1102,9 +1285,9 @@ specific drugs and optionally to specific references. Resolution precedence
 3. Global `thresholds`
 
 Reference matching is accession-version tolerant: `NC_001345.1` matches
-`NC_001345`. When a drug has hits under multiple references, the reference used
-for per-`(reference, drug)` override resolution is the **alphabetically first**
-reference name, ensuring stable output across invocations.
+`NC_001345`. When a drug has hits under multiple references, ResPro evaluates
+the drug against each observed reference in deterministic alphabetical order
+and selects the **strongest** (most resistant) assessment.
 
 ### 11.5 `drug_groups`
 
@@ -1134,8 +1317,9 @@ distinct from the project database. The results DB stores:
   counts, and FASTA/VCF mode flag.
 - **Variant results**: one row per annotated variant, including the remapped
   internal coordinates, user-reference coordinates (for VCF mode), amino-acid
-  consequence, AF bin, rule match flag, drug hits (JSON), and the full
-  serialised Fréchet combined states.
+  consequence, AF bin, rule match flag, drug hits (JSON), serialised
+  `haplotype_links` (`[[record_id, alt_id, af], ...]`), and the full serialised
+  Fréchet combined states.
 - **Coverage gaps**: one row per non-covered codon stretch.
 - **Formula rule hits**: one row per matched combination rule (serialised JSON).
 - **Profiled features**: the set of feature names evaluated for this run, so
@@ -1146,22 +1330,20 @@ distinct from the project database. The results DB stores:
 
 The **project fingerprint** is a stable UUID assigned once at project creation
 and never changed. It is stored in the `project` table and copied into every
-results run row. Regeneration validates that the stored fingerprint matches the
-current project DB's fingerprint before reproducing a report — if the project
-DB has been modified (rules added, features changed), the fingerprint still
-matches (it is immutable), but the `project_updated_at` timestamp provides a
-secondary consistency check.
+results run row. Regeneration verifies that the stored fingerprint matches the
+supplied project DB's UUID and fails with an error on mismatch. Because the UUID
+is immutable across in-place `respro add` updates, the `project_updated_at`
+timestamp is also stored on each run for auditability.
 
 ### 12.3 Deterministic regeneration
 
-Regeneration reads a stored run from the results DB and reproduces the HTML
-report (and optional exports) from the persisted annotations — **without**
-re-running alignment, variant emission, annotation, or rule matching. This
-guarantees that the regenerated report is byte-identical to the original, as
-long as the project DB's rules and features have not changed. The project
-fingerprint and updated-at timestamp provide a compatibility guard: if the
-project DB has been modified since the run was stored, regeneration warns but
-proceeds (the stored annotations are self-contained).
+Regeneration reads a stored run from the results DB or results JSON and
+reproduces the HTML report (and optional exports) from the persisted annotations
+— **without** re-running alignment, variant emission, annotation, or rule
+matching. This guarantees deterministic reproduction against the originating
+project database. If the project database's rules were later updated via
+`respro add`, run `respro manage results --sync` to re-annotate stored runs
+before regenerating reports.
 
 ---
 
@@ -1178,7 +1360,8 @@ same inputs always produce the same report:
   tiebreak.
 - **Reference selection**: the best reference is chosen by a fixed sort key
   (identity, coverage, name).
-- **Multi-reference override resolution**: alphabetically first reference name.
+- **Multi-reference override resolution**: strongest-wins across observed
+  references evaluated in deterministic alphabetical order.
 - **Project fingerprint**: an immutable UUID guards regeneration compatibility.
 - **Query mapping cache**: mappings are cached by sequence checksum (SHA-256,
   computed from the sequence alone — the FASTA header is excluded), so repeated

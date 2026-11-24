@@ -16,6 +16,7 @@ def build_health_router(
     *,
     config: StartupConfig,
     sample_limit_per_minute: int,
+    artifact_bundle_max_artifacts: int,
     build_readiness_payload: Callable[[StartupConfig], ApiEnvelope],
     version: str,
 ) -> APIRouter:
@@ -44,6 +45,7 @@ def build_health_router(
             data={
                 'batch_max_samples': sample_limit_per_minute,
                 'sample_limit_per_minute': sample_limit_per_minute,
+                'artifact_bundle_max_artifacts': artifact_bundle_max_artifacts,
                 'cli_version': version,
             }
         )

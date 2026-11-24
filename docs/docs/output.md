@@ -44,6 +44,13 @@ The HTML report is a single, portable file you can open in any browser. It is al
 <figcaption>Detailed overview of all mutations, regardless of whether they have database hits.</figcaption>
 </figure>
 
+In VCF mode the All Mutations table carries a **Variant source** column:
+`VCF derived` means the variant was called in the VCF (and mapped onto the stored
+reference); `Reference derived` means the variant is a mismatch between the
+supplied reference FASTA and the stored database reference (assumed frequency
+`1.0`, or the remaining uncalled fraction `1 − VCF AF` when a sub-1.0 VCF call
+overlaps that position). The column is omitted in FASTA mode.
+
 
 
 ## JSON export (`*.results.json`)
@@ -57,6 +64,7 @@ A structured, machine-readable export for automation and reproducibility.
 - `coverage_gap`
 - `formula_rule_hit`
 - `sample_classification`
+- `references`
 
 **Best for:**
 
@@ -100,12 +108,13 @@ respro vcf \
 
 | Column | Description |
 |---|---|
-| `reference` | Matched internal reference name (VCF mode only; omitted in FASTA mode). Populated for multi-species VCF runs; empty for single-reference runs where the chrom is not the reference accession. |
+| `reference` | Matched internal reference name (VCF mode only; omitted in FASTA mode). |
 | `gene` | Feature / gene name (display name applied when configured). |
-| `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined codon events use `ref_codon{codon_pos}alt_codon`. |
+| `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined-codon outcomes are surfaced in `aa_effects`. |
 | `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
+| `variant_source` | Provenance of the variant: `VCF derived` when the variant was called in the VCF (mapped onto the stored reference); `Reference derived` when the variant is a mismatch between the supplied reference FASTA and the stored database reference (assumed frequency `1.0`, or the remaining uncalled fraction `1 − VCF AF` when a sub-1.0 VCF call overlaps that position). VCF mode only; omitted in FASTA mode. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
-| `af` | Allele frequency (raw float). |
+| `aa_frequency` | Variant allele frequency (rounded to 3 decimal places); for `formula` rows, reports the combination's Fréchet lower bound. |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |
 | `consequence` | Consequence label (`missense`, `frameshift`, …). |
 | `aa_effects` | All amino-acid effects for the variant, as `<ref><pos><alt> | <frequency> | <tag>` joined with `; `. The tag is `observed` or `lower bound`. The single-exchange effect is listed first (when its amino-acid frequency is > 0), followed by every accepted combined-codon outcome. Combined formula rows join member effects with `;`. |
@@ -127,7 +136,8 @@ respro vcf \
   phenotype/IC50/fold-IC50/score.
 - **Formula (combinatorial) rules**: one **combined row** per fired formula rule.
   Member mutations are joined with `;` in `gene`, `nt_mut`, `nt_mut_user`,
-  `aa_effects`, `af`, and `strand`. The phenotype/IC50/fold-IC50/score
+  `variant_source`, `aa_effects`, and `strand` (`aa_frequency` reports the
+  formula hit's Fréchet lower bound). The phenotype/IC50/fold-IC50/score
   come from the formula rule set (the combined call), not the individual members.
 - **Formula-member-only variants**: a variant that is only a formula member (no
   single rule of its own) gets a `rule_type=formula-member` row with

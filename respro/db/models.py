@@ -1,23 +1,20 @@
-"""
-Lightweight dataclass models for in-memory pipeline objects.
-"""
+"""In-memory domain models shared across the profiling, persistence, and reporting layers."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 
-_INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
+INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
 
-# Sentinel marking single_exchange_aa_freq as unset so __post_init__ can default
-# it to allele_freq for non-combined annotations without conflating a genuine 0.0
-# (a combined member whose single state is Fréchet-impossible).
+# NaN sentinel distinguishes "unset" (defaults to variant.allele_freq in __post_init__)
+# from a genuine 0.0 (a combined-codon member whose single state is Fréchet-impossible).
 _SINGLE_EXCHANGE_AA_FREQ_UNSET = float('nan')
 
 
 def is_internal_formula_component_drug_name(drug_name: str) -> bool:
-    """Return True when a drug name is the internal placeholder for formula members."""
-    return (drug_name or '').strip().lower() == _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
+    """Return True when a drug name is the internal placeholder for formula-only members."""
+    return (drug_name or '').strip().lower() == INTERNAL_FORMULA_COMPONENT_DRUG_NAME
 
 
 @dataclass(frozen=True)
@@ -28,25 +25,69 @@ class Publication:
     doi: str
     title: str
     pubmed_id: str
-    raw_input: str  # original curator string; preserved as display fallback
-    first_author: str = ''  # surname + initials of the first author (e.g. 'Smith J')
-    year: str = ''  # publication year as a string (e.g. '2021')
-    journal: str = ''  # full journal name
+    raw_input: str
+    first_author: str = ''
+    year: str = ''
+    journal: str = ''
+
+    def to_dict(self) -> dict[str, str]:
+        """Serialize publication metadata for JSON persistence and exports."""
+        return {
+            'doi': self.doi,
+            'title': self.title,
+            'pubmed_id': self.pubmed_id,
+            'raw_input': self.raw_input,
+            'first_author': self.first_author,
+            'year': self.year,
+            'journal': self.journal,
+        }
 
 
 @dataclass(frozen=True)
 class CoverageGap:
-    """A codon stretch that could not be assessed due to N-bases or missing alignment in FASTA mode."""
+    """A contiguous 0-based inclusive codon stretch that could not be assessed."""
 
     feature_name: str
-    codon_start: int  # 0-based codon index, inclusive
-    codon_end: int    # 0-based codon index, inclusive
-    chrom: str = ''   # query contig (== ReferenceGroup.query_name); '' when single-reference/legacy
+    codon_start: int
+    codon_end: int
+    chrom: str = ''
+
+    @classmethod
+    def merge(
+        cls,
+        feature_name: str,
+        codon_indices: list[int],
+        *,
+        chrom: str = '',
+    ) -> list[CoverageGap]:
+        """Collapse unordered 0-based codon indices into contiguous ``CoverageGap`` runs."""
+        if not codon_indices:
+            return []
+        sorted_positions = sorted(set(codon_indices))
+        gaps: list[CoverageGap] = []
+        start = end = sorted_positions[0]
+        for pos in sorted_positions[1:]:
+            if pos == end + 1:
+                end = pos
+                continue
+            gaps.append(cls(feature_name=feature_name, codon_start=start, codon_end=end, chrom=chrom))
+            start = end = pos
+        gaps.append(cls(feature_name=feature_name, codon_start=start, codon_end=end, chrom=chrom))
+        return gaps
+
+
+@dataclass(frozen=True)
+class FeatureSegment:
+    """One CDS exon segment as a 0-based ``[start, end)`` genomic interval."""
+
+    segment_index: int
+    start: int
+    end: int
 
 
 @dataclass
 class FeatureRecord:
-    """A annotation loaded from the database."""
+    """A coding feature (CDS or mat_peptide) loaded from the project database."""
 
     id: int
     reference_id: int
@@ -55,31 +96,30 @@ class FeatureRecord:
     start: int
     end: int
     strand: str
-    codon_start: int = 0  # 0-based offset (GenBank codon_start qualifier minus 1)
-    nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
-    aa_sequence: str = ''  # pre-translated protein sequence stored at init time
+    codon_start: int = 0
+    nt_sequence: str = ''
+    aa_sequence: str = ''
     feature_type: str = 'CDS'
     parent_feature_name: str = ''
-    reference_accession: str = ''  # accession of the parent reference (e.g. NC_001806)
+    reference_accession: str = ''
     segments: tuple[FeatureSegment, ...] = field(default_factory=tuple)
 
     @property
-    def length_nt(self) -> int:
-        return self.end - self.start
-
-    @property
-    def _coding_segments(self) -> tuple[FeatureSegment, ...]:
-        """Return CDS segments in 5'->3' coding orientation."""
+    def coding_segments(self) -> tuple[FeatureSegment, ...]:
+        """Return CDS exon segments in canonical 5'->3' coding order."""
         if not self.segments:
             return (FeatureSegment(segment_index=0, start=self.start, end=self.end),)
-        if self.strand == '+':
-            return self.segments
-        return tuple(reversed(self.segments))
+        return self.segments
+
+    @property
+    def length_nt(self) -> int:
+        """Total coding nucleotide length across all exon segments."""
+        return sum(seg.end - seg.start for seg in self.coding_segments)
 
     def genomic_to_cds_position(self, pos: int) -> int | None:
-        """Return the 0-based CDS offset for one genomic position, or None outside coding segments."""
+        """Map a 0-based genomic position to its 0-based CDS offset, or None outside exons."""
         cds_offset = 0
-        for segment in self._coding_segments:
+        for segment in self.coding_segments:
             segment_length = segment.end - segment.start
             if segment.start <= pos < segment.end:
                 if self.strand == '+':
@@ -89,92 +129,62 @@ class FeatureRecord:
         return None
 
     def cds_to_genomic_position(self, cds_pos: int) -> int | None:
-        """Return the genomic position for one 0-based CDS offset, or None outside the CDS."""
+        """Map a 0-based CDS offset to its 0-based genomic position, or None outside the CDS."""
         if cds_pos < 0:
             return None
-
         remaining = cds_pos
-        for segment in self._coding_segments:
+        for segment in self.coding_segments:
             segment_length = segment.end - segment.start
             if remaining < segment_length:
                 if self.strand == '+':
                     return segment.start + remaining
                 return (segment.end - 1) - remaining
             remaining -= segment_length
-
         return None
 
-
     def contains(self, pos: int) -> bool:
-        """
-        Return True if pos (0-based) falls within this feature.
-
-        :param pos: 0-based genomic position
-        :return: True if position is within feature bounds
-        """
+        """Return True if 0-based genomic ``pos`` falls inside any coding exon."""
         return self.genomic_to_cds_position(pos) is not None
 
     def codon_index(self, pos: int) -> int | None:
-        """
-        Return 0-based codon index for a 0-based genomic position.
-
-        :param pos: 0-based genomic position
-        :return: 0-based codon index
-        """
-        nt_offset = self.genomic_to_cds_position(pos)
-        if nt_offset is None:
+        """Return 0-based codon index for genomic ``pos``, or None outside the coding frame."""
+        cds_pos = self.genomic_to_cds_position(pos)
+        if cds_pos is None or cds_pos < self.codon_start:
             return None
-        return (nt_offset - self.codon_start) // 3
+        return (cds_pos - self.codon_start) // 3
 
     def codon_position_in_codon(self, pos: int) -> int | None:
-        """
-        Return 0-based position within the codon (0, 1, or 2).
-
-        :param pos: 0-based genomic position
-        :return: 0-based position within codon
-        """
-        nt_offset = self.genomic_to_cds_position(pos)
-        if nt_offset is None:
+        """Return 0-based nucleotide offset within its codon (0, 1, or 2), or None."""
+        cds_pos = self.genomic_to_cds_position(pos)
+        if cds_pos is None or cds_pos < self.codon_start:
             return None
-        return (nt_offset - self.codon_start) % 3
+        return (cds_pos - self.codon_start) % 3
 
     @property
     def display_name(self) -> str:
-        """Return the preferred display name for reports: protein for mat_peptides (if present), else name."""
+        """Preferred label for reports: protein name for mat_peptides when present, else name."""
         if self.feature_type == 'mat_peptide' and self.protein:
             return self.protein
         return self.name
 
 
 @dataclass(frozen=True)
-class FeatureSegment:
-    """One CDS genomic segment as a 0-based [start, end) interval."""
-
-    segment_index: int
-    start: int
-    end: int
-
-
-@dataclass(frozen=True)
 class IntronInterval:
-    """One intron detected between two CDS exons in a spliced-feature alignment.
+    """One intron skipped between CDS exons in an unspliced-query alignment.
 
-    Carried on :class:`FeatureMatch` so downstream consumers (FASTA variant
-    emission, VCF remap, cache, visualization) can skip the intron without
-    re-deriving its position from the CIGAR.
+    ``query_start`` is the 0-based exon-only coding-orientation offset relative to the
+    aligned region start; consumers indexing the unspliced region accumulate preceding
+    intron lengths via ``full_intron_spans()``.
     """
 
-    cds_junction_pos: int  # 0-based CDS offset where the intron begins
-    query_start: int       # 0-based query offset relative to the alignment's
-                           # coding-orientation region start (RC-relative for
-                           # '-' strand); downstream consumers add the region's
-                           # absolute start to obtain strand-specific coordinates
-    length: int            # intron length in query nt
+    cds_junction_pos: int
+    query_start: int
+    length: int
 
 
 @dataclass
 class ResistanceRule:
-    """A single resistance rule loaded from the database."""
+    """An atomic resistance rule targeting one feature codon position."""
 
     id: int
     feature_name: str
@@ -200,31 +210,8 @@ class ResistanceRule:
 
 
 @dataclass
-class FormulaRuleRuntime:
-    """Runtime representation of one formula rule and its referenced atomic members."""
-
-    id: int
-    formula_id: str
-    label: str
-    normalized_expression: str
-    drug_name: str
-    drug_id: int
-    phenotype: str
-    clinical_phenotype: str
-    ic50: str
-    fold_ic50: str
-    score: str
-    source: str
-    comment: str
-    pubchem_url: str = ''
-    description: str = ''
-    publications: list[Publication] = field(default_factory=list)
-    member_rules: dict[str, ResistanceRule] = field(default_factory=dict)
-
-
-@dataclass
 class ResistanceRuleSetMember:
-    """One member mutation within a combined resistance rule set."""
+    """One atomic member referenced inside a boolean formula resistance rule."""
 
     id: int
     rule_set_id: int
@@ -239,7 +226,7 @@ class ResistanceRuleSetMember:
 
 @dataclass
 class ResistanceRuleSet:
-    """A combined resistance rule requiring multiple member mutations to co-occur."""
+    """A boolean formula resistance rule combining one or more atomic members."""
 
     id: int
     drug_name: str
@@ -261,28 +248,7 @@ class ResistanceRuleSet:
 
 @dataclass
 class CodonState:
-    """One candidate codon state from Fréchet-intersection inference.
-
-    Represents a possible exact nucleotide codon arising from same-codon SNPs,
-    with the sharp Fréchet bounds on its guaranteed co-occurrence frequency.
-
-    - ``alt_codon``: the complete three-base candidate codon.
-    - ``alt_aa``: translated single-letter amino acid (``'?'`` if untranslatable).
-    - ``lower``: Fréchet lower bound — the minimum guaranteed frequency of this
-      exact codon state. This is the only frequency reported for combined events;
-      it is a conservative minimum, NOT a phase-derived point estimate.
-    - ``upper``: Fréchet upper bound — the maximum possible co-occurrence.
-    - ``forced_fraction``: ``lower / upper`` — the minimum fraction of the rarest
-      required condition forced into this codon state.
-    - ``accepted``: True when ``lower > eps`` and ``forced_fraction >= threshold``.
-    - ``member_indices``: indices (into the input variant list) of the SNPs that
-      differ from the reference in this state.
-
-    The calculation uses sharp Fréchet intersection bounds and does NOT infer
-    physical phase. The acceptance threshold is an explicit conservative
-    interpretation policy (passing means the guaranteed portion is at least
-    twice the potentially unshared portion).
-    """
+    """One candidate codon state from Fréchet lower-bound or BAM read-backed co-occurrence."""
 
     alt_codon: str
     alt_aa: str
@@ -295,18 +261,11 @@ class CodonState:
 
 @dataclass
 class VariantCall:
-    """A single variant extracted from a VCF record (0-based internal position).
+    """A 0-based nucleotide variant in internal-reference coordinates.
 
-    ``user_*`` fields preserve the variant's coordinates on the user-supplied
-    reference (the VCF CHROM/POS/REF/ALT as parsed, before remap to internal
-    coordinates). They are populated by the VCF remap path and left empty for
-    FASTA-emitted variants (no user reference is supplied in FASTA mode).
-
-    ``query_codon_feature_id`` is the id of the feature whose alignment frame
-    produced ``query_ref_codon`` (0 when unset, e.g. legacy callers). A query
-    codon is only trusted by annotation when the annotating feature has this
-    id — a codon extracted from an overlapping second feature's frame must not
-    leak into another feature's annotation.
+    Carries optional provenance from VCF reference comparison (``user_*`` coords,
+    ``source``, ``record_index``, ``alt_index``, ``haplotype_links``) and FASTA/reconciled
+    codon context (``query_ref_codon`` bound to ``query_codon_feature_id``).
     """
 
     chrom: str
@@ -322,11 +281,15 @@ class VariantCall:
     user_pos: int = 0
     user_ref: str = ''
     user_alt: str = ''
+    source: str = ''
+    record_index: int = -1
+    alt_index: int = -1
+    haplotype_links: tuple[tuple[int, int, float], ...] = ()
 
 
 @dataclass
 class AnnotatedVariant:
-    """A variant with codon-aware amino acid annotation and rule matches."""
+    """A variant annotated with codon-aware amino-acid consequence and matched rules."""
 
     variant: VariantCall
     feature_name: str = ''
@@ -339,74 +302,31 @@ class AnnotatedVariant:
     is_combined_codon_event: bool = False
     combined_member_count: int = 1
     combined_states: list[CodonState] = field(default_factory=list)
-    # Amino-acid frequency of the single-exchange codon state (this member
-    # carried, all co-codon members absent). Method-agnostic: for non-combined
-    # annotations and BAM-backed combined codons this is a directly measured
-    # frequency (``freq_method='observed'``); for Fréchet-combined codons it is
-    # the Fréchet lower bound (``freq_method='estimated'``). This is distinct
-    # from ``variant.allele_freq`` (the nucleotide frequency): for a single-SNP
-    # codon they are equal, but for combined-codon members the single-exchange
-    # amino acid requires this SNP present AND co-codon SNPs absent, so its
-    # frequency can be 0 even when the nucleotide frequency is high. This
-    # amino-acid frequency is what single-exchange rule matching and AF binning
-    # use. A member whose single state is Fréchet-impossible (lower=0) is
-    # guaranteed absent as a single exchange and must not be classified as a
-    # high-AF resistance hit.
+    # Amino-acid frequency of the single-exchange codon (distinct from variant.allele_freq
+    # for combined-codon members, where it may be 0.0 if the single state is impossible).
     single_exchange_aa_freq: float = _SINGLE_EXCHANGE_AA_FREQ_UNSET
-    # Per matched rule, the amino-acid frequency to display/bin in the report.
-    # Maps rule.id -> frequency. For single-exchange hits the value is the
-    # row's ``single_exchange_aa_freq`` (amino-acid frequency of the single
-    # codon); for combined-state hits it is the state's ``lower`` (amino-acid
-    # frequency of the combined codon). Never the nucleotide frequency.
+    # Per matched rule.id: amino-acid frequency and matched alt_aa actually triggering the rule.
     rule_effect_aa_freq: dict[int, float] = field(default_factory=dict)
-    # Per matched rule, the amino-acid allele that actually matched the rule.
-    # Maps rule.id -> alt_aa. For single-exchange hits this is ``ann.alt_aa``;
-    # for combined-state hits it is the combined state's ``alt_aa`` (which can
-    # differ from ``ann.alt_aa``). The Database Hits table uses this to display
-    # the amino-acid change that triggered the rule, not the row's single-
-    # exchange AA. Persisted so regenerated reports match the live report.
     rule_effect_alt: dict[int, str] = field(default_factory=dict)
-    # Provenance: how the amino-acid frequencies on this annotation were derived.
-    # 'observed' = directly measured (single-nucleotide VCF allele frequency for
-    #   non-combined annotations, or BAM read-backed codon co-occurrence for
-    #   combined codons with a BAM).
-    # 'estimated' = conservative Fréchet lower-bound inference (combined codons
-    #   without raw read data, i.e. no BAM).
-    # All ``combined_states`` on one annotation share the same method. The
-    # report label (observed/estimated) reads this field alone.
+    # 'observed' (single-SNP or BAM read-backed) vs 'estimated' (Fréchet lower bound).
     freq_method: str = 'observed'
     af_bin: str = ''
-    is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
+    is_fasta_mode: bool = False
     rule_matches: list[ResistanceRule] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        # Default single_exchange_aa_freq to the nucleotide frequency
-        # (variant.allele_freq) for non-combined annotations, where nucleotide
-        # and amino-acid frequencies coincide (one SNP -> one codon -> one AA).
-        # Combined members set it explicitly in _annotate_combined_snp_codon to
-        # the amino-acid frequency of the single-exchange codon; the sentinel
-        # distinguishes "unset" from a genuine 0.0 (Fréchet-impossible single,
-        # i.e. the amino acid is guaranteed absent despite a high nucleotide
-        # frequency).
-        if self.single_exchange_aa_freq != self.single_exchange_aa_freq:  # NaN check
+        # Default unset single_exchange_aa_freq to nucleotide AF; NaN check preserves genuine 0.0.
+        if self.single_exchange_aa_freq != self.single_exchange_aa_freq:
             self.single_exchange_aa_freq = self.variant.allele_freq
 
     @property
     def has_user_ref_coords(self) -> bool:
-        """Return True when user-reference coordinates are recorded for this annotation.
-
-        FASTA-emitted variants have no supplied user reference, so their user-ref
-        fields stay empty; VCF-remapped variants always carry them.
-        """
+        """Return True when supplied-reference VCF coordinates are recorded."""
         return bool(self.variant.user_ref or self.variant.user_alt)
 
     @property
     def user_ref_coords(self) -> tuple[str, int, str, str]:
-        """Return the preserved user-reference coordinates ``(chrom, pos, ref, alt)``.
-
-        Positions are 0-based, matching VCF parsing. Empty strings/0 indicate
-        FASTA-emitted variants with no supplied user reference.
-        """
+        """Return 0-based supplied-reference coordinates ``(chrom, pos, ref, alt)``."""
         return (
             self.variant.user_chrom,
             self.variant.user_pos,
@@ -416,7 +336,7 @@ class AnnotatedVariant:
 
     @property
     def non_formula_component_rule_matches(self) -> list[ResistanceRule]:
-        """Return matched single rules excluding internal formula-component placeholder rows."""
+        """Return matched single rules excluding internal formula-component placeholders."""
         return [rule for rule in self.rule_matches if not rule.is_internal_formula_component]
 
     @property
@@ -424,13 +344,10 @@ class AnnotatedVariant:
         return bool(self.non_formula_component_rule_matches)
 
     def drug_hits_json(self) -> list[dict]:
-        """
-        Return a JSON-serializable list of matched drug/rule info.
-
-        :return: list of dicts containing drug and rule information
-        """
+        """Serialize non-placeholder matched rules for results persistence and JSON export."""
         return [
             {
+                'rule_id': r.id,
                 'drug': r.drug_name,
                 'external_id': r.external_id,
                 'reference_identifier': r.reference_identifier,
@@ -441,18 +358,8 @@ class AnnotatedVariant:
                 'ic50': r.ic50,
                 'fold_ic50': r.fold_ic50,
                 'score': r.score,
-                'publications': [
-                    {
-                        'doi': p.doi,
-                        'title': p.title,
-                        'pubmed_id': p.pubmed_id,
-                        'raw_input': p.raw_input,
-                        'first_author': p.first_author,
-                        'year': p.year,
-                        'journal': p.journal,
-                    }
-                    for p in r.publications
-                ],
+                'source': r.source,
+                'publications': [p.to_dict() for p in r.publications],
                 'pubchem_url': r.pubchem_url,
             }
             for r in self.non_formula_component_rule_matches
@@ -461,27 +368,17 @@ class AnnotatedVariant:
 
 @dataclass
 class FormulaRuleHit:
-    """A fired formula resistance rule with its contributing annotated variants."""
+    """A fired boolean formula rule with its contributing annotations and Fréchet metrics."""
 
     rule_set: ResistanceRuleSet
     matched_variants: list[AnnotatedVariant] = field(default_factory=list)
     matched_member_ids: list[str] = field(default_factory=list)
-    # Fréchet guarantee of the firing clause: the lower bound on the guaranteed
-    # minimum co-occurrence of the contributing members (amino-acid frequency
-    # scale). Equals the winning member's effect lower for OR/XOR/single-member.
     frechet_lower: float = 0.0
-    # forced_fraction of the firing clause (lower / upper); 1.0 for
-    # OR/XOR/single-member winners.
     forced_fraction: float = 0.0
-    # Number of contributing members of the firing clause.
     member_count: int = 1
 
     def to_dict(self) -> dict:
-        """
-        Return a JSON-serializable representation of this formula rule hit.
-
-        :return: dict with rule set metadata and matched variant summaries
-        """
+        """Serialize this formula hit for results persistence and JSON export."""
         rs = self.rule_set
         return {
             'drug': rs.drug_name,
@@ -490,10 +387,7 @@ class FormulaRuleHit:
             'ic50': rs.ic50,
             'fold_ic50': rs.fold_ic50,
             'score': rs.score,
-            'publications': [
-                {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
-                for p in rs.publications
-            ],
+            'publications': [p.to_dict() for p in rs.publications],
             'source': rs.source,
             'pubchem_url': rs.pubchem_url,
             'rule_group': rs.group_name,
@@ -502,7 +396,7 @@ class FormulaRuleHit:
                 {
                     'member_id': m.external_id,
                     'feature': m.feature_name,
-                    'position': m.position + 1,  # 1-based for output
+                    'position': m.position + 1,  # 1-based for user-facing output
                     'reference': m.reference,
                     'mutation': m.mutation,
                 }
@@ -527,31 +421,23 @@ class FormulaRuleHit:
 
 @dataclass(frozen=True)
 class FeatureMatch:
-    """Result of aligning a query sequence to an internal feature CDS."""
+    """Result of aligning a query sequence against one internal feature CDS."""
 
     feature: FeatureRecord
     identity: float
-    cds_coverage: float   # fraction of CDS bases covered by the alignment
-    query_coverage: float  # fraction of query bases consumed by the alignment
+    cds_coverage: float
+    query_coverage: float
     query_start: int
     query_end: int
     strand: str
     cigar: str
-    cds_start: int = 0  # first aligned CDS position (0-based); used to reconstruct gapped strings
+    cds_start: int = 0
     intron_intervals: tuple[IntronInterval, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class ReferenceGroup:
-    """One matched internal reference within a (possibly multi-reference) profiling run.
-
-    Carries the per-reference query identity, alignment matches, and the ruled
-    features/rules loaded for that internal reference. A single-reference run
-    produces one ``ReferenceGroup``; a multi-chrom VCF run produces one per
-    matched FASTA record. Flat lists on :class:`ProfilingResult` (annotations,
-    formula_hits, coverage_gaps) carry ``feature_name`` so per-reference grouping
-    is derivable from this list.
-    """
+    """One matched internal reference (and its ruled features/rules) within a profiling run."""
 
     reference_name: str
     reference_id: int
@@ -562,20 +448,13 @@ class ReferenceGroup:
     feature_matches: list[FeatureMatch] = field(default_factory=list)
     features: list[FeatureRecord] = field(default_factory=list)
     rules: list[ResistanceRule] = field(default_factory=list)
-    formula_rules: list[FormulaRuleRuntime] = field(default_factory=list)
+    formula_rules: list[ResistanceRuleSet] = field(default_factory=list)
     rule_feature_names: set[str] = field(default_factory=set)
 
 
 @dataclass
 class ProfilingResult:
-    """Complete result of a single profiling run. HTML exports are derived from this object.
-
-    Per-reference data lives in ``references`` (one :class:`ReferenceGroup` per
-    matched internal reference). Read-only convenience properties
-    (:attr:`reference_name`, :attr:`reference_length_nt`, :attr:`query_sequence`,
-    :attr:`feature_matches`) delegate to ``references[0]`` to support incremental
-    migration of legacy single-reference readers; they are NOT stored fields.
-    """
+    """Complete output of a profiling run; feeds HTML/JSON/TSV/PDF exports and results DB."""
 
     project_name: str = ''
     organism: str = ''
@@ -587,7 +466,8 @@ class ProfilingResult:
     total_variants: int = 0
     variants_in_cds: int = 0
     resistance_hits: int = 0
-    is_fasta_mode: bool = False  # True when the run derived variants from a consensus FASTA, not a VCF
+    is_fasta_mode: bool = False
+    coverage_assessed: bool = False
     annotations: list[AnnotatedVariant] = field(default_factory=list)
     formula_hits: list[FormulaRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
@@ -596,74 +476,49 @@ class ProfilingResult:
 
     @property
     def reference_name(self) -> str:
-        """Primary reference name (first matched reference); '' when no references."""
         return self.references[0].reference_name if self.references else ''
 
     @property
     def reference_length_nt(self) -> int:
-        """Primary reference length in nucleotides; 0 when no references."""
         return self.references[0].reference_length_nt if self.references else 0
 
     @property
     def query_sequence(self) -> str:
-        """Primary reference query sequence; '' when no references."""
         return self.references[0].query_sequence if self.references else ''
 
     @property
     def feature_matches(self) -> list[FeatureMatch]:
-        """Primary reference feature matches; empty list when no references."""
         return self.references[0].feature_matches if self.references else []
 
     @property
     def cds_annotations(self) -> list[AnnotatedVariant]:
-        """
-        Return annotations that fall within a coding region.
-
-        :return: list of AnnotatedVariant with feature_name set
-        """
         return [a for a in self.annotations if a.feature_name]
 
     @property
     def database_hit_annotations(self) -> list[AnnotatedVariant]:
-        """
-        Return annotations that should be counted as database hits.
-
-        This includes direct resistance hits and formula-only member annotations referenced by
-        fired formula rules, without double-counting shared annotations.
-        """
+        """Return unique annotations counted as database hits (direct + fired formula members)."""
         hit_annotations: list[AnnotatedVariant] = []
-        seen_annotation_ids: set[int] = set()
+        seen_ids: set[int] = set()
 
         for ann in self.annotations:
-            if not ann.is_resistance_hit:
-                continue
-            ann_id = id(ann)
-            if ann_id in seen_annotation_ids:
-                continue
-            seen_annotation_ids.add(ann_id)
-            hit_annotations.append(ann)
+            if ann.is_resistance_hit and id(ann) not in seen_ids:
+                seen_ids.add(id(ann))
+                hit_annotations.append(ann)
 
         for formula_hit in self.formula_hits:
             for ann in formula_hit.matched_variants:
-                ann_id = id(ann)
-                if ann_id in seen_annotation_ids:
-                    continue
-                seen_annotation_ids.add(ann_id)
-                hit_annotations.append(ann)
+                if id(ann) not in seen_ids:
+                    seen_ids.add(id(ann))
+                    hit_annotations.append(ann)
 
         return hit_annotations
 
     @property
     def database_hit_count(self) -> int:
-        """Return the total number of database-hit annotations."""
         return len(self.database_hit_annotations)
 
     def summary_dict(self) -> dict:
-        """
-        Return a JSON-serializable summary (no per-variant detail).
-
-        :return: dict with project metadata and summary statistics
-        """
+        """Return a JSON-serializable summary of run metadata and counts."""
         return {
             'project_name': self.project_name,
             'organism': self.organism,
