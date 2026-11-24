@@ -1,8 +1,8 @@
 import Plotly from 'plotly.js-dist-min';
+
 import { baseLayout } from './database-plots/shared';
-import { useRef, useEffect, useState, useContext } from 'react';
+import { usePlotlyChart } from './database-plots/usePlotlyChart';
 import { Spinner } from './Spinner';
-import { ThemeContext } from '../hooks/useTheme';
 import {
   prepareHeatmapData,
   consequenceColor,
@@ -10,66 +10,167 @@ import {
   uniqueConsequenceTypes,
 } from './comparison-heatmap-data';
 
+const ALLELE_FREQ_COLORSCALE = [
+  [0, '#f0fdfa'],
+  [0.25, '#99f6e4'],
+  [0.5, '#2dd4bf'],
+  [0.75, '#0f766e'],
+  [1.0, '#7f1d1d'],
+];
+
+const HEATMAP_PLOT_CONFIG = {
+  responsive: true,
+  displayModeBar: true,
+  modeBarButtonsToAdd: ['toImage'],
+  toImageButtonOptions: {
+    format: 'svg',
+    filename: 'comparison-heatmap',
+  },
+};
+
+function heatmapTrace(xLabels, lineColor, overrides) {
+  return {
+    x: xLabels,
+    type: 'heatmap',
+    zmin: 0,
+    zmax: 1,
+    showscale: false,
+    xgap: 1,
+    ygap: 1,
+    xaxis: 'x',
+    line: { color: lineColor, width: 1 },
+    ...overrides,
+  };
+}
+
+function annotationAxis(start, end, color) {
+  return {
+    showticklabels: true,
+    showgrid: false,
+    domain: [start, end],
+    tickfont: { size: 10, color },
+  };
+}
+
+function renderHeatmap(container, data, theme) {
+  const prepared = prepareHeatmapData(data);
+  if (!prepared) {
+    Plotly.purge(container);
+    return;
+  }
+
+  const isDark = theme === 'dark';
+  const gridLineColor = isDark ? '#09090b' : '#ffffff';
+  const traces = [
+    // Coverage gap overlay behind main allele-frequency trace.
+    heatmapTrace(prepared.xLabels, gridLineColor, {
+      z: prepared.gapZ,
+      y: prepared.samples,
+      yaxis: 'y',
+      colorscale: isDark ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
+      customdata: prepared.gapCustomdata,
+      hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
+    }),
+    heatmapTrace(prepared.xLabels, isDark ? '#09090b' : '#333', {
+      z: prepared.mainZ,
+      y: prepared.samples,
+      yaxis: 'y',
+      colorscale: ALLELE_FREQ_COLORSCALE,
+      showscale: true,
+      colorbar: {
+        title: { text: 'Allele freq', side: 'right' },
+        tickvals: [0, 0.25, 0.5, 0.75, 1.0],
+        ticktext: ['0', '0.25', '0.5', '0.75', '1.0'],
+        thickness: 15,
+        tickfont: { size: 10, color: isDark ? '#a1a1aa' : '#71717a' },
+        outlinewidth: 0,
+      },
+      customdata: prepared.mainCustomdata,
+      hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
+    }),
+  ];
+
+  if (prepared.hasFeatures) {
+    traces.push(heatmapTrace(prepared.xLabels, gridLineColor, {
+      z: prepared.featureZValues,
+      y: ['Feature'],
+      yaxis: 'y2',
+      colorscale: prepared.featureColorscale,
+      zmax: Math.max(data.features.length - 1, 1),
+      customdata: prepared.featureCustomdata,
+      hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
+    }));
+  }
+
+  if (prepared.hasDbHits) {
+    traces.push(heatmapTrace(prepared.xLabels, gridLineColor, {
+      z: prepared.dbHitZ,
+      y: ['DB hit'],
+      yaxis: 'y3',
+      colorscale: [[0, '#f4f4f5'], [1, '#dc2626']],
+      customdata: prepared.dbHitCustomdata,
+      hovertemplate: '%{customdata[0]}<extra></extra>',
+    }));
+  }
+
+  if (prepared.hasConsequences) {
+    traces.push(heatmapTrace(prepared.xLabels, gridLineColor, {
+      z: prepared.consequenceZValues,
+      y: ['Consequence'],
+      yaxis: 'y4',
+      colorscale: prepared.consequenceColorscale,
+      zmax: Math.max(prepared.consequenceTypes.length - 1, 1),
+      customdata: prepared.consequenceCustomdata,
+      hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
+    }));
+  }
+
+  const base = baseLayout();
+  const axisLabelColor = isDark ? '#f4f4f5' : '#18181b';
+  const layout = {
+    ...base,
+    margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
+    xaxis: {
+      ...base.xaxis,
+      showgrid: false,
+      tickangle: 45,
+      side: 'bottom',
+      tickfont: { ...base.xaxis.tickfont, color: axisLabelColor },
+    },
+    yaxis: {
+      ...base.yaxis,
+      showgrid: false,
+      domain: [0, prepared.heatmapDomainEnd],
+      tickfont: { ...base.yaxis.tickfont, color: axisLabelColor },
+    },
+    height: prepared.height,
+    autosize: true,
+  };
+
+  if (prepared.hasFeatures) {
+    layout.yaxis2 = annotationAxis(prepared.featureDomainStart, prepared.featureDomainEnd, axisLabelColor);
+  }
+  if (prepared.hasDbHits) {
+    layout.yaxis3 = annotationAxis(prepared.dbHitDomainStart, prepared.dbHitDomainEnd, axisLabelColor);
+  }
+  if (prepared.hasConsequences) {
+    layout.yaxis4 = annotationAxis(prepared.consequenceDomainStart, prepared.consequenceDomainEnd, axisLabelColor);
+  }
+
+  Plotly.react(container, traces, layout, HEATMAP_PLOT_CONFIG);
+}
+
 /**
  * Interactive comparison heatmap rendered with Plotly.js.
- *
- * Props:
- * - data: CompareResponse object from the backend, or null
- * - isBusy: boolean — show spinner while loading
  */
 export function ComparisonHeatmap({ data, isBusy }) {
-  const containerRef = useRef(null);
-  const [plotError, setPlotError] = useState('');
-  const theme = useContext(ThemeContext);
-
-  useEffect(() => {
-    if (!data || !containerRef.current) {
-      // Clear previous plot if data is removed
-      if (containerRef.current) {
-        Plotly.purge(containerRef.current);
-      }
-      return;
-    }
-
-    setPlotError('');
-    try {
-      renderHeatmap(containerRef.current, data, theme);
-    } catch (err) {
-      setPlotError(String(err.message || err));
-    }
-
-    return () => {
-      if (containerRef.current) {
-        Plotly.purge(containerRef.current);
-      }
-    };
-  }, [data, theme]);
-
-  // Re-render heatmap on window resize (debounced) — Plots.resize() is insufficient
-  // for multi-yaxis domain layouts; a full re-render matches the "Compare selected" behavior
-  useEffect(() => {
-    if (!data || !containerRef.current) return;
-
-    let timeoutId = null;
-    const handleResize = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        if (containerRef.current && data) {
-          try {
-            renderHeatmap(containerRef.current, data, theme);
-          } catch (_) {
-            // ignore re-render errors on resize
-          }
-        }
-      }, 300);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      clearTimeout(timeoutId);
-    };
-  }, [data, theme]);
+  // Full re-render on resize preserves multi-yaxis domain alignment.
+  const { containerRef, plotError } = usePlotlyChart({
+    enabled: Boolean(data),
+    deps: [data],
+    resizeMode: 'rerender',
+    render: (el, activeTheme) => renderHeatmap(el, data, activeTheme),
+  });
 
   if (isBusy) {
     return (
@@ -91,255 +192,47 @@ export function ComparisonHeatmap({ data, isBusy }) {
     return null;
   }
 
-  // Build feature legend and simplified cell legend below the heatmap
-  let featureLegend = null;
-
-  if (data.features && data.features.length > 0) {
-    const featureColors = featureColorPalette(Math.max(data.features.length, 1));
-    const displayNames = data.feature_display_names || {};
-    featureLegend = (
-      <>
-        <span className="comparison-feature-legend-title">Features:</span>
-        {data.features.map((feature, idx) => (
-          <span key={feature} className="comparison-feature-legend-item">
-            <span className="comparison-feature-swatch" style={{ backgroundColor: featureColors[idx] }} />
-            {displayNames[feature] || feature}
-          </span>
-        ))}
-      </>
-    );
-  }
-
-  const cellLegend = (
-    <>
-      <span className="comparison-cell-legend-item">
-        <span className="comparison-cell-swatch" style={{ backgroundColor: '#a1a1aa' }} /> Coverage gap
-      </span>
-      <span className="comparison-cell-legend-item">
-        <span className="comparison-cell-swatch" style={{ backgroundColor: '#dc2626' }} /> Database hit
-      </span>
-    </>
-  );
-
-  // Consequence legend
-  const consequenceLegend = data.consequences && data.consequences.length > 0 ? (
-    <>
-      <span className="comparison-consequence-legend-title">Consequences:</span>
-      {uniqueConsequenceTypes(data.consequences).map((ctype) => (
-        <span key={ctype} className="comparison-consequence-legend-item">
-          <span
-            className="comparison-consequence-swatch"
-            style={{ backgroundColor: consequenceColor(ctype) }}
-          />
-          {ctype}
-        </span>
-      ))}
-    </>
-  ) : null;
+  const featureColors = data.features?.length ? featureColorPalette(data.features.length) : [];
+  const displayNames = data.feature_display_names || {};
 
   return (
     <>
       <div className="comparison-heatmap-container" ref={containerRef} />
       <div className="comparison-legend-row">
-        {featureLegend}
+        {data.features && data.features.length > 0 && (
+          <>
+            <span className="comparison-feature-legend-title">Features:</span>
+            {data.features.map((feature, idx) => (
+              <span key={feature} className="comparison-feature-legend-item">
+                <span className="comparison-feature-swatch" style={{ backgroundColor: featureColors[idx] }} />
+                {displayNames[feature] || feature}
+              </span>
+            ))}
+          </>
+        )}
         <span className="comparison-legend-separator" />
-        {cellLegend}
-        {consequenceLegend && (
+        <span className="comparison-cell-legend-item">
+          <span className="comparison-cell-swatch" style={{ backgroundColor: '#a1a1aa' }} /> Coverage gap
+        </span>
+        <span className="comparison-cell-legend-item">
+          <span className="comparison-cell-swatch" style={{ backgroundColor: '#dc2626' }} /> Database hit
+        </span>
+        {data.consequences && data.consequences.length > 0 && (
           <>
             <span className="comparison-legend-separator" />
-            {consequenceLegend}
+            <span className="comparison-consequence-legend-title">Consequences:</span>
+            {uniqueConsequenceTypes(data.consequences).map((ctype) => (
+              <span key={ctype} className="comparison-consequence-legend-item">
+                <span
+                  className="comparison-consequence-swatch"
+                  style={{ backgroundColor: consequenceColor(ctype) }}
+                />
+                {ctype}
+              </span>
+            ))}
           </>
         )}
       </div>
     </>
   );
-}
-
-function renderHeatmap(container, data, theme) {
-  const prepared = prepareHeatmapData(data);
-  if (!prepared) {
-    Plotly.purge(container);
-    return;
-  }
-
-  const traces = [];
-
-  // 1. Coverage gap overlay trace (behind main trace)
-  const gapTrace = {
-    z: prepared.gapZ,
-    x: prepared.xLabels,
-    y: prepared.samples,
-    type: 'heatmap',
-    colorscale: theme === 'dark' ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
-    showscale: false,
-    zmin: 0,
-    zmax: 1,
-    xgap: 1,
-    ygap: 1,
-    xaxis: 'x',
-    yaxis: 'y',
-    customdata: prepared.gapCustomdata,
-    hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
-    line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
-  };
-  traces.push(gapTrace);
-
-  // 2. Main allele frequency trace
-  const mainTrace = {
-    z: prepared.mainZ,
-    x: prepared.xLabels,
-    y: prepared.samples,
-    type: 'heatmap',
-    colorscale: [
-      [0, '#f0fdfa'],
-      [0.25, '#99f6e4'],
-      [0.5, '#2dd4bf'],
-      [0.75, '#0f766e'],
-      [1.0, '#7f1d1d'],
-    ],
-    zmin: 0,
-    zmax: 1,
-    showscale: true,
-    colorbar: {
-      title: { text: 'Allele freq', side: 'right' },
-      tickvals: [0, 0.25, 0.5, 0.75, 1.0],
-      ticktext: ['0', '0.25', '0.5', '0.75', '1.0'],
-      thickness: 15,
-      tickfont: { size: 10, color: theme === 'dark' ? '#a1a1aa' : '#71717a' },
-      outlinewidth: 0,
-    },
-    xgap: 1,
-    ygap: 1,
-    xaxis: 'x',
-    yaxis: 'y',
-    customdata: prepared.mainCustomdata,
-    hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
-    line: { color: theme === 'dark' ? '#09090b' : '#333', width: 1 },
-  };
-  traces.push(mainTrace);
-
-  // 3. Feature annotation row
-  if (prepared.hasFeatures) {
-    const featureTrace = {
-      z: prepared.featureZValues,
-      x: prepared.xLabels,
-      y: ['Feature'],
-      type: 'heatmap',
-      colorscale: prepared.featureColorscale,
-      zmin: 0,
-      zmax: Math.max(data.features.length - 1, 1),
-      showscale: false,
-      xgap: 1,
-      ygap: 1,
-      xaxis: 'x',
-      yaxis: 'y2',
-      customdata: prepared.featureCustomdata,
-      hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
-      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
-    };
-    traces.push(featureTrace);
-  }
-
-  // 4. DB hit annotation bar
-  if (prepared.hasDbHits) {
-    const dbHitTrace = {
-      z: prepared.dbHitZ,
-      x: prepared.xLabels,
-      y: ['DB hit'],
-      type: 'heatmap',
-      colorscale: [[0, '#f4f4f5'], [1, '#dc2626']],
-      zmin: 0,
-      zmax: 1,
-      showscale: false,
-      xgap: 1,
-      ygap: 1,
-      xaxis: 'x',
-      yaxis: 'y3',
-      customdata: prepared.dbHitCustomdata,
-      hovertemplate: '%{customdata[0]}<extra></extra>',
-      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
-    };
-    traces.push(dbHitTrace);
-  }
-
-  // 5. Consequence annotation row
-  if (prepared.hasConsequences) {
-    const consequenceTrace = {
-      z: prepared.consequenceZValues,
-      x: prepared.xLabels,
-      y: ['Consequence'],
-      type: 'heatmap',
-      colorscale: prepared.consequenceColorscale,
-      zmin: 0,
-      zmax: Math.max(prepared.consequenceTypes.length - 1, 1),
-      showscale: false,
-      xgap: 1,
-      ygap: 1,
-      xaxis: 'x',
-      yaxis: 'y4',
-      customdata: prepared.consequenceCustomdata,
-      hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
-      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
-    };
-    traces.push(consequenceTrace);
-  }
-
-  // Layout with domains for all axes
-  const axisLabelColor = theme === 'dark' ? '#f4f4f5' : '#18181b';
-  const layout = {
-    ...baseLayout(),
-    margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
-    xaxis: {
-      ...baseLayout().xaxis,
-      showgrid: false,
-      tickangle: 45,
-      side: 'bottom',
-      tickfont: { ...baseLayout().xaxis.tickfont, color: axisLabelColor },
-    },
-    yaxis: {
-      ...baseLayout().yaxis,
-      showgrid: false,
-      domain: [0, prepared.heatmapDomainEnd],
-      tickfont: { ...baseLayout().yaxis.tickfont, color: axisLabelColor },
-    },
-    height: prepared.height,
-    autosize: true,
-  };
-
-  if (prepared.hasFeatures) {
-    layout.yaxis2 = {
-      showticklabels: true,
-      showgrid: false,
-      domain: [prepared.featureDomainStart, prepared.featureDomainEnd],
-      tickfont: { size: 10, color: axisLabelColor },
-    };
-  }
-
-  if (prepared.hasDbHits) {
-    layout.yaxis3 = {
-      showticklabels: true,
-      showgrid: false,
-      domain: [prepared.dbHitDomainStart, prepared.dbHitDomainEnd],
-      tickfont: { size: 10, color: axisLabelColor },
-    };
-  }
-
-  if (prepared.hasConsequences) {
-    layout.yaxis4 = {
-      showticklabels: true,
-      showgrid: false,
-      domain: [prepared.consequenceDomainStart, prepared.consequenceDomainEnd],
-      tickfont: { size: 10, color: axisLabelColor },
-    };
-  }
-
-  Plotly.react(container, traces, layout, {
-    responsive: true,
-    displayModeBar: true,
-    modeBarButtonsToAdd: ['toImage'],
-    toImageButtonOptions: {
-      format: 'svg',
-      filename: 'comparison-heatmap',
-    },
-  });
 }

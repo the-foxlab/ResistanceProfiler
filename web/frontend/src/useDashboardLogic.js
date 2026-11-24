@@ -1,76 +1,55 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import faviconSrc from './assets/favicon.svg';
 import packageJson from '../package.json';
-import { FRONTEND_CONFIG } from './config';
-import { API_BASE, buildHeaders, apiGet, chunkIds, getArtifactBundleLimit, setArtifactBundleLimit } from './api';
-import { ROUTES } from './routes';
+import { API_BASE, apiGet, setArtifactBundleLimit } from './api';
 import { PROFILE_MODES } from './constants';
 import { useProfileSubmit } from './hooks/useProfileSubmit';
 import { useBatchManager } from './hooks/useBatchManager';
 import { useMutationBrowser } from './hooks/useMutationBrowser';
 import { useSessionResults } from './hooks/useSessionResults';
+import { useSessionCleanup } from './hooks/useSessionCleanup';
 import { useUploadManager } from './hooks/useUploadManager';
 import { useComparisonManager } from './hooks/useComparisonManager';
 
-// Web version is a build-time constant from package.json; the CLI version comes
-// from the backend (/api/ui/config) since it reflects the installed respro package.
 const webVersion = packageJson.version;
 
 export function useDashboardLogic() {
-  // Top-level orchestration state not owned by any domain hook.
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [statusError, setStatusError] = useState('');
-  // ``legalLink`` is null when the imprint feature is disabled; otherwise it is the
-  // href the footer "Legal notice" link should point at — an external URL when the
-  // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
   const [legalLink, setLegalLink] = useState(null);
-  // ``contactEmail`` is null when the contact-e-mail feature is disabled; otherwise
-  // it is the bare address rendered as a ``mailto:`` link in the footer and on the
-  // About tab.
   const [contactEmail, setContactEmail] = useState(null);
   const [cliVersion, setCliVersion] = useState(null);
-  // The URL is the source of truth for the active page; `activeMode` is derived
-  // so existing tab components keep working unchanged.
-  const location = useLocation();
-  const navigate = useNavigate();
-  const activeMode = _pageForPath(location.pathname);
-  const setActiveMode = (mode) => navigate(_pathForPage(mode));
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
+  const navigate = useNavigate();
 
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
-  // Compose domain hooks.
   const session = useSessionResults();
   const upload = useUploadManager();
-  const mutations = useMutationBrowser({ selectedDatabaseId, setStatusError });
+  const mutations = useMutationBrowser({ setStatusError });
   const profile = useProfileSubmit({
     setStatusError,
-    addReportPath: session.addReportPath,
     addUploadedPath: session.addUploadedPath,
     addResultArtifactPaths: session.addResultArtifactPaths,
     setSessionResults: session.setSessionResults,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     setInlineReportPath: session.setInlineReportPath,
-    setInlineReportLabel: session.setInlineReportLabel,
     databases,
     selectedDatabaseId,
     activeProfileMode,
-    analyzeSubMode,
     setUploadProgress: upload.setUploadProgress,
     beginUpload: upload.beginUpload,
     endUpload: upload.endUpload,
   });
   const batch = useBatchManager({
     selectedDatabaseId,
-    addReportPath: session.addReportPath,
     addUploadedPath: session.addUploadedPath,
     addResultArtifactPaths: session.addResultArtifactPaths,
     setSessionResults: session.setSessionResults,
     setUploadProgress: upload.setUploadProgress,
-    setStatusError,
   });
   const comparison = useComparisonManager({
     sessionResults: session.sessionResults,
@@ -79,12 +58,10 @@ export function useDashboardLogic() {
     setStatusError,
   });
 
-  // Database loading effect (top-level orchestration).
   useEffect(() => {
     const initData = async () => {
       try {
-        const uiConfigPayload = await apiGet('/api/ui/config').catch(() => null);
-        const uiConfig = uiConfigPayload?.data || {};
+        const uiConfig = (await apiGet('/api/ui/config').catch(() => null))?.data || {};
         if (Number.isFinite(uiConfig.batch_max_samples) && uiConfig.batch_max_samples > 0) {
           batch.setBatchMaxSamples(uiConfig.batch_max_samples);
         }
@@ -94,20 +71,16 @@ export function useDashboardLogic() {
         if (Number.isInteger(uiConfig.artifact_bundle_max_artifacts) && uiConfig.artifact_bundle_max_artifacts > 0) {
           setArtifactBundleLimit(uiConfig.artifact_bundle_max_artifacts);
         }
-        if (uiConfig.cli_version) {
-          setCliVersion(uiConfig.cli_version);
-        }
+        if (uiConfig.cli_version) setCliVersion(uiConfig.cli_version);
+
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
         setLegalLink(_resolveLegalLink(legalPayload?.data));
         const contactPayload = await apiGet('/api/ui/contact').catch(() => null);
         setContactEmail(_resolveContactEmail(contactPayload?.data));
-        const payload = await apiGet('/api/databases');
-        const items = payload.data.items || [];
+
+        const items = (await apiGet('/api/databases')).data.items || [];
         setDatabases(items);
-        if (items.length > 0) {
-          setSelectedDatabaseId(items[0].id);
-          return;
-        }
+        if (items.length > 0) setSelectedDatabaseId(items[0].id);
       } catch (error) {
         setStatusError(`Error loading data: ${error.message}`);
       }
@@ -115,83 +88,13 @@ export function useDashboardLogic() {
     initData();
   }, []);
 
-  // Mutation loading effect — reload when database changes.
   useEffect(() => {
-    if (!selectedDatabaseId) {
-      return;
-    }
-    mutations.loadMutations(selectedDatabaseId);
-  }, [selectedDatabase, selectedDatabaseId]);
+    if (selectedDatabaseId) mutations.loadMutations(selectedDatabaseId);
+  }, [selectedDatabaseId]);
 
-  // Report path sync effect.
+  useSessionCleanup(session.uploadedPaths, session.reportPaths);
+
   useEffect(() => {
-    if (!session.selectedProfileReportPath) {
-      return;
-    }
-    const selectedOption = session.reportOptions.find((option) => option.path === session.selectedProfileReportPath);
-    session.setInlineReportPath(session.selectedProfileReportPath);
-    session.setInlineReportLabel(selectedOption ? selectedOption.label : 'Selected report');
-  }, [session.reportOptions, session.selectedProfileReportPath]);
-
-  // Session cleanup effect (cross-cutting concern using uploadedPaths, reportPaths).
-  useEffect(() => {
-    const cleanupUrl = `${API_BASE}/api/session/cleanup`;
-
-    const handlePageHide = (event) => {
-      if (event.persisted || (session.uploadedPaths.length === 0 && session.reportPaths.length === 0)) {
-        return;
-      }
-      const limit = getArtifactBundleLimit();
-      const uploadChunks = chunkIds(session.uploadedPaths, limit);
-      const artifactChunks = chunkIds(session.reportPaths, limit);
-      const requestCount = Math.max(uploadChunks.length, artifactChunks.length);
-      if (requestCount > 1) {
-        console.warn('Session cleanup needs multiple requests; rate limits may prevent cleanup.');
-      }
-      for (let index = 0; index < requestCount; index += 1) {
-        const payload = JSON.stringify({
-          upload_ids: uploadChunks[index] || [],
-          artifact_ids: artifactChunks[index] || [],
-        });
-        if (navigator.sendBeacon) {
-          const blob = new Blob([payload], { type: 'application/json' });
-          try {
-            if (navigator.sendBeacon(cleanupUrl, blob)) {
-              continue;
-            }
-            console.warn('Session cleanup beacon was rejected; attempting keepalive fetch.');
-          } catch (error) {
-            console.warn('Session cleanup beacon failed; attempting keepalive fetch.', error);
-          }
-        }
-        try {
-          fetch(cleanupUrl, {
-            method: 'POST',
-            headers: buildHeaders({ 'Content-Type': 'application/json' }),
-            body: payload,
-            keepalive: true,
-          }).then((response) => {
-            if (!response.ok) {
-              console.warn(`Session cleanup failed with HTTP ${response.status}.`);
-            }
-          }).catch((error) => {
-            console.warn('Session cleanup keepalive request failed.', error);
-          });
-        } catch (error) {
-          console.warn('Session cleanup keepalive request failed.', error);
-        }
-      }
-    };
-
-    window.addEventListener('pagehide', handlePageHide);
-    return () => {
-      window.removeEventListener('pagehide', handlePageHide);
-    };
-  }, [session.uploadedPaths, session.reportPaths]);
-
-  // Favicon effect.
-  useEffect(() => {
-    // Ensure the app uses the bundled SVG favicon in all entry modes.
     let link = document.querySelector('link[rel="icon"]');
     if (!link) {
       link = document.createElement('link');
@@ -202,17 +105,11 @@ export function useDashboardLogic() {
     link.setAttribute('href', faviconSrc);
   }, []);
 
+  const { loadMutations: _loadMutations, ...mutationState } = mutations;
+  const { setBatchMaxSamples: _setMax, setSampleLimitPerMinute: _setLimit, ...batchState } = batch;
+
   return {
-    // Expose one stable object so the view component stays presentation-focused.
-    API_BASE,
     PROFILE_MODES,
-    // Profile submit
-    vcfInput: profile.vcfInput,
-    setVcfInput: profile.setVcfInput,
-    fastaInput: profile.fastaInput,
-    setFastaInput: profile.setFastaInput,
-    rules: mutations.rules,
-    formulaRules: mutations.formulaRules,
     databases,
     selectedDatabase,
     selectedDatabaseId,
@@ -222,159 +119,36 @@ export function useDashboardLogic() {
     contactEmail,
     cliVersion,
     webVersion,
-    selectedProfileReportPath: session.selectedProfileReportPath,
-    setSelectedProfileReportPath: session.setSelectedProfileReportPath,
-    mutationFilter: mutations.mutationFilter,
-    setMutationFilter: mutations.setMutationFilter,
-    mutationFilterColumn: mutations.mutationFilterColumn,
-    setMutationFilterColumn: mutations.setMutationFilterColumn,
-    mutationSortColumn: mutations.mutationSortColumn,
-    setMutationSortColumn: mutations.setMutationSortColumn,
-    mutationSortAsc: mutations.mutationSortAsc,
-    setMutationSortAsc: mutations.setMutationSortAsc,
-    formulaFilter: mutations.formulaFilter,
-    setFormulaFilter: mutations.setFormulaFilter,
-    formulaFilterColumn: mutations.formulaFilterColumn,
-    setFormulaFilterColumn: mutations.setFormulaFilterColumn,
-    mutationsLoaded: mutations.mutationsLoaded,
-    activeMode,
-    setActiveMode,
     navigate,
     activeProfileMode,
     setActiveProfileMode,
     analyzeSubMode,
     setAnalyzeSubMode,
-    sessionResults: session.sessionResults,
-    inlineReportPath: session.inlineReportPath,
-    inlineReportLabel: session.inlineReportLabel,
-    mutationColumns: mutations.mutationColumns,
-    formulaColumns: mutations.formulaColumns,
-    mutationPlotMeta: mutations.mutationPlotMeta,
-    displayedRules: mutations.displayedRules,
-    displayedFormulaRules: mutations.displayedFormulaRules,
-    reportOptions: session.reportOptions,
-    isProfileBusy: profile.isProfileBusy,
-    canCancelJob: profile.canCancelJob,
-    activeJobStatus: profile.activeJobStatus,
-    isCancelingJob: profile.isCancelingJob,
-    cancelActiveJob: profile.cancelActiveJob,
-    runSelectedProfile: profile.runSelectedProfile,
-    runExampleProfile: profile.runExampleProfile,
-    buildReportUrl: profile.buildReportUrl,
-    buildArtifactUrl: profile.buildArtifactUrl,
-    uploadFastaFile: profile.uploadFastaFile,
-    uploadVcfFile: profile.uploadVcfFile,
-    uploadReferenceFile: profile.uploadReferenceFile,
-    uploadBamFile: profile.uploadBamFile,
-    uploadJsonFile: profile.uploadJsonFile,
-    jsonInputId: profile.jsonInputId,
-    isRegenerateBusy: profile.isProcessingRegenerate,
-    runRegenerateFromJson: profile.runRegenerateFromJson,
-    downloadMutationsAsTsv: mutations.downloadMutationsAsTsv,
-    downloadFormulaRulesAsTsv: mutations.downloadFormulaRulesAsTsv,
     uploadProgress: upload.uploadProgress,
     isUploading: upload.isUploading,
-    cancelUpload: profile.cancelUpload,
-    // Batch
-    isBatchUploading: batch.isBatchUploading,
-    cancelBatchUpload: batch.cancelBatchUpload,
-    batchMode: batch.batchMode,
-    setBatchMode: batch.setBatchMode,
-    batchVcfFiles: batch.batchVcfFiles,
-    batchFastaFiles: batch.batchFastaFiles,
-    batchJsonFiles: batch.batchJsonFiles,
-    batchReferenceFasta: batch.batchReferenceFasta,
-    batchSamples: batch.batchSamples,
-    batchSubmitting: batch.batchSubmitting,
-    isBatchDownloadBusy: batch.isBatchDownloadBusy,
-    batchError: batch.batchError,
-    batchRateLimitCooldown: batch.batchRateLimitCooldown,
-    setBatchRateLimitCooldown: batch.setBatchRateLimitCooldown,
-    batchSubmitted: batch.batchSubmitted,
-    batchMaxSamples: batch.batchMaxSamples,
-    sampleLimitPerMinute: batch.sampleLimitPerMinute,
-    batchVcfCutoffs: batch.batchVcfCutoffs,
-    setBatchVcfCutoffs: batch.setBatchVcfCutoffs,
-    addBatchVcfFiles: batch.addBatchVcfFiles,
-    addBatchFastaFiles: batch.addBatchFastaFiles,
-    addBatchJsonFiles: batch.addBatchJsonFiles,
-    addBatchBamFiles: batch.addBatchBamFiles,
-    attachBatchBam: batch.attachBatchBam,
-    removeBatchFile: batch.removeBatchFile,
-    uploadBatchReferenceFasta: batch.uploadBatchReferenceFasta,
-    submitBatch: batch.submitBatch,
-    downloadAllBatchArtifacts: batch.downloadAllBatchArtifacts,
-    resetBatch: batch.resetBatch,
-    // Session
+    sessionResults: session.sessionResults,
+    selectedProfileReportPath: session.selectedProfileReportPath,
+    setSelectedProfileReportPath: session.setSelectedProfileReportPath,
+    inlineReportPath: session.inlineReportPath,
+    reportOptions: session.reportOptions,
     isSessionDownloadBusy: session.isSessionDownloadBusy,
-    downloadAllSessionArtifacts: () => session.downloadAllSessionArtifacts(setStatusError),
-    // Comparison
     selectedResultIndices: session.selectedResultIndices,
     setSelectedResultIndices: session.setSelectedResultIndices,
-    comparisonDbId: comparison.comparisonDbId,
-    comparisonRefName: comparison.comparisonRefName,
-    selectAllComparable: comparison.selectAllComparable,
-    comparisonData: comparison.comparisonData,
-    isComparisonBusy: comparison.isComparisonBusy,
-    nonSynonymousOnly: comparison.nonSynonymousOnly,
-    setNonSynonymousOnly: comparison.setNonSynonymousOnly,
-    dbHitsOnly: comparison.dbHitsOnly,
-    setDbHitsOnly: comparison.setDbHitsOnly,
-    fetchComparisonData: comparison.fetchComparisonData,
     downloadSelectedArtifacts: () => session.downloadSelectedArtifacts(setStatusError),
-    clearComparison: comparison.clearComparison,
+    ...mutationState,
+    ...profile,
+    ...batchState,
+    ...comparison,
   };
 }
 
-/**
- * Resolve the footer "Legal notice" href from the ``/api/ui/legal`` payload.
- *
- * Returns ``null`` when the imprint feature is disabled. For ``kind:'url'`` the
- * external URL is returned so the footer links straight to the hosted imprint. For
- * ``kind:'path'`` (or a stale backend that omits ``kind``) the self-hosted ``/legal``
- * route is returned. A disabled payload without ``kind`` is treated as path mode.
- */
 export function _resolveLegalLink(legalData) {
-  if (!legalData || !legalData.enabled) {
-    return null;
-  }
-  if (legalData.kind === 'url' && legalData.url) {
-    return legalData.url;
-  }
+  if (!legalData || !legalData.enabled) return null;
+  if (legalData.kind === 'url' && legalData.url) return legalData.url;
   return `${API_BASE}/legal`;
 }
 
-/**
- * Resolve the footer / About contact e-mail from the ``/api/ui/contact`` payload.
- *
- * Returns ``null`` when the contact feature is disabled or the address is missing,
- * otherwise the bare address string (rendered as a ``mailto:`` link by the view).
- */
 export function _resolveContactEmail(contactData) {
-  if (!contactData || !contactData.enabled || !contactData.email) {
-    return null;
-  }
+  if (!contactData || !contactData.enabled || !contactData.email) return null;
   return contactData.email;
 }
-
-// Derived from the single route table in routes.js; keyed by page id.
-const PAGE_TO_PATH = Object.fromEntries(
-  ROUTES.map(({ path, page }) => [page, path]),
-);
-
-function _pageForPath(pathname) {
-  for (const [page, path] of Object.entries(PAGE_TO_PATH)) {
-    if (pathname === path) {
-      return page;
-    }
-  }
-  // Sub-pages map to their parent page for components that only read the mode.
-  if (pathname.startsWith('/analysis')) return 'analyze';
-  if (pathname.startsWith('/databases')) return 'database';
-  return 'analyze';
-}
-
-function _pathForPage(page) {
-  return PAGE_TO_PATH[page] || '/analysis';
-}
-

@@ -1,21 +1,24 @@
 /**
  * Session-persistent state for the Compare Databases tab.
  *
- * The tab unmounts whenever the user switches sidebar modes, and React state
- * would be lost. This module-level store keeps the selection alive for the
- * browser session without adding a global provider: the tab hydrates from it
- * on mount and writes through on every change.
+ * The tab unmounts whenever the user switches sidebar modes, so this module-level
+ * store keeps the selection and result alive for the browser session.
  */
 
-const EMPTY_SLOTS = ['', '', ''];
+function initialState() {
+  return {
+    slots: ['', '', ''],
+    accession: '',
+    response: null,
+    regionFilter: 'all',
+    expandedKey: '',
+    tableSearch: '',
+    sharedRefs: [],
+    sharedRefsKey: '',
+  };
+}
 
-let state = {
-  slots: [...EMPTY_SLOTS],
-  accession: '',
-  response: null,
-  regionFilter: 'all',
-  expandedKey: '',
-};
+let state = initialState();
 
 export function getCompareState() {
   return state;
@@ -26,11 +29,5 @@ export function setCompareState(patch) {
 }
 
 export function resetCompareState() {
-  state = {
-    slots: [...EMPTY_SLOTS],
-    accession: '',
-    response: null,
-    regionFilter: 'all',
-    expandedKey: '',
-  };
+  state = initialState();
 }

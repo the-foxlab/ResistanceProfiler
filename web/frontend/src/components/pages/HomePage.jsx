@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 
-import { usePageTitle } from '../../hooks/usePageTitle';
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
 import shieldIconSrc from '../../assets/shield.svg';
@@ -58,7 +57,6 @@ function organismListItems(db) {
 }
 
 export function HomePage({ logic }) {
-  usePageTitle('ResPro | Home');
   const { databases = [], onStartTour, setSelectedDatabaseId } = logic;
 
   const totalRules = databases.reduce((sum, db) => sum + (db.mutation_count || 0), 0);

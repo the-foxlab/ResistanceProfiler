@@ -1,10 +1,9 @@
-"""Artifact and branding routes."""
+"""Artifact download, bundle export, comparison, and branding routes."""
 
 from __future__ import annotations
 
 import io
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -15,6 +14,7 @@ from web.backend.artifact_kinds import (
     REPORT_HTML,
     artifact_kind_for_path,
     derive_download_filename,
+    is_allowed_artifact_path,
     is_html_report_path,
     unsupported_artifact_message,
 )
@@ -24,11 +24,9 @@ from web.backend.models import (
     CompareResponse,
     artifact_bundle_payload_model,
 )
+from web.backend.routes.common import get_session, resolve_owned_file
 from web.backend.services.compare import build_comparison_matrix
-from web.backend.services.session import (
-    Session,
-    resolve_owned_path,
-)
+from web.backend.startup_config import is_path_within_allowed_roots
 
 
 def build_artifacts_router(
@@ -36,39 +34,25 @@ def build_artifacts_router(
     results_dir: Path,
     branding_dir: Path,
     allowed_roots: tuple[Path, ...],
-    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
-    is_allowed_artifact_path: Callable[[Path], bool],
     artifact_bundle_max_artifacts: int,
     limiter: Limiter,
     api_rate_limit: str,
-    get_session: Callable[..., Session],
 ) -> APIRouter:
-    """Build artifact download and branding routes.
-
-    All result artifacts (one per kind registered in ``artifact_kinds``) are
-    referenced by opaque ``artifact_id`` tokens resolved through the
-    session-ownership store rather than by absolute filesystem paths.
-    """
+    """Build report, artifact download, ZIP bundle, branding, and sample-compare routes."""
     router = APIRouter()
 
     @router.get('/api/report')
     @limiter.limit(api_rate_limit)
-    def open_report(
-        request: Request,
-        artifact_id: str = Query(...),
-    ) -> FileResponse:
+    def open_report(request: Request, artifact_id: str = Query(...)) -> FileResponse:
         session = get_session(request)
-        try:
-            report_path = resolve_owned_path(
-                prefix='artifact',
-                record_id=artifact_id,
-                session_hash=session.session_hash,
-                allowed_roots=allowed_roots,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail='Report not found.') from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        report_path = resolve_owned_file(
+            prefix='artifact',
+            record_id=artifact_id,
+            session_hash=session.session_hash,
+            allowed_roots=allowed_roots,
+            not_found_detail='Report not found.',
+            require_file=False,
+        )
         if not is_html_report_path(report_path):
             raise HTTPException(
                 status_code=400,
@@ -80,28 +64,21 @@ def build_artifacts_router(
 
     @router.get('/api/artifact')
     @limiter.limit(api_rate_limit)
-    def download_artifact(
-        request: Request,
-        artifact_id: str = Query(...),
-    ) -> FileResponse:
+    def download_artifact(request: Request, artifact_id: str = Query(...)) -> FileResponse:
         session = get_session(request)
-        try:
-            artifact_path = resolve_owned_path(
-                prefix='artifact',
-                record_id=artifact_id,
-                session_hash=session.session_hash,
-                allowed_roots=allowed_roots,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail='Artifact not found.') from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        artifact_path = resolve_owned_file(
+            prefix='artifact',
+            record_id=artifact_id,
+            session_hash=session.session_hash,
+            allowed_roots=allowed_roots,
+            not_found_detail='Artifact not found.',
+            require_file=False,
+        )
         artifact_kind = artifact_kind_for_path(artifact_path)
         if artifact_kind is None:
             raise HTTPException(status_code=400, detail=unsupported_artifact_message())
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
-
         return FileResponse(
             str(artifact_path),
             media_type=artifact_kind.media_type,
@@ -124,60 +101,32 @@ def build_artifacts_router(
                     f'At most {artifact_bundle_max_artifacts} can be downloaded at once.'
                 ),
             )
-
-        resolved_paths = _resolve_artifact_ids(
-            payload.artifact_ids,
-            session.session_hash,
-            allowed_roots,
-        )
-        bundle_bytes = _build_artifact_bundle(
-            resolved_paths,
-            results_dir,
-            is_allowed_artifact_path,
-            part=part,
-        )
+        resolved_paths = _resolve_artifact_ids(payload.artifact_ids, session.session_hash, allowed_roots)
         return Response(
-            content=bundle_bytes,
+            content=_build_artifact_bundle(resolved_paths, part=part),
             media_type='application/zip',
             headers={'Content-Disposition': 'attachment; filename="respro-batch-artifacts.zip"'},
         )
 
-    # FastAPI inspects annotations when registering a route; bind the per-app
-    # model before SlowAPI wraps the endpoint and the router inspects it.
-    download_artifact_bundle.__annotations__['payload'] = artifact_bundle_payload_model(
-        artifact_bundle_max_artifacts,
-    )
+    # Bind the per-app payload model before SlowAPI wraps and FastAPI inspects annotations.
+    download_artifact_bundle.__annotations__['payload'] = artifact_bundle_payload_model(artifact_bundle_max_artifacts)
     router.post('/api/artifact-bundle')(limiter.limit(api_rate_limit)(download_artifact_bundle))
 
     @router.get('/api/branding/logo.svg')
     def branding_logo() -> FileResponse:
-        logo_path = branding_dir / 'logo.svg'
-        if not logo_path.is_file():
-            raise HTTPException(status_code=404, detail='Logo not found.')
-        return FileResponse(str(logo_path), media_type='image/svg+xml')
+        return _serve_branding_svg(branding_dir / 'logo.svg', 'Logo not found.')
 
     @router.get('/api/branding/favicon.svg')
     def branding_favicon() -> FileResponse:
-        favicon_path = branding_dir / 'favicon.svg'
-        if not favicon_path.is_file():
-            raise HTTPException(status_code=404, detail='Favicon not found.')
-        return FileResponse(str(favicon_path), media_type='image/svg+xml')
+        return _serve_branding_svg(branding_dir / 'favicon.svg', 'Favicon not found.')
 
     @router.post('/api/compare')
     @limiter.limit(api_rate_limit)
-    def compare_samples(
-        request: Request,
-        payload: ComparePayload,
-    ) -> CompareResponse:
+    def compare_samples(request: Request, payload: ComparePayload) -> CompareResponse:
         session = get_session(request)
         if not payload.artifact_ids:
             raise HTTPException(status_code=400, detail='At least one artifact id is required.')
-
-        resolved_paths = _resolve_artifact_ids(
-            payload.artifact_ids,
-            session.session_hash,
-            allowed_roots,
-        )
+        resolved_paths = _resolve_artifact_ids(payload.artifact_ids, session.session_hash, allowed_roots)
         try:
             return build_comparison_matrix(
                 result_json_paths=resolved_paths,
@@ -189,11 +138,15 @@ def build_artifacts_router(
             )
         except ValueError as exc:
             msg = str(exc)
-            if 'not found' in msg.lower():
-                raise HTTPException(status_code=404, detail=msg) from exc
-            raise HTTPException(status_code=400, detail=msg) from exc
+            raise HTTPException(status_code=404 if 'not found' in msg.lower() else 400, detail=msg) from exc
 
     return router
+
+
+def _serve_branding_svg(path: Path, not_found_detail: str) -> FileResponse:
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return FileResponse(str(path), media_type='image/svg+xml')
 
 
 def _resolve_artifact_ids(
@@ -201,63 +154,46 @@ def _resolve_artifact_ids(
     session_hash: str,
     allowed_roots: tuple[Path, ...],
 ) -> list[Path]:
-    """Resolve a list of artifact IDs to owned, path-confined result files."""
-    resolved: list[Path] = []
-    for artifact_id in artifact_ids:
-        try:
-            path = resolve_owned_path(
-                prefix='artifact',
-                record_id=artifact_id,
-                session_hash=session_hash,
-                allowed_roots=allowed_roots,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail='Artifact not found.') from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        resolved.append(path)
-    return resolved
+    return [
+        resolve_owned_file(
+            prefix='artifact',
+            record_id=artifact_id,
+            session_hash=session_hash,
+            allowed_roots=allowed_roots,
+            not_found_detail='Artifact not found.',
+            require_file=False,
+        )
+        for artifact_id in artifact_ids
+    ]
 
 
-def _build_artifact_bundle(
-    artifact_paths: list[Path],
-    results_dir: Path,
-    is_allowed_artifact_path: Callable[[Path], bool],
-    *,
-    part: int | None = None,
-) -> bytes:
-    """Pack validated result artifacts into one zip archive."""
+def _build_artifact_bundle(artifact_paths: list[Path], *, part: int | None = None) -> bytes:
+    """Pack validated result artifacts into one ZIP archive."""
     buffer = io.BytesIO()
     used_names: set[str] = set()
-
     with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
         for artifact_path in artifact_paths:
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(status_code=400, detail=unsupported_artifact_message())
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
-
             name = derive_download_filename(artifact_path)
             if part is not None:
                 name = f'part{part}-{name}'
             archive.write(artifact_path, arcname=_deduplicate_archive_name(name, used_names))
-
     return buffer.getvalue()
 
 
 def _deduplicate_archive_name(file_name: str, used_names: set[str]) -> str:
-    """Keep archive member names unique while preserving readable basenames."""
+    """Ensure unique ZIP member names by appending ``_1``, ``_2``, ... on collision."""
     if file_name not in used_names:
         used_names.add(file_name)
         return file_name
-
     path = Path(file_name)
     stem = path.stem
     suffix = ''.join(path.suffixes)
     counter = 1
-    while True:
-        candidate = f'{stem}_{counter}{suffix}'
-        if candidate not in used_names:
-            used_names.add(candidate)
-            return candidate
+    while (candidate := f'{stem}_{counter}{suffix}') in used_names:
         counter += 1
+    used_names.add(candidate)
+    return candidate

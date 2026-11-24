@@ -1,61 +1,62 @@
-"""Job status and cancel routes."""
+"""Job status polling and cancellation routes."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from rq import Queue
+from rq.exceptions import NoSuchJobError
 from rq.job import Job
 from rq.results import Result
 from rq.serializers import JSONSerializer
 from slowapi import Limiter
 
 from web.backend.artifact_kinds import ARTIFACT_MEDIA_TYPES, ARTIFACT_RESULT_FIELDS
+from web.backend.errors import user_facing_error_message
 from web.backend.models import JobStatusResponse
 from web.backend.queue import get_queue
+from web.backend.routes.common import get_session
 from web.backend.services.session import (
-    Session,
     fetch_owned_record,
     owner_matches,
     record_artifact,
+    update_owned_record_fields,
 )
 
+_JOB_STATUS_MAP: dict[str, str] = {
+    'finished': 'succeeded',
+    'started': 'running',
+    'failed': 'failed',
+    'stopped': 'failed',
+    'canceled': 'failed',
+}
+_ARTIFACT_ID_RE = re.compile(r'[A-Za-z0-9_-]+')
 
-def build_jobs_router(
-    *,
-    map_job_status: Callable[[str], str],
-    user_facing_error_message: Callable[[str | None], str],
-    job_class: type[Job],
-    no_such_job_error: type[Exception],
-    limiter: Limiter,
-    api_rate_limit: str,
-    get_session: Callable[..., Session],
-) -> APIRouter:
+
+def _map_job_status(rq_status: str) -> str:
+    return _JOB_STATUS_MAP.get(rq_status, 'queued')
+
+
+def _job_exc_string(job: Job) -> str | None:
+    """Return the latest failure exception string (replaces deprecated ``job.exc_info``)."""
+    latest = job.latest_result()
+    return latest.exc_string if latest is not None and latest.type == Result.Type.FAILED else None
+
+
+def _fetch_owned_job(job_id: str, session_hash: str, queue: Queue) -> Job:
+    """Verify job ownership and fetch the RQ job, mapping missing/unowned jobs to 404."""
+    if not owner_matches(fetch_owned_record('job', job_id), session_hash):
+        raise HTTPException(status_code=404, detail='Job not found.')
+    try:
+        return Job.fetch(job_id, connection=queue.connection, serializer=JSONSerializer)
+    except NoSuchJobError as exc:
+        raise HTTPException(status_code=404, detail='Job not found.') from exc
+
+
+def build_jobs_router(*, limiter: Limiter, api_rate_limit: str) -> APIRouter:
     """Build job inspection and cancellation routes."""
     router = APIRouter()
-
-    def _require_job_owner(job_id: str, session_hash: str) -> None:
-        """Return 404 unless the session owns the job record.
-
-        A missing or non-owned record both map to 404 so existence is not
-        confirmed to non-owners.
-        """
-        record = fetch_owned_record('job', job_id)
-        if not owner_matches(record, session_hash):
-            raise HTTPException(status_code=404, detail='Job not found.')
-
-    def _job_exc_string(job: Job) -> str | None:
-        """Return the exception string from the job's latest result.
-
-        Replaces the deprecated ``job.exc_info`` property (RQ >=2.0). Returns
-        ``None`` when there is no result or the latest result is not a failure.
-        """
-        latest = job.latest_result()
-        if latest is not None and latest.type == Result.Type.FAILED:
-            return latest.exc_string
-        return None
 
     @router.get('/api/jobs/{job_id}', response_model=JobStatusResponse)
     @limiter.limit(api_rate_limit)
@@ -65,14 +66,10 @@ def build_jobs_router(
         queue: Queue = Depends(get_queue),
     ) -> JobStatusResponse:
         session = get_session(request)
-        _require_job_owner(job_id, session.session_hash)
-        try:
-            job = job_class.fetch(job_id, connection=queue.connection, serializer=JSONSerializer)
-        except no_such_job_error:
-            raise HTTPException(status_code=404, detail='Job not found.')
+        job = _fetch_owned_job(job_id, session.session_hash, queue)
 
         rq_status = job.get_status()
-        status = map_job_status(rq_status)
+        status = _map_job_status(rq_status)
         result = job.return_value() if status == 'succeeded' else None
         error = user_facing_error_message(_job_exc_string(job)) if status == 'failed' else None
         if status == 'failed' and rq_status in ('stopped', 'canceled'):
@@ -89,107 +86,76 @@ def build_jobs_router(
         queue: Queue = Depends(get_queue),
     ) -> Response:
         session = get_session(request)
-        _require_job_owner(job_id, session.session_hash)
-        try:
-            job = job_class.fetch(job_id, connection=queue.connection, serializer=JSONSerializer)
-        except no_such_job_error:
-            raise HTTPException(status_code=404, detail='Job not found.')
+        job = _fetch_owned_job(job_id, session.session_hash, queue)
 
         rq_status = job.get_status()
         if rq_status in ('queued', 'scheduled', 'deferred'):
             job.cancel()
-            return Response(status_code=204)
-
-        if rq_status == 'started':
+        elif rq_status == 'started':
             kill_worker = getattr(job, 'kill_worker', None)
             if callable(kill_worker):
                 kill_worker()
-                return Response(status_code=204)
-
-            # Fallback when worker-kill support is unavailable in the installed RQ version.
-            Result.create_failure(
-                job,
-                ttl=job.failure_ttl or 0,
-                exc_string='Job canceled by user.',
-            )
-            job.set_status('failed')
-            job.save()
-            return Response(status_code=204)
-
+            else:
+                # Fallback when worker-kill support is unavailable in the installed RQ version.
+                Result.create_failure(job, ttl=job.failure_ttl or 0, exc_string='Job canceled by user.')
+                job.set_status('failed')
+                job.save()
         return Response(status_code=204)
 
     return router
 
 
+def _validate_stored_artifact_ids(
+    stored_ids: str,
+    fields: list[str],
+    result: dict,
+    session_hash: str,
+) -> list[str]:
+    artifact_ids = stored_ids.split(',')
+    if len(artifact_ids) != len(fields):
+        raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+    for field, artifact_id in zip(fields, artifact_ids, strict=True):
+        if not _ARTIFACT_ID_RE.fullmatch(artifact_id):
+            raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+        artifact = fetch_owned_record('artifact', artifact_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail='Job artifacts unavailable.')
+        if (
+            not owner_matches(artifact, session_hash)
+            or artifact.canonical_path != str(result[field])
+            or artifact.fields.get('media_type') != ARTIFACT_MEDIA_TYPES[field]
+        ):
+            raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+    return artifact_ids
+
+
+def _record_job_artifacts(job_id: str, fields: list[str], result: dict, session_hash: str) -> list[str]:
+    artifact_ids = [
+        record_artifact(
+            session_hash=session_hash,
+            canonical_path=result[field],
+            media_type=ARTIFACT_MEDIA_TYPES[field],
+        )
+        for field in fields
+    ]
+    update_owned_record_fields('job', job_id, {'artifact_ids': ','.join(artifact_ids)})
+    return artifact_ids
+
+
 def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
-    """Replace absolute artifact paths in a job result with opaque artifact IDs.
-
-    On first successful fetch, each artifact path is recorded under the owning
-    session and the job record is updated with the resulting IDs. Subsequent
-    fetches reuse the stored IDs. The absolute paths are never returned to the
-    client.
-
-    ``artifact_ids`` is returned in registry order so clients can bundle every
-    artifact without enumerating the per-type fields themselves.
-    """
+    """Replace absolute artifact paths in a job result with session-owned opaque artifact IDs."""
     record = fetch_owned_record('job', job_id)
     if not owner_matches(record, session_hash):
         raise HTTPException(status_code=404, detail='Job not found.')
     fields = [field for field in ARTIFACT_RESULT_FIELDS if result.get(field)]
     stored_ids = record.fields.get('artifact_ids', '')
-    if stored_ids:
-        artifact_ids = stored_ids.split(',')
-        if len(artifact_ids) != len(fields):
-            raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
-        for field, artifact_id in zip(fields, artifact_ids, strict=True):
-            if not re.fullmatch(r'[A-Za-z0-9_-]+', artifact_id):
-                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
-            artifact = fetch_owned_record('artifact', artifact_id)
-            if artifact is None:
-                raise HTTPException(status_code=404, detail='Job artifacts unavailable.')
-            if (
-                not owner_matches(artifact, session_hash)
-                or artifact.canonical_path != str(result[field])
-                or artifact.fields.get('media_type') != ARTIFACT_MEDIA_TYPES[field]
-            ):
-                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
-    else:
-        artifact_ids = []
-        for field in fields:
-            artifact_id = record_artifact(
-                session_hash=session_hash,
-                canonical_path=result[field],
-                media_type=ARTIFACT_MEDIA_TYPES[field],
-            )
-            artifact_ids.append(artifact_id)
-        # Persist the IDs on the job record so later polls don't re-record.
-        _store_job_artifact_ids(job_id, artifact_ids)
-
-    redacted = dict(result)
-    for field, artifact_id in zip(fields, artifact_ids, strict=True):
-        redacted[field] = artifact_id
-    redacted['artifact_ids'] = artifact_ids
-    return redacted
-
-
-def _store_job_artifact_ids(job_id: str, artifact_ids: list[str]) -> None:
-    """Persist the resolved artifact IDs back onto the job record."""
-    from web.backend.services.session import _redis_connection  # local import to avoid cycle
-
-    record = fetch_owned_record('job', job_id)
-    if record is None:
-        return
-    mapping = dict(record.fields)
-    mapping['artifact_ids'] = ','.join(artifact_ids)
-    key = f'respro:job:{job_id}'
-    client = _redis_connection()
-    if client is not None:
-        try:
-            client.hset(key, mapping=mapping)
-        except Exception:  # noqa: BLE001 — best-effort persistence of artifact IDs
-            pass
-    else:
-        from web.backend.services.session import _MEMORY_OWNED_LOCK, _MEMORY_OWNED_STORE
-
-        with _MEMORY_OWNED_LOCK:
-            _MEMORY_OWNED_STORE[key] = mapping
+    artifact_ids = (
+        _validate_stored_artifact_ids(stored_ids, fields, result, session_hash)
+        if stored_ids
+        else _record_job_artifacts(job_id, fields, result, session_hash)
+    )
+    return {
+        **result,
+        **dict(zip(fields, artifact_ids, strict=True)),
+        'artifact_ids': artifact_ids,
+    }

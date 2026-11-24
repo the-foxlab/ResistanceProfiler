@@ -1,15 +1,15 @@
 import { useRef, useState } from 'react';
 import { FRONTEND_CONFIG } from '../config';
-import { apiGet, apiPostRaw, apiUpload, formatUserError, formatPathStem, downloadArtifactBundle } from '../api';
+import { apiPostRaw, apiUpload, downloadArtifactBundle, formatPathStem, formatUserError } from '../api';
+import { validateVcfCutoffs } from '../utils';
+import { pollBatchJobs } from './batchPolling';
 
 export function useBatchManager({
   selectedDatabaseId,
-  addReportPath,
   addUploadedPath,
   addResultArtifactPaths,
   setSessionResults,
   setUploadProgress,
-  setStatusError,
 }) {
   const [batchMode, setBatchMode] = useState('vcf');
   const [batchVcfFiles, setBatchVcfFiles] = useState([]);
@@ -24,35 +24,14 @@ export function useBatchManager({
   const [batchSubmitted, setBatchSubmitted] = useState(false);
   const [batchMaxSamples, setBatchMaxSamples] = useState(25);
   const [sampleLimitPerMinute, setSampleLimitPerMinute] = useState(25);
-  // In-flight counter (not a boolean) so a multi-file batch upload keeps the flag
-  // true until every file in the loop has finished, gating submit against partial
-  // submissions. Owned here because the batch manager is exercised in isolation.
   const [activeBatchUploads, setActiveBatchUploads] = useState(0);
-  const beginBatchUpload = () => {
-    setActiveBatchUploads((count) => count + 1);
-  };
-  const endBatchUpload = () => {
-    setActiveBatchUploads((count) => (count > 0 ? count - 1 : 0));
-  };
   const [batchVcfCutoffs, setBatchVcfCutoffs] = useState({
     min_af: FRONTEND_CONFIG.profile.vcf.minAf,
     min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
   });
-  // The in-flight upload XHR, so a cancel can abort it mid-transfer.
-  const currentBatchUploadRef = useRef(null);
-  // True while an upload is being canceled, so the abort is not reported as an
-  // error and the multi-file loop stops. Reset at the START of every upload
-  // operation (not only at loop end): a cancel must never leak into later
-  // operations, or genuine failures there would be silently suppressed.
-  const isBatchUploadCanceledRef = useRef(false);
 
-  // Wrap apiUpload so every batch upload captures its XHR for cancellation and
-  // surfaces progress. A canceled upload aborts the XHR; the caller's catch
-  // suppresses the resulting error via isBatchUploadCanceledRef.
-  const uploadBatchFile = (path, file, onProgress) =>
-    apiUpload(path, file, onProgress, (request) => {
-      currentBatchUploadRef.current = request;
-    });
+  const currentBatchUploadRef = useRef(null);
+  const isBatchUploadCanceledRef = useRef(false);
 
   const cancelBatchUpload = () => {
     if (currentBatchUploadRef.current) {
@@ -61,120 +40,108 @@ export function useBatchManager({
     }
   };
 
-  const addBatchVcfFiles = async (files) => {
+  // Shared single-file upload runner with progress, cancel suppression, and active count.
+  const uploadOneFile = async (endpoint, labelPrefix, file, onSuccess) => {
+    setActiveBatchUploads((count) => count + 1);
+    try {
+      setUploadProgress({ percent: 0, fileName: `${labelPrefix} - ${file.name}` });
+      const response = await apiUpload(
+        endpoint,
+        file,
+        (percent) => setUploadProgress((prev) => ({ ...prev, percent })),
+        (request) => {
+          currentBatchUploadRef.current = request;
+        },
+      );
+      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+      addUploadedPath(response.upload_id);
+      onSuccess(response, file);
+    } catch (error) {
+      if (!isBatchUploadCanceledRef.current) {
+        setBatchError(formatUserError(error.message));
+      }
+    } finally {
+      setActiveBatchUploads((count) => (count > 0 ? count - 1 : 0));
+    }
+  };
+
+  const uploadBatchFileList = async (files, { endpoint, labelPrefix, limit = null, onUploaded }) => {
     isBatchUploadCanceledRef.current = false;
-    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchVcfFiles.length);
+    const list = Array.from(files);
+    const toUpload = limit === null ? list : list.slice(0, limit);
     for (const file of toUpload) {
-      beginBatchUpload();
-      try {
-        setUploadProgress({
-          percent: 0,
-          fileName: `BATCH VCF - ${file.name}`,
-        });
-        const response = await uploadBatchFile('/api/upload/vcf', file, (percent) => {
-          setUploadProgress((prev) => ({
-            ...prev,
-            percent,
-          }));
-        });
-        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        setBatchVcfFiles((prev) => [...prev, {
-          uploadId: response.upload_id,
-          name: file.name,
-          size: file.size,
-          bamId: null,
-          bamName: null,
-          bamSize: null,
-        }]);
-        addUploadedPath(response.upload_id);
-      } catch (error) {
-        if (!isBatchUploadCanceledRef.current) {
-          setBatchError(formatUserError(error.message));
-        }
-      } finally {
-        endBatchUpload();
-      }
-      // A cancel aborts the current XHR and must stop the remaining files;
-      // continuing would re-disable the submit button and upload files the
-      // user asked not to upload.
-      if (isBatchUploadCanceledRef.current) {
-        break;
-      }
+      await uploadOneFile(endpoint, labelPrefix, file, onUploaded);
+      if (isBatchUploadCanceledRef.current) break;
     }
     isBatchUploadCanceledRef.current = false;
   };
 
-  // ── Per-sample BAM ─────────────────────────────────────────────────
-  // Multi-select BAM upload auto-pairs each BAM to the VCF row whose filename stem matches
-  // (case-insensitive). Unmatched BAMs and collisions (stem matches an already-paired row) are
-  // reported back to the caller rather than silently dropped or overwritten, so the UI can prompt
-  // the user to resolve them with the per-row attach control.
+  const addBatchVcfFiles = (files) =>
+    uploadBatchFileList(files, {
+      endpoint: '/api/upload/vcf',
+      labelPrefix: 'BATCH VCF',
+      limit: batchMaxSamples - batchVcfFiles.length,
+      onUploaded: (response, file) =>
+        setBatchVcfFiles((prev) => [
+          ...prev,
+          { uploadId: response.upload_id, name: file.name, size: file.size, bamId: null, bamName: null, bamSize: null },
+        ]),
+    });
 
+  const addBatchFastaFiles = (files) =>
+    uploadBatchFileList(files, {
+      endpoint: '/api/upload/fasta',
+      labelPrefix: 'BATCH FASTA',
+      limit: batchMaxSamples - batchFastaFiles.length,
+      onUploaded: (response, file) =>
+        setBatchFastaFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]),
+    });
+
+  const addBatchJsonFiles = (files) =>
+    uploadBatchFileList(files, {
+      endpoint: '/api/upload/json',
+      labelPrefix: 'BATCH JSON',
+      limit: batchMaxSamples - batchJsonFiles.length,
+      onUploaded: (response, file) =>
+        setBatchJsonFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]),
+    });
+
+  // Auto-pair uploaded BAMs to VCF rows by case-insensitive filename stem; report unmatched/collisions.
   const addBatchBamFiles = async (files) => {
-    isBatchUploadCanceledRef.current = false;
-    const toUpload = Array.from(files);
     const paired = [];
     const unmatched = [];
     const collisions = [];
-    // Track VCF-row indices claimed during this call. We cannot read pairings back from
-    // ``batchVcfFiles`` here: the closure snapshot is not updated by the ``setBatchVcfFiles``
-    // calls made by earlier loop iterations within the same call, so a second BAM whose stem
-    // matches an already-paired row would otherwise miss the first pairing and silently
-    // overwrite it. This local set sees claims made earlier in the same call synchronously.
+    // Local set tracks rows claimed synchronously within this multi-select batch.
     const claimedIndices = new Set();
-    for (const file of toUpload) {
-      beginBatchUpload();
-      try {
-        setUploadProgress({
-          percent: 0,
-          fileName: `BATCH BAM - ${file.name}`,
-        });
-        const response = await uploadBatchFile('/api/upload/bam', file, (percent) => {
-          setUploadProgress((prev) => ({
-            ...prev,
-            percent,
-          }));
-        });
-        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        addUploadedPath(response.upload_id);
 
+    await uploadBatchFileList(files, {
+      endpoint: '/api/upload/bam',
+      labelPrefix: 'BATCH BAM',
+      onUploaded: (response, file) => {
         const bamStem = formatPathStem(file.name).toLowerCase();
         const matchIndex = batchVcfFiles.findIndex(
           (entry) => formatPathStem(entry.name).toLowerCase() === bamStem,
         );
         if (matchIndex === -1) {
           unmatched.push(file.name);
-          continue;
+          return;
         }
-        // Collision = the row already has a BAM (from a prior call) OR was claimed earlier in
-        // this same multi-select call. Either way, do not overwrite the existing pairing.
         if (batchVcfFiles[matchIndex].bamId || claimedIndices.has(matchIndex)) {
           collisions.push(file.name);
-          continue;
+          return;
         }
         claimedIndices.add(matchIndex);
-        setBatchVcfFiles((prev) => prev.map((entry, i) => (
-          i === matchIndex
-            ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
-            : entry
-        )));
+        setBatchVcfFiles((prev) =>
+          prev.map((entry, i) =>
+            i === matchIndex
+              ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
+              : entry,
+          ),
+        );
         paired.push(file.name);
-      } catch (error) {
-        if (!isBatchUploadCanceledRef.current) {
-          setBatchError(formatUserError(error.message));
-        }
-      } finally {
-        endBatchUpload();
-      }
-      // A cancel aborts the current XHR and must stop the remaining files.
-      if (isBatchUploadCanceledRef.current) {
-        break;
-      }
-    }
-    // Report only the cases that need user action (unmatched / collisions). Successful pairings
-    // are visible in the per-row table, so we do not narrate them. This mirrors how upload
-    // errors are surfaced (batchError near the Analyze button) rather than inline next to the
-    // BAM input, keeping reporting consistent.
+      },
+    });
+
     if (unmatched.length > 0 || collisions.length > 0) {
       const parts = [];
       if (unmatched.length > 0) {
@@ -190,197 +157,95 @@ export function useBatchManager({
 
   const attachBatchBam = async (vcfIndex, file) => {
     isBatchUploadCanceledRef.current = false;
-    beginBatchUpload();
-    try {
-      setUploadProgress({
-        percent: 0,
-        fileName: `BATCH BAM - ${file.name}`,
-      });
-      const response = await uploadBatchFile('/api/upload/bam', file, (percent) => {
-        setUploadProgress((prev) => ({
-          ...prev,
-          percent,
-        }));
-      });
-      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-      addUploadedPath(response.upload_id);
-      // Uploading a new BAM overwrites any existing BAM on this row — no separate remove step.
-      setBatchVcfFiles((prev) => prev.map((entry, i) => (
-        i === vcfIndex
-          ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
-          : entry
-      )));
-    } catch (error) {
-      if (!isBatchUploadCanceledRef.current) {
-        setBatchError(formatUserError(error.message));
-      }
-    } finally {
-      endBatchUpload();
-    }
-  };
-
-  const addBatchFastaFiles = async (files) => {
-    isBatchUploadCanceledRef.current = false;
-    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchFastaFiles.length);
-    for (const file of toUpload) {
-      beginBatchUpload();
-      try {
-        setUploadProgress({
-          percent: 0,
-          fileName: `BATCH FASTA - ${file.name}`,
-        });
-        const response = await uploadBatchFile('/api/upload/fasta', file, (percent) => {
-          setUploadProgress((prev) => ({
-            ...prev,
-            percent,
-          }));
-        });
-        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        setBatchFastaFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
-        addUploadedPath(response.upload_id);
-      } catch (error) {
-        if (!isBatchUploadCanceledRef.current) {
-          setBatchError(formatUserError(error.message));
-        }
-      } finally {
-        endBatchUpload();
-      }
-      // A cancel aborts the current XHR and must stop the remaining files.
-      if (isBatchUploadCanceledRef.current) {
-        break;
-      }
-    }
-    isBatchUploadCanceledRef.current = false;
-  };
-
-  const addBatchJsonFiles = async (files) => {
-    isBatchUploadCanceledRef.current = false;
-    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchJsonFiles.length);
-    for (const file of toUpload) {
-      beginBatchUpload();
-      try {
-        setUploadProgress({
-          percent: 0,
-          fileName: `BATCH JSON - ${file.name}`,
-        });
-        const response = await uploadBatchFile('/api/upload/json', file, (percent) => {
-          setUploadProgress((prev) => ({
-            ...prev,
-            percent,
-          }));
-        });
-        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        setBatchJsonFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
-        addUploadedPath(response.upload_id);
-      } catch (error) {
-        if (!isBatchUploadCanceledRef.current) {
-          setBatchError(formatUserError(error.message));
-        }
-      } finally {
-        endBatchUpload();
-      }
-      // A cancel aborts the current XHR and must stop the remaining files.
-      if (isBatchUploadCanceledRef.current) {
-        break;
-      }
-    }
-    isBatchUploadCanceledRef.current = false;
-  };
-
-  const removeBatchFile = (index) => {
-    if (batchMode === 'vcf') {
-      setBatchVcfFiles((prev) => prev.filter((_, i) => i !== index));
-    } else if (batchMode === 'fasta') {
-      setBatchFastaFiles((prev) => prev.filter((_, i) => i !== index));
-    } else {
-      setBatchJsonFiles((prev) => prev.filter((_, i) => i !== index));
-    }
+    await uploadOneFile('/api/upload/bam', 'BATCH BAM', file, (response) => {
+      setBatchVcfFiles((prev) =>
+        prev.map((entry, i) =>
+          i === vcfIndex
+            ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
+            : entry,
+        ),
+      );
+    });
   };
 
   const uploadBatchReferenceFasta = async (file) => {
     isBatchUploadCanceledRef.current = false;
-    beginBatchUpload();
-    try {
-      setUploadProgress({
-        percent: 0,
-        fileName: `BATCH REF - ${file.name}`,
-      });
-      const response = await uploadBatchFile('/api/upload/fasta', file, (percent) => {
-        setUploadProgress((prev) => ({
-          ...prev,
-          percent,
-        }));
-      });
-      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+    await uploadOneFile('/api/upload/fasta', 'BATCH REF', file, (response) => {
       setBatchReferenceFastaState({ uploadId: response.upload_id, name: file.name });
-      addUploadedPath(response.upload_id);
-    } catch (error) {
-      if (!isBatchUploadCanceledRef.current) {
-        setBatchError(formatUserError(error.message));
-      }
-    } finally {
-      endBatchUpload();
-    }
+    });
   };
 
-  const pollBatchJobs = async (initialSamples) => {
-    const terminal = new Set(['succeeded', 'failed']);
-    let samples = initialSamples.map((s) => ({ ...s }));
-    for (;;) {
-      const pending = samples.filter((s) => !terminal.has(s.status));
-      if (pending.length === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
-      const updated = await Promise.all(
-        pending.map(async (sample) => {
-          try {
-            const payload = await apiGet(`/api/jobs/${sample.job_id}`);
-            return {
-              ...sample,
-              status: payload.status,
-              result: payload.result || null,
-              errorMessage: payload.error ? formatUserError(payload.error) : null,
-            };
-          } catch (error) {
-            return { ...sample, errorMessage: formatUserError(error.message) };
-          }
-        })
-      );
-      samples = samples.map((s) => updated.find((u) => u.job_id === s.job_id) || s);
-      const succeededResults = samples
-        .filter((sample) => sample.status === 'succeeded' && sample.result)
-        .map((sample) => sample.result);
-      succeededResults.forEach((result) => {
-        addResultArtifactPaths(result);
-      });
-      if (succeededResults.length > 0) {
-        setSessionResults((prev) => {
-          const next = [...prev];
-          succeededResults.forEach((result) => {
-            const alreadyPresent = result.run_id
-              ? next.some((existing) => existing.run_id === result.run_id)
-              : next.some((existing) => existing.report_html_path === result.report_html_path);
-            if (!alreadyPresent) {
-              next.push(result);
-            }
-          });
-          return next;
-        });
-      }
-      setBatchSamples(
-        samples.map((s) => ({
-          job_id: s.job_id,
-          sample_name: s.sample_name,
-          status: s.status,
-          errorMessage: s.errorMessage || null,
-          report_url: s.result ? s.result.report_html_path : null,
-          reportHtmlPath: s.result ? s.result.report_html_path : null,
-          reportPdfPath: s.result ? s.result.report_pdf_path : null,
-          reportJsonPath: s.result ? s.result.report_json_path : null,
-          reportTsvPath: s.result ? s.result.report_tsv_path : null,
-          artifactIds: s.result ? s.result.artifact_ids : null,
-        }))
-      );
+  const removeBatchFile = (index) => {
+    const setter = batchMode === 'vcf' ? setBatchVcfFiles : batchMode === 'fasta' ? setBatchFastaFiles : setBatchJsonFiles;
+    setter((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const postBatchRequest = async (endpoint, body) => {
+    const response = await apiPostRaw(endpoint, body);
+    if (response.status === 429) {
+      setBatchRateLimitCooldown(60);
+      setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
+      return null;
     }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+    }
+    return response.json();
+  };
+
+  const buildBatchRequest = () => {
+    if (batchMode === 'vcf') {
+      validateVcfCutoffs(batchVcfCutoffs.min_af, batchVcfCutoffs.min_depth);
+      return [
+        '/api/profile/batch/vcf',
+        {
+          vcf_ids: batchVcfFiles.map((f) => f.uploadId),
+          sample_names: batchVcfFiles.map((f) => formatPathStem(f.name)),
+          input_display_names: batchVcfFiles.map((f) => f.name),
+          reference_id: batchReferenceFasta.uploadId,
+          db_path: selectedDatabaseId,
+          min_af: batchVcfCutoffs.min_af,
+          min_depth: batchVcfCutoffs.min_depth,
+          threads: FRONTEND_CONFIG.profile.threads,
+          bam_ids: batchVcfFiles.map((f) => f.bamId ?? null),
+        },
+      ];
+    }
+    if (batchMode === 'fasta') {
+      return [
+        '/api/profile/batch/fasta',
+        {
+          fasta_ids: batchFastaFiles.map((f) => f.uploadId),
+          sample_names: batchFastaFiles.map((f) => formatPathStem(f.name)),
+          input_display_names: batchFastaFiles.map((f) => f.name),
+          db_path: selectedDatabaseId,
+        },
+      ];
+    }
+    return [
+      '/api/regenerate/batch',
+      {
+        json_ids: batchJsonFiles.map((f) => f.uploadId),
+        sample_names: batchJsonFiles.map((f) => formatPathStem(f.name)),
+        input_display_names: batchJsonFiles.map((f) => f.name),
+        database_id: selectedDatabaseId,
+      },
+    ];
+  };
+
+  const recordBatchResults = (succeededResults) => {
+    succeededResults.forEach((result) => addResultArtifactPaths(result));
+    setSessionResults((prev) => {
+      const next = [...prev];
+      succeededResults.forEach((result) => {
+        const exists = result.run_id
+          ? next.some((item) => item.run_id === result.run_id)
+          : next.some((item) => item.report_html_path === result.report_html_path);
+        if (!exists) next.push(result);
+      });
+      return next;
+    });
   };
 
   const submitBatch = async () => {
@@ -393,80 +258,12 @@ export function useBatchManager({
       return;
     }
     try {
-      let responseData;
-      if (batchMode === 'vcf') {
-        const sampleNames = batchVcfFiles.map((file) => formatPathStem(file.name));
-        if (!Number.isFinite(batchVcfCutoffs.min_af) || batchVcfCutoffs.min_af < 0 || batchVcfCutoffs.min_af > 1) {
-          throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
-        }
-        if (!Number.isInteger(batchVcfCutoffs.min_depth) || batchVcfCutoffs.min_depth < 0) {
-          throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
-        }
-        const body = {
-          vcf_ids: batchVcfFiles.map((f) => f.uploadId),
-          sample_names: sampleNames,
-          input_display_names: batchVcfFiles.map((f) => f.name),
-          reference_id: batchReferenceFasta.uploadId,
-          db_path: selectedDatabaseId,
-          min_af: batchVcfCutoffs.min_af,
-          min_depth: batchVcfCutoffs.min_depth,
-          threads: FRONTEND_CONFIG.profile.threads,
-          bam_ids: batchVcfFiles.map((f) => f.bamId ?? null),
-        };
-        const response = await apiPostRaw('/api/profile/batch/vcf', body);
-        if (response.status === 429) {
-          setBatchRateLimitCooldown(60);
-          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
-          return;
-        }
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-        }
-        responseData = await response.json();
-      } else if (batchMode === 'fasta') {
-        const sampleNames = batchFastaFiles.map((file) => formatPathStem(file.name));
-        const body = {
-          fasta_ids: batchFastaFiles.map((f) => f.uploadId),
-          sample_names: sampleNames,
-          input_display_names: batchFastaFiles.map((f) => f.name),
-          db_path: selectedDatabaseId,
-        };
-        const response = await apiPostRaw('/api/profile/batch/fasta', body);
-        if (response.status === 429) {
-          setBatchRateLimitCooldown(60);
-          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
-          return;
-        }
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-        }
-        responseData = await response.json();
-      } else {
-        // JSON regenerate batch: each results-JSON resolves its own project DB via the
-        // stored fingerprint on the backend, so no shared db_path is sent.
-        const sampleNames = batchJsonFiles.map((file) => formatPathStem(file.name));
-        const body = {
-          json_ids: batchJsonFiles.map((f) => f.uploadId),
-          sample_names: sampleNames,
-          input_display_names: batchJsonFiles.map((f) => f.name),
-          database_id: selectedDatabaseId,
-        };
-        const response = await apiPostRaw('/api/regenerate/batch', body);
-        if (response.status === 429) {
-          setBatchRateLimitCooldown(60);
-          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
-          return;
-        }
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-        }
-        responseData = await response.json();
-      }
-      const initialSamples = responseData.samples.map((s) => ({
-        ...s,
+      const [endpoint, body] = buildBatchRequest();
+      const responseData = await postBatchRequest(endpoint, body);
+      if (!responseData) return;
+
+      const initialSamples = responseData.samples.map((sample) => ({
+        ...sample,
         errorMessage: null,
         report_url: null,
         reportHtmlPath: null,
@@ -477,14 +274,15 @@ export function useBatchManager({
       }));
       setBatchSamples(initialSamples);
       setBatchSubmitted(true);
-      // The batch has been analyzed: clear the upload overview (files) but keep
-      // the analysis results in batchSamples. The uploaded files are no longer
-      // needed once they are being analyzed.
       setBatchVcfFiles([]);
       setBatchFastaFiles([]);
       setBatchJsonFiles([]);
       setBatchReferenceFastaState(null);
-      await pollBatchJobs(initialSamples);
+      await pollBatchJobs({
+        initialSamples,
+        onSamplesChange: setBatchSamples,
+        onSucceededResults: recordBatchResults,
+      });
     } catch (error) {
       setBatchError(formatUserError(error.message));
     } finally {
@@ -538,7 +336,6 @@ export function useBatchManager({
     batchSubmitted,
     batchMaxSamples,
     setBatchMaxSamples,
-    sampleLimitPerMinute,
     setSampleLimitPerMinute,
     batchVcfCutoffs,
     setBatchVcfCutoffs,

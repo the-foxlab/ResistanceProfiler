@@ -7,14 +7,9 @@ import { AppShell } from './components/AppShell';
 import { TourProvider, useTour } from './components/tour/TourContext';
 import { buildTourSteps } from './components/tour/steps';
 import { useDashboardLogic } from './useDashboardLogic';
-import { useMobileClass } from './hooks/useMobileClass';
 import './styles/index.css';
 
-// Everything below lives INSIDE <BrowserRouter>: useDashboardLogic() calls
-// useLocation()/useNavigate(), which throw outside a Router context. Mounting
-// them in the component that renders the Router crashed the production bundle
-// before first paint (blank page), while jsdom tests that wrap components in
-// their own MemoryRouter never saw the failure.
+// Everything below lives INSIDE <BrowserRouter> because useDashboardLogic() uses router hooks.
 function App() {
   return (
     <BrowserRouter>
@@ -24,15 +19,7 @@ function App() {
 }
 
 function AppInsideRouter() {
-  // Data/state logic lives in one hook mounted above the routes so session
-  // results, uploads and comparison state survive in-app navigation.
   const logic = useDashboardLogic();
-  // Reflect mobile layout mode on <body> for any JS that needs it.
-  useMobileClass();
-  // Build the tour steps once with the real navigation setters (stable useState setters)
-  // and pass them to the provider so its nextStep/prevStep clamping uses the real step
-  // count. The overlay reads the same steps from context. (Fixes the Critical wiring bug
-  // where steps={[]} made nextStep clamp to -1 and the tour died after the first Next.)
   const tourSteps = useMemo(
     () => buildTourSteps({
       navigate: logic.navigate,
@@ -48,7 +35,6 @@ function AppInsideRouter() {
   );
 }
 
-// Lives inside TourProvider so Home can start the guided tour.
 function AppWithTour({ logic }) {
   const { startTour } = useTour();
   return (
@@ -58,13 +44,10 @@ function AppWithTour({ logic }) {
   );
 }
 
-// Named export so tests can mount <App /> bare (no wrapper Router) and catch
-// router-context wiring bugs that only appear in the production bundle.
 export { App };
 
-// StrictMode helps surface side effects and unsafe patterns during development.
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>
+  </React.StrictMode>,
 );

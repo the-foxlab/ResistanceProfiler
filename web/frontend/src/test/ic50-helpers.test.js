@@ -3,6 +3,8 @@ import {
   parseNumericMeasurement,
   scoreCategorySort,
   buildLogTicks,
+  buildIc50DistributionSections,
+  buildScoreDistributionSections,
 } from '../components/database-plots/ic50-builders';
 
 describe('parseNumericMeasurement', () => {
@@ -128,5 +130,89 @@ describe('buildLogTicks', () => {
     expect(result.majorTicks).toContain(1);
     expect(result.majorTicks).toContain(2);
     expect(result.majorTicks).toContain(3);
+  });
+});
+
+describe('buildIc50DistributionSections', () => {
+  const plotMeta = {
+    references: [
+      { reference_name: 'ref1', reference_organism: 'Virus A' },
+      { reference_name: 'ref2', reference_organism: 'Virus B' },
+    ],
+    drug_aliases: { acyclovir: 'ACV' },
+  };
+
+  it('returns empty array when no positive IC50 or fold_ic50 values exist', () => {
+    expect(buildIc50DistributionSections([{ reference_name: 'ref1', drug: 'Acyclovir', ic50: 0 }], [], plotMeta)).toEqual([]);
+  });
+
+  it('builds per-organism plots preferring IC50 over fold_ic50 and tracking skipped non-positive values', () => {
+    const rules = [
+      { reference_name: 'ref1', drug: 'Acyclovir', ic50: '10', fold_ic50: '2' },
+      { reference_name: 'ref1', drug: 'Acyclovir', ic50: '-1' },
+      { reference_name: 'ref1', drug: 'Foscarnet', fold_ic50: '5' },
+    ];
+    const formulaRules = [
+      { reference_name: 'ref2', drug: 'Ganciclovir', ic50: '100' },
+    ];
+    const sections = buildIc50DistributionSections(rules, formulaRules, plotMeta);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].sectionKey).toBe('ic50-distribution');
+    expect(sections[0].plots.map((p) => p.title)).toEqual(['Virus A', 'Virus B']);
+
+    const virusA = sections[0].plots[0];
+    expect(virusA.laneLabels).toEqual({ 1: 'Acyclovir (ACV)', 2: 'Foscarnet' });
+    expect(virusA.points).toHaveLength(2);
+    expect(virusA.points[0].metricLabel).toBe('IC50');
+    expect(virusA.points[1].metricLabel).toBe('Fold IC50');
+    expect(virusA.footer).toContain('1 non-positive value(s)');
+    expect(virusA.xAxisLabel).toBe('IC₅₀ (µM, log scale) / Fold IC₅₀ (log scale)');
+  });
+
+  it('pads xDomain when all positive values are identical', () => {
+    const sections = buildIc50DistributionSections(
+      [{ reference_name: 'ref1', drug: 'Acyclovir', ic50: '10' }],
+      [],
+      plotMeta,
+    );
+    expect(sections[0].plots[0].xDomain[0]).toBeCloseTo(Math.log10(5));
+    expect(sections[0].plots[0].xDomain[1]).toBeCloseTo(Math.log10(20));
+  });
+});
+
+describe('buildScoreDistributionSections', () => {
+  const baseMeta = {
+    references: [{ reference_name: 'ref1', reference_organism: 'Virus A' }],
+    drug_aliases: { acyclovir: 'ACV' },
+  };
+
+  it('builds a single section when no drug_groups exist', () => {
+    const rules = [
+      { reference_name: 'ref1', drug: 'Acyclovir', score: '10' },
+      { reference_name: 'ref1', drug: 'Acyclovir', score: '2' },
+    ];
+    const formulaRules = [{ reference_name: 'ref1', drug: 'Acyclovir', score: '10' }];
+    const sections = buildScoreDistributionSections(rules, formulaRules, baseMeta);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].sectionKey).toBe('score-distribution');
+    expect(sections[0].plots[0].title).toBe('Acyclovir (ACV)');
+    expect(sections[0].plots[0].bars.map((b) => [b.scoreLabel, b.count])).toEqual([
+      ['2', 1],
+      ['10', 2],
+    ]);
+  });
+
+  it('splits into grouped sections and sorts Ungrouped last', () => {
+    const meta = {
+      ...baseMeta,
+      drug_groups: { Acyclovir: 'Nucleoside' },
+    };
+    const rules = [
+      { reference_name: 'ref1', drug: 'Foscarnet', score: '1' },
+      { reference_name: 'ref1', drug: 'Acyclovir', score: '2' },
+    ];
+    const sections = buildScoreDistributionSections(rules, [], meta);
+    expect(sections.map((s) => s.sectionHeading)).toEqual(['Nucleoside', 'Ungrouped']);
+    expect(sections[0].plots[0].bars.map((b) => [b.scoreLabel, b.count])).toEqual([['1', 0], ['2', 1]]);
   });
 });

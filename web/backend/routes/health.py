@@ -1,15 +1,70 @@
-"""Health and configuration routes."""
+"""Health, readiness, UI configuration, legal notice, and contact routes."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+import os
+from pathlib import Path
 
+import redis
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from web.backend.config import WEB_BACKEND_CONFIG
+from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
 from web.backend.models import ApiEnvelope
-from web.backend.startup_config import ContactEmailConfig, ImprintConfig, StartupConfig
+from web.backend.project_dbs import list_project_db_paths
+from web.backend.startup_config import StartupConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _is_redis_connected() -> bool:
+    redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
+    try:
+        return bool(redis.Redis.from_url(redis_url).ping())
+    except (redis.RedisError, OSError, RuntimeError) as exc:
+        logger.debug('Readiness check: Redis unavailable at %s: %s', redis_url, exc)
+        return False
+
+
+def _project_database_catalog_readiness(project_databases_dir: Path) -> tuple[bool, int]:
+    try:
+        db_paths = list_project_db_paths(project_databases_dir)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        logger.debug('Readiness check: project database catalog unavailable in %s: %s', project_databases_dir, exc)
+        return False, 0
+    return bool(db_paths), len(db_paths)
+
+
+def _build_readiness_payload(config: StartupConfig) -> ApiEnvelope:
+    """Build readiness diagnostics without exposing filesystem paths or credentials."""
+    diagnostics: list[str] = []
+    redis_connected = _is_redis_connected()
+    if not redis_connected:
+        diagnostics.append('redis_unreachable')
+
+    project_db_ready, project_db_count = _project_database_catalog_readiness(config.project_databases_dir)
+    if not project_db_ready:
+        diagnostics.append('project_database_catalog_unready')
+
+    workspace = {
+        'project_databases_dir_ready': config.project_databases_dir.is_dir(),
+        'uploads_dir_ready': config.uploads_dir.is_dir(),
+        'results_dir_ready': config.results_dir.is_dir(),
+    }
+    if not all(workspace.values()):
+        diagnostics.append('workspace_directories_unready')
+
+    return ApiEnvelope(
+        status='ok' if not diagnostics else 'error',
+        data={
+            'service': WEB_BACKEND_CONFIG.defaults.service_name,
+            'redis': {'connected': redis_connected},
+            'project_databases': {'ready': project_db_ready, 'count': project_db_count},
+            'workspace': workspace,
+            'diagnostics': diagnostics,
+        },
+    )
 
 
 def build_health_router(
@@ -17,27 +72,21 @@ def build_health_router(
     config: StartupConfig,
     sample_limit_per_minute: int,
     artifact_bundle_max_artifacts: int,
-    build_readiness_payload: Callable[[StartupConfig], ApiEnvelope],
     version: str,
 ) -> APIRouter:
-    """Build health, readiness, and UI config routes."""
+    """Build public health, readiness, UI config, legal-notice, and contact routes."""
     router = APIRouter()
+    imprint = config.imprint
+    contact_email = config.contact_email
 
     @router.get('/api/health', response_model=ApiEnvelope)
     def health() -> ApiEnvelope:
-        return ApiEnvelope(
-            data={
-                'service': WEB_BACKEND_CONFIG.defaults.service_name,
-            },
-            status='ok',
-        )
+        return ApiEnvelope(data={'service': WEB_BACKEND_CONFIG.defaults.service_name}, status='ok')
 
     @router.get('/api/readiness', response_model=ApiEnvelope)
     def readiness() -> JSONResponse | ApiEnvelope:
-        payload = build_readiness_payload(config)
-        if payload.status == 'ok':
-            return payload
-        return JSONResponse(status_code=503, content=payload.model_dump())
+        payload = _build_readiness_payload(config)
+        return payload if payload.status == 'ok' else JSONResponse(status_code=503, content=payload.model_dump())
 
     @router.get('/api/ui/config', response_model=ApiEnvelope)
     def ui_config() -> ApiEnvelope:
@@ -50,56 +99,27 @@ def build_health_router(
             }
         )
 
-    return router
-
-
-def build_legal_router(*, imprint: ImprintConfig | None) -> APIRouter:
-    """Build public legal-notice routes (no API token — DSGVO requires reachability).
-
-    Path mode serves the stored HTML at ``/legal``; URL mode 302-redirects ``/legal``
-    to the external imprint so a bookmarked link still lands on the hosted page. The
-    ``/api/ui/legal`` indicator carries ``kind`` and ``url`` so the frontend can render
-    a direct external link instead of routing through ``/legal``.
-    """
-    router = APIRouter()
-
     @router.get('/legal', response_class=HTMLResponse, response_model=None)
     def legal() -> HTMLResponse | RedirectResponse:
         if imprint is None:
             raise HTTPException(status_code=404)
         if imprint.kind == 'url':
-            # ``imprint.url`` is guaranteed non-None for kind='url' by ImprintConfig construction.
-            return RedirectResponse(url=imprint.url, status_code=302)
-        # Path mode — ``imprint.html`` is guaranteed non-None for kind='path'.
+            return RedirectResponse(url=imprint.url, status_code=302)  # type: ignore[arg-type]
         return HTMLResponse(content=imprint.html)
 
     @router.get('/api/ui/legal', response_model=ApiEnvelope)
     def legal_indicator() -> ApiEnvelope:
         if imprint is None:
             return ApiEnvelope(data={'enabled': False, 'kind': 'path'}, status='ok')
+        data: dict[str, object] = {'enabled': True, 'kind': imprint.kind}
         if imprint.kind == 'url':
-            return ApiEnvelope(data={'enabled': True, 'kind': 'url', 'url': imprint.url}, status='ok')
-        return ApiEnvelope(data={'enabled': True, 'kind': 'path'}, status='ok')
-
-    return router
-
-
-def build_contact_router(*, contact_email: ContactEmailConfig | None) -> APIRouter:
-    """Build the public contact-e-mail indicator route (no API token — reachability is public).
-
-    ``GET /api/ui/contact`` returns ``{'enabled': bool, 'email': str | None}`` so the
-    frontend can render a ``mailto:`` footer link only when a contact address is
-    configured. Mirrors :func:`build_legal_router` in keeping the endpoint public.
-    """
-    router = APIRouter()
+            data['url'] = imprint.url
+        return ApiEnvelope(data=data, status='ok')
 
     @router.get('/api/ui/contact', response_model=ApiEnvelope)
     def contact_indicator() -> ApiEnvelope:
         if contact_email is None:
             return ApiEnvelope(data={'enabled': False, 'email': None}, status='ok')
-        return ApiEnvelope(
-            data={'enabled': True, 'email': contact_email.email},
-            status='ok',
-        )
+        return ApiEnvelope(data={'enabled': True, 'email': contact_email.email}, status='ok')
 
     return router

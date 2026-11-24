@@ -24,8 +24,9 @@ from rq.exceptions import NoSuchJobError
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.artifact_kinds import ARTIFACT_KINDS, ARTIFACT_RESULT_FIELDS
 from web.backend.config import WEB_BACKEND_CONFIG
-from web.backend.main import _SAMPLE_QUOTA_COUNTER, _resolve_proxy_settings, create_app
+from web.backend.main import create_app
 from web.backend.queue import get_batch_queue, get_queue
+from web.backend.rate_limit import _SAMPLE_QUOTA_COUNTER, resolve_proxy_settings
 from web.backend.services.session import (
     SESSION_COOKIE_NAME,
     hash_session_token,
@@ -391,7 +392,7 @@ class TestWebApi:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv('RESPRO_WEB_TRUSTED_PROXIES', raising=False)
-        proxy_headers, forwarded_allow_ips = _resolve_proxy_settings()
+        proxy_headers, forwarded_allow_ips = resolve_proxy_settings()
         assert proxy_headers is False
         assert forwarded_allow_ips == ''
 
@@ -400,7 +401,7 @@ class TestWebApi:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1, 10.0.0.0/8')
-        proxy_headers, forwarded_allow_ips = _resolve_proxy_settings()
+        proxy_headers, forwarded_allow_ips = resolve_proxy_settings()
         assert proxy_headers is True
         assert forwarded_allow_ips == '127.0.0.1,10.0.0.0/8'
 
@@ -519,7 +520,7 @@ class TestWebApi:
     ) -> None:
         redis_client = Mock()
         redis_client.ping.return_value = True
-        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
+        monkeypatch.setattr('web.backend.routes.health.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
 
         client = TestClient(create_app(startup_config=startup_config))
         response = client.get('/api/readiness')
@@ -538,7 +539,7 @@ class TestWebApi:
     ) -> None:
         redis_client = Mock()
         redis_client.ping.side_effect = RuntimeError('redis connection failed')
-        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
+        monkeypatch.setattr('web.backend.routes.health.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
 
         client = TestClient(create_app(startup_config=startup_config))
         response = client.get('/api/readiness')
@@ -577,7 +578,7 @@ class TestWebApi:
         job = Mock()
         job.get_status.return_value = rq_status
         job.return_value.return_value = {'report_html_path': '/tmp/example.report.html'}
-        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+        monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_args, **_kwargs: job)
 
         response = client.get('/api/jobs/test-job-id')
 
@@ -602,7 +603,7 @@ class TestWebApi:
         job = Mock()
         job.get_status.return_value = 'failed'
         job.return_value.return_value = None
-        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+        monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_args, **_kwargs: job)
 
         response = client.get('/api/jobs/test-job-id')
 
@@ -619,7 +620,7 @@ class TestWebApi:
         def _raise_no_such_job(*_args, **_kwargs):
             raise NoSuchJobError('missing')
 
-        monkeypatch.setattr('web.backend.main.Job.fetch', _raise_no_such_job)
+        monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', _raise_no_such_job)
 
         response = client.get('/api/jobs/missing-job-id')
 
@@ -1343,7 +1344,7 @@ class TestWebApi:
         job = Mock()
         job.get_status.return_value = 'queued'
 
-        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+        monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_args, **_kwargs: job)
 
         response = client.delete('/api/jobs/test-job-id')
         assert response.status_code == 204
@@ -1360,7 +1361,7 @@ class TestWebApi:
         job = Mock()
         job.get_status.return_value = 'started'
 
-        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+        monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_args, **_kwargs: job)
 
         response = client.delete('/api/jobs/test-job-id')
         assert response.status_code == 204
@@ -2295,7 +2296,7 @@ class TestBatchProfileEndpoints:
             return FakeQuotaRedis()
 
         monkeypatch.delenv('REDIS_URL', raising=False)
-        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', fake_from_url)
+        monkeypatch.setattr('web.backend.rate_limit.redis.Redis.from_url', fake_from_url)
 
         response = client.post(
             '/api/profile/batch/fasta',
@@ -2737,12 +2738,12 @@ class TestBatchRegenerateEndpoints:
         # Force the in-memory quota path (no Redis) and a fixed identity so we can
         # pre-saturate the counter for the exact key the route will use.
         monkeypatch.delenv('REDIS_URL', raising=False)
-        import web.backend.main as main_module
+        import web.backend.rate_limit as rate_limit_module
 
         fixed_identity = 'ip:testclient'
-        monkeypatch.setattr(main_module, '_rate_limit_key', lambda request: fixed_identity)
+        monkeypatch.setattr(rate_limit_module, '_rate_limit_key', lambda request: fixed_identity)
         max_per_minute = WEB_BACKEND_CONFIG.defaults.max_batch_size
-        window_minute = main_module._current_window_minute()
+        window_minute = rate_limit_module._current_window_minute()
         _SAMPLE_QUOTA_COUNTER.clear()
         _SAMPLE_QUOTA_COUNTER[(fixed_identity, window_minute)] = max_per_minute
 

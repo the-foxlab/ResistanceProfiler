@@ -1,20 +1,10 @@
-"""Opaque server-side session issuance and Redis-backed session store.
-
-Sessions are the ownership boundary for uploads, jobs, and artifacts in
-non-local deployment modes. In local mode they are additive: zero-config
-startup still works without a token and without a running Redis, in which
-case sessions fall back to a process-local in-memory store. In non-local
-modes Redis is already required (for the RQ queue), so the Redis-backed store
-is used and provides cross-process ownership semantics.
+"""Opaque server-side session issuance, Redis-backed store, and ownership registry.
 
 Security properties:
-
-* The raw session value carries >=256 bits of randomness.
-* Only a keyed hash of the session value is stored — the raw value is never
+* Raw session tokens carry 256 bits of entropy; only the SHA-256 hex digest is
   persisted, so a store read cannot be replayed as a cookie.
-* The cookie is ``Secure``, ``HttpOnly``, ``SameSite=Lax``.
-* A tampered or unknown session cookie is treated as "no session" and a fresh
-  session is issued rather than erroring.
+* Cookies use ``HttpOnly; SameSite=Lax`` (plus ``Secure`` in non-local modes).
+* Unknown or tampered cookies silently issue a fresh session rather than erroring.
 """
 
 from __future__ import annotations
@@ -31,37 +21,28 @@ from pathlib import Path
 
 import redis
 
-from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
+from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV, parse_int_env
+from web.backend.startup_config import is_path_within_allowed_roots
 
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = 'respro_session'
-# 32 raw bytes -> 256 bits of entropy, url-safe encoded.
-_SESSION_ENTROPY_BYTES = 32
-_SESSION_HASH_BYTES = 32
+_SESSION_ENTROPY_BYTES = 32  # 256 bits of entropy, url-safe encoded.
 
-# Process-local fallback store used when Redis is unavailable (local zero-config
-# startup without a Redis container). Keyed by session hash; value is the
-# creation timestamp. In non-local modes Redis is required and this fallback is
-# only a transient safety net.
+# Process-local fallbacks used when Redis is unreachable (local zero-config mode).
 _MEMORY_STORE: dict[str, float] = {}
 _MEMORY_STORE_LOCK = threading.Lock()
-
-# Process-local fallback for owned records (uploads/jobs/artifacts). Keyed by
-# ``prefix:record_id``; value is the field mapping. Used only when Redis is
-# unavailable so local single-user mode still works.
 _MEMORY_OWNED_STORE: dict[str, dict[str, str]] = {}
 _MEMORY_OWNED_LOCK = threading.Lock()
 
-# Cached Redis client and negative-cache expiry so we don't reconnect on every
-# request. Reset by tests that swap in fakeredis.
+# Cached Redis client and short negative cache to avoid reconnecting per request.
 _REDIS_CLIENT_CACHE: redis.Redis | None = None
 _REDIS_UNAVAILABLE_UNTIL: float | None = None
 _REDIS_NEGATIVE_CACHE_SECONDS = 5
 
 
 def reset_memory_stores() -> None:
-    """Clear the in-memory fallback stores (test helper)."""
+    """Clear in-memory fallback stores and cached Redis probe state (test helper)."""
     global _REDIS_CLIENT_CACHE, _REDIS_UNAVAILABLE_UNTIL
     with _MEMORY_STORE_LOCK:
         _MEMORY_STORE.clear()
@@ -73,39 +54,33 @@ def reset_memory_stores() -> None:
 
 @dataclass(frozen=True)
 class Session:
-    """A resolved session: the opaque token to set on the cookie and its Redis key."""
+    """Resolved session token and its persisted SHA-256 hash."""
 
     token: str
     session_hash: str
 
 
+@dataclass(frozen=True)
+class OwnedRecord:
+    """Resolved upload, job, or artifact ownership record."""
+
+    record_id: str
+    owner: str
+    canonical_path: str | None
+    fields: dict[str, str]
+
+
 def resolve_session_ttl_seconds() -> int:
     """Resolve the session TTL from env with the config default, failing fast on invalid input."""
-    default = WEB_BACKEND_CONFIG.defaults.session_ttl_seconds
-    raw_value = os.getenv(WEB_ENV.session_ttl, str(default)).strip()
-    if not raw_value:
-        return default
-    try:
-        parsed = int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f'{WEB_ENV.session_ttl} must be an integer value.') from exc
-    if parsed <= 0:
-        raise ValueError(f'{WEB_ENV.session_ttl} must be > 0.')
-    return parsed
+    return parse_int_env(
+        WEB_ENV.session_ttl,
+        WEB_BACKEND_CONFIG.defaults.session_ttl_seconds,
+        min_value=1,
+    )
 
 
 def _redis_connection() -> redis.Redis | None:
-    """Build a Redis connection from the configured URL, or None if Redis is unreachable.
-
-    In local zero-config mode Redis may not be running; the session store then
-    falls back to a process-local in-memory dict so single-user startup still
-    works. In non-local modes Redis is required (for the RQ queue) and a
-    connection is expected to succeed.
-
-    The resolved client (or None) is cached to avoid reconnecting on every
-    request; a short negative cache limits how often an unavailable Redis is
-    retried so a Redis that comes up later is picked up.
-    """
+    """Return a cached Redis client, or ``None`` if unreachable (falling back to in-memory)."""
     global _REDIS_CLIENT_CACHE, _REDIS_UNAVAILABLE_UNTIL
     now = time.time()
     if _REDIS_CLIENT_CACHE is not None:
@@ -118,25 +93,26 @@ def _redis_connection() -> redis.Redis | None:
         client.ping()
         _REDIS_CLIENT_CACHE = client
         return client
-    except Exception as exc:  # noqa: BLE001 — best-effort Redis probe; any failure falls back to in-memory
+    except Exception as exc:  # noqa: BLE001 — best-effort probe; falls back to in-memory
         logger.debug('Session store: Redis unavailable at %s, using in-memory fallback: %s', redis_url, exc)
         _REDIS_UNAVAILABLE_UNTIL = now + _REDIS_NEGATIVE_CACHE_SECONDS
         return None
 
 
 def hash_session_token(token: str) -> str:
-    """Return the hex SHA-256 hash of a session token.
-
-    Only the hash is stored, so a store read cannot be replayed as a cookie.
-    SHA-256 is sufficient here because the token carries 256 bits of fresh
-    randomness and is never reused, making brute-force preimage attacks
-    infeasible.
-    """
+    """Return the hex SHA-256 hash of *token*."""
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
+def _session_key(session_hash: str) -> str:
+    return f'respro:session:{session_hash}'
+
+
+def _owned_key(prefix: str, record_id: str) -> str:
+    return f'respro:{prefix}:{record_id}'
+
+
 def _store_session(session_hash: str, ttl: int) -> None:
-    """Persist a session hash with the given TTL, preferring Redis."""
     client = _redis_connection()
     if client is not None:
         key = _session_key(session_hash)
@@ -148,7 +124,6 @@ def _store_session(session_hash: str, ttl: int) -> None:
 
 
 def _session_exists(session_hash: str) -> bool:
-    """Return whether a session hash is known and unexpired."""
     client = _redis_connection()
     if client is not None:
         try:
@@ -170,69 +145,31 @@ def create_session() -> Session:
     """Generate a fresh session token, persist its hash, and return it."""
     token = secrets.token_urlsafe(_SESSION_ENTROPY_BYTES)
     session_hash = hash_session_token(token)
-    ttl = resolve_session_ttl_seconds()
-    _store_session(session_hash, ttl)
+    _store_session(session_hash, resolve_session_ttl_seconds())
     return Session(token=token, session_hash=session_hash)
 
 
 def resolve_or_create_session(cookie_value: str | None) -> Session:
-    """Return a valid session for the request, creating one if the cookie is absent/invalid.
-
-    A tampered or unknown cookie is treated as "no session" and a fresh session
-    is issued rather than erroring — this avoids confirming session existence to
-    an attacker and keeps the zero-config local flow robust.
-    """
+    """Return a valid session for *cookie_value*, or issue a fresh session if absent/invalid."""
     if cookie_value:
-        session = _validate_cookie(cookie_value)
-        if session is not None:
-            return session
+        token = cookie_value.strip()
+        if token:
+            session_hash = hash_session_token(token)
+            if _session_exists(session_hash):
+                return Session(token=token, session_hash=session_hash)
     return create_session()
 
 
-def _validate_cookie(cookie_value: str) -> Session | None:
-    """Return a Session if the cookie value maps to a known, unexpired session."""
-    token = cookie_value.strip()
-    if not token:
-        return None
-    session_hash = hash_session_token(token)
-    if _session_exists(session_hash):
-        return Session(token=token, session_hash=session_hash)
-    return None
-
-
-def _session_key(session_hash: str) -> str:
-    """Return the Redis key for one session hash."""
-    return f'respro:session:{session_hash}'
-
-
-def session_cookie_attributes(deployment_mode: str = 'local') -> str:
-    """Return the cookie attribute string for a session cookie.
-
-    ``Secure`` is set only in non-local deployment modes: in local mode the app
-    binds to loopback over plain HTTP, and a ``Secure`` cookie would not be sent
-    by clients (browsers exclude ``Secure`` cookies from HTTP requests, and so
-    does the httpx test client). In non-local mode the app sits behind a
-    TLS-terminating proxy, so ``Secure`` is correct. ``HttpOnly`` keeps the token
-    out of JavaScript; ``SameSite=Lax`` allows top-level navigations (e.g.
-    opening a report link) while blocking cross-site POSTs.
-    """
+def set_session_cookie_header(session: Session, deployment_mode: str = 'local') -> str:
+    """Format the ``Set-Cookie`` header value (``Secure`` only in non-local modes)."""
     secure = '; Secure' if deployment_mode != 'local' else ''
     return (
-        f'{SESSION_COOKIE_NAME}=%s; Path=/; HttpOnly; SameSite=Lax{secure}; '
+        f'{SESSION_COOKIE_NAME}={session.token}; Path=/; HttpOnly; SameSite=Lax{secure}; '
         f'Max-Age={resolve_session_ttl_seconds()}'
     )
 
 
-def set_session_cookie_header(session: Session, deployment_mode: str = 'local') -> str:
-    """Return the full Set-Cookie header value for a session."""
-    return session_cookie_attributes(deployment_mode) % session.token
-
-
 # ─── Ownership registry (uploads / jobs / artifacts) ──────────────────────
-#
-# Every upload, job, and artifact is recorded in Redis with its owning session
-# hash and canonical path. Routes resolve opaque IDs to these records
-# server-side and verify ownership before acting.
 
 
 def record_upload(
@@ -242,7 +179,7 @@ def record_upload(
     file_type: str,
     ttl: int | None = None,
 ) -> str:
-    """Record an upload under a session and return its opaque upload id."""
+    """Record an upload under *session_hash* and return its opaque upload ID."""
     return _record_owned(
         prefix='upload',
         session_hash=session_hash,
@@ -259,12 +196,7 @@ def record_job(
     job_id: str | None = None,
     ttl: int | None = None,
 ) -> str:
-    """Record a queued job under a session and return its opaque job id.
-
-    When ``job_id`` is provided (the RQ job id), the ownership record is keyed by
-    that id so the job-status route can look it up directly. Otherwise a fresh
-    opaque id is generated.
-    """
+    """Record a queued job under *session_hash* and return its job ID."""
     return _record_owned(
         prefix='job',
         session_hash=session_hash,
@@ -282,7 +214,7 @@ def record_artifact(
     media_type: str,
     ttl: int | None = None,
 ) -> str:
-    """Record an output artifact under a session and return its opaque artifact id."""
+    """Record an output artifact under *session_hash* and return its opaque artifact ID."""
     return _record_owned(
         prefix='artifact',
         session_hash=session_hash,
@@ -301,14 +233,11 @@ def _record_owned(
     ttl: int | None,
     record_id: str | None = None,
 ) -> str:
-    """Persist one owned record and return its opaque id."""
-    if record_id is None:
-        record_id = secrets.token_urlsafe(16)
-    key = f'respro:{prefix}:{record_id}'
-    mapping: dict[str, str] = {'owner': session_hash}
+    record_id = record_id or secrets.token_urlsafe(16)
+    key = _owned_key(prefix, record_id)
+    mapping: dict[str, str] = {'owner': session_hash, **extra}
     if canonical_path is not None:
         mapping['canonical_path'] = str(canonical_path)
-    mapping.update(extra)
     effective_ttl = ttl if ttl is not None else resolve_session_ttl_seconds()
     client = _redis_connection()
     if client is not None:
@@ -320,19 +249,9 @@ def _record_owned(
     return record_id
 
 
-@dataclass(frozen=True)
-class OwnedRecord:
-    """A resolved owned record from Redis."""
-
-    record_id: str
-    owner: str
-    canonical_path: str | None
-    fields: dict[str, str]
-
-
 def fetch_owned_record(prefix: str, record_id: str) -> OwnedRecord | None:
-    """Fetch one owned record by id, or None if it does not exist."""
-    key = f'respro:{prefix}:{record_id}'
+    """Fetch one owned record by ID, or ``None`` if absent."""
+    key = _owned_key(prefix, record_id)
     client = _redis_connection()
     if client is not None:
         try:
@@ -340,14 +259,12 @@ def fetch_owned_record(prefix: str, record_id: str) -> OwnedRecord | None:
         except (redis.RedisError, OSError) as exc:
             logger.debug('Owned record fetch failed for %s: %s', key, exc)
             return None
-        if not raw:
-            return None
-        decoded = {k.decode('utf-8'): v.decode('utf-8') for k, v in raw.items()}
+        decoded = {k.decode('utf-8'): v.decode('utf-8') for k, v in raw.items()} if raw else {}
     else:
         with _MEMORY_OWNED_LOCK:
             decoded = dict(_MEMORY_OWNED_STORE.get(key, {}))
-        if not decoded:
-            return None
+    if not decoded:
+        return None
     return OwnedRecord(
         record_id=record_id,
         owner=decoded.get('owner', ''),
@@ -356,21 +273,34 @@ def fetch_owned_record(prefix: str, record_id: str) -> OwnedRecord | None:
     )
 
 
-def owner_matches(record: OwnedRecord | None, session_hash: str) -> bool:
-    """Return True only when the record exists and is owned by the given session.
-
-    A non-existent record is treated as a non-match so callers can uniformly
-    return 404 (not 403) for both unknown and non-owned records, avoiding
-    confirming existence to non-owners.
-    """
+def update_owned_record_fields(prefix: str, record_id: str, updates: dict[str, str]) -> bool:
+    """Merge *updates* into an existing owned record; return True if persisted."""
+    record = fetch_owned_record(prefix, record_id)
     if record is None:
         return False
-    return bool(record.owner) and hmac.compare_digest(record.owner, session_hash)
+    mapping = {**record.fields, **updates}
+    key = _owned_key(prefix, record_id)
+    client = _redis_connection()
+    if client is not None:
+        try:
+            client.hset(key, mapping=mapping)
+            return True
+        except (redis.RedisError, OSError) as exc:
+            logger.warning('Owned record update failed for %s: %s', key, exc)
+            return False
+    with _MEMORY_OWNED_LOCK:
+        _MEMORY_OWNED_STORE[key] = mapping
+    return True
+
+
+def owner_matches(record: OwnedRecord | None, session_hash: str) -> bool:
+    """Return True only when *record* exists and belongs to *session_hash* (constant-time)."""
+    return record is not None and bool(record.owner) and hmac.compare_digest(record.owner, session_hash)
 
 
 def delete_owned_record(prefix: str, record_id: str) -> bool:
     """Delete one owned record; return True if a key was removed."""
-    key = f'respro:{prefix}:{record_id}'
+    key = _owned_key(prefix, record_id)
     client = _redis_connection()
     if client is not None:
         try:
@@ -389,26 +319,13 @@ def resolve_owned_path(
     session_hash: str,
     allowed_roots: tuple[Path, ...],
 ) -> Path:
-    """Resolve an opaque record ID to a validated, owned, path-confined file.
-
-    Raises ``LookupError`` if the record does not exist or is not owned by the
-    session (callers map this to 404 to avoid confirming existence), and
-    ``ValueError`` if the resolved path escapes the allowed roots.
-    """
+    """Resolve an opaque ID to an owned, path-confined file (``LookupError`` → 404, ``ValueError`` → 400)."""
     record = fetch_owned_record(prefix, record_id)
     if not owner_matches(record, session_hash):
         raise LookupError(f'{prefix} not found.')
     if record.canonical_path is None:
         raise LookupError(f'{prefix} record has no canonical path.')
     resolved = Path(record.canonical_path).expanduser().resolve()
-    if not _is_within_allowed_roots(resolved, allowed_roots):
+    if not is_path_within_allowed_roots(resolved, allowed_roots):
         raise ValueError(f'{prefix} path is outside allowed directory.')
     return resolved
-
-
-def _is_within_allowed_roots(path: Path, allowed_roots: tuple[Path, ...]) -> bool:
-    """Return whether a resolved path is contained in one of the allowed roots."""
-    for root in allowed_roots:
-        if path == root or root in path.parents:
-            return True
-    return False

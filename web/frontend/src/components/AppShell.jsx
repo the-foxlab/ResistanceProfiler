@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
 
 import logoSrc from '../assets/logo.svg';
-import aboutIconSrc from '../assets/icon-about.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
 import mutationsIconSrc from '../assets/search.svg';
 import homeIconSrc from '../assets/home.svg';
@@ -14,7 +13,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { ThemeContext, useTheme } from '../hooks/useTheme';
 import { AppFooter } from './AppFooter';
 import { TourOverlay } from './tour/TourOverlay';
-import { ROUTE_META, SIDEBAR_SECTIONS } from '../routes';
+import { resolveRouteMeta, SIDEBAR_SECTIONS } from '../routes';
 
 const SIDEBAR_ICONS = {
   analyze: homeIconSrc,
@@ -43,7 +42,7 @@ function readCollapsed() {
 
 export function AppShell({ logic, children }) {
   const { pathname } = useLocation();
-  const meta = ROUTE_META[pathname] || { showsSidebar: false, showsDatabaseSelector: false, breadcrumb: [] };
+  const meta = resolveRouteMeta(pathname);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);

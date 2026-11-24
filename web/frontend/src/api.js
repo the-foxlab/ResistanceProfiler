@@ -1,23 +1,33 @@
 import { FRONTEND_CONFIG } from './config';
+import { formatResultTimestamp, triggerBlobDownload } from './utils';
 
 const API_BASE = FRONTEND_CONFIG.apiBase;
 
-function buildHeaders(baseHeaders = {}) {
-  return baseHeaders;
-}
+const ERROR_MATCHERS = [
+  [['unsupported fasta format'], 'Unsupported FASTA format. Upload a text FASTA file with a header line starting with >.'],
+  [['unsupported vcf format'], 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'],
+  [['unsupported bam format'], 'Unsupported BAM format. Upload a BGZF-compressed BAM file.'],
+  [['vcf and reference fasta do not match'], 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'],
+  [['vcf contig names do not match'], 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'],
+  [['coverage annotation needs a coordinate-sorted bam'], 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.'],
+  [['bam and reference fasta do not match'], 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.'],
+  [['unsupported json format'], 'Unsupported JSON format. Upload a valid ResistanceProfiler results JSON file.'],
+  [['project database uuid mismatch'], 'Project database UUID mismatch. Database updates currently do not allow regeneration of reports from older database versions.'],
+  [['no cds matches found'], 'No matches to references in the database found.'],
+];
 
 export function buildApiUrl(path, params = {}) {
-  // Drop empty query params so generated URLs stay compact and predictable.
-  const filteredParams = Object.fromEntries(
-    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  const filtered = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ''),
   );
-  const query = new URLSearchParams(filteredParams);
-  const queryString = query.toString();
+  const queryString = new URLSearchParams(filtered).toString();
   return queryString ? `${API_BASE}${path}?${queryString}` : `${API_BASE}${path}`;
 }
 
+export const buildReportUrl = (artifactId) => buildApiUrl('/api/report', { artifact_id: artifactId });
+export const buildArtifactUrl = (artifactId) => buildApiUrl('/api/artifact', { artifact_id: artifactId });
+
 export function formatUserError(message) {
-  // Convert backend/internal error wording into actionable UI-friendly messages.
   const lines = String(message || '')
     .split('\n')
     .map((line) => line.trim())
@@ -26,59 +36,16 @@ export function formatUserError(message) {
   normalized = normalized.replace(/^(ValueError|RuntimeError|Exception|OSError):\s*/, '');
 
   const lowered = normalized.toLowerCase();
-  if (lowered.includes('unsupported fasta format')) {
-    return 'Unsupported FASTA format. Upload a text FASTA file with a header line starting with >.';
+  for (const [terms, friendly] of ERROR_MATCHERS) {
+    if (terms.every((term) => lowered.includes(term))) {
+      return friendly;
+    }
   }
-  if (lowered.includes('unsupported vcf format')) {
-    return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.';
-  }
-  if (lowered.includes('unsupported bam format')) {
-    return 'Unsupported BAM format. Upload a BGZF-compressed BAM file.';
-  }
-  if (lowered.includes('vcf and reference fasta do not match') || lowered.includes('vcf contig names do not match')) {
-    return 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.';
-  }
-  if (lowered.includes('coverage annotation needs a coordinate-sorted bam')) {
-    return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.';
-  }
-  if (lowered.includes('bam and reference fasta do not match')) {
-    return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.';
-  }
-  if (lowered.includes('unsupported json format')) {
-    return 'Unsupported JSON format. Upload a valid ResistanceProfiler results JSON file.';
-  }
-  if (lowered.includes('project database uuid mismatch')) {
-    return (
-      'Project database UUID mismatch. Database updates currently do not allow regeneration '
-      + 'of reports from older database versions.'
-    );
-  }
-  if (lowered.includes('no cds matches found')) {
-    return 'No matches to references in the database found.';
-  }
-  if (normalized.startsWith('Request failed:')) {
-    return 'The request failed.';
-  }
-  return normalized;
+  return normalized.startsWith('Request failed:') ? 'The request failed.' : normalized;
 }
 
-export function formatResultTimestamp(timestamp) {
-  if (!timestamp) {
-    return 'n/a';
-  }
-
-  const parsed = new Date(timestamp);
-  if (Number.isNaN(parsed.getTime())) {
-    return timestamp;
-  }
-
-  return parsed.toLocaleString();
-}
-
-export function formatPathBasename(path) {
-  if (!path) {
-    return 'n/a';
-  }
+function formatPathBasename(path) {
+  if (!path) return 'n/a';
   const normalized = String(path).replace(/\\/g, '/');
   const parts = normalized.split('/').filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : normalized;
@@ -87,63 +54,46 @@ export function formatPathBasename(path) {
 export function formatPathStem(path) {
   const basename = formatPathBasename(path);
   const dotIndex = basename.lastIndexOf('.');
-  if (dotIndex <= 0) {
-    return basename;
-  }
-  return basename.slice(0, dotIndex);
+  return dotIndex <= 0 ? basename : basename.slice(0, dotIndex);
 }
 
-export async function apiGet(path, params = {}) {
-  // Shared fetch helper keeps all GET error handling consistent.
-  const response = await fetch(buildApiUrl(path, params), {
-    headers: buildHeaders(),
-  });
+async function apiRequest(url, options = {}) {
+  const response = await fetch(url, options);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
   }
+  return response;
+}
+
+export async function apiGet(path, params = {}) {
+  const response = await apiRequest(buildApiUrl(path, params), { headers: {} });
   return response.json();
 }
 
 export async function apiPost(path, body) {
-  // Shared POST helper centralizes auth/error handling.
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiRequest(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: buildHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-  }
   return response.json();
 }
 
-export async function apiPostRaw(path, body) {
-  // Returns the raw Response so callers can inspect status before parsing.
-  const response = await fetch(`${API_BASE}${path}`, {
+export function apiPostRaw(path, body) {
+  return fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: buildHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return response;
 }
 
 export async function apiDelete(path) {
-  // Shared DELETE helper centralizes auth/error handling.
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    headers: buildHeaders(),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-  }
+  await apiRequest(`${API_BASE}${path}`, { method: 'DELETE', headers: {} });
 }
 
-export async function apiUpload(path, file, onProgress = null, onAbort = null) {
-  // Use XHR so upload progress events can be surfaced in the UI. ``onAbort``
-  // lets the caller capture the request so it can be aborted mid-flight.
+export function apiUpload(path, file, onProgress = null, onAbort = null) {
+  // XHR is used so upload progress events and mid-flight cancellation can be surfaced.
   const formData = new FormData();
   formData.append('file', file);
 
@@ -151,18 +101,10 @@ export async function apiUpload(path, file, onProgress = null, onAbort = null) {
     const request = new XMLHttpRequest();
     request.open('POST', `${API_BASE}${path}`);
 
-    const headers = buildHeaders();
-    Object.entries(headers).forEach(([key, value]) => {
-      request.setRequestHeader(key, value);
-    });
-
     if (onProgress) {
       request.upload.onprogress = (event) => {
-        if (!event.lengthComputable) {
-          return;
-        }
-        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-        onProgress(percent);
+        if (!event.lengthComputable) return;
+        onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
       };
     }
 
@@ -182,27 +124,16 @@ export async function apiUpload(path, file, onProgress = null, onAbort = null) {
       reject(new Error(formatUserError(payload.detail || `Upload failed: ${request.status}`)));
     };
 
-    request.onerror = () => {
-      reject(new Error('Upload failed: network error'));
-    };
+    request.onerror = () => reject(new Error('Upload failed: network error'));
+    // Settle on abort so callers' finally blocks clear in-flight state after a cancel.
+    request.onabort = () => reject(new Error('Upload canceled'));
 
-    // A real browser fires the ``abort`` event (not ``error``) when the XHR is
-    // aborted. Settling the promise here is what lets callers' finally blocks
-    // run and clear their in-flight flags after a cancel.
-    request.onabort = () => {
-      reject(new Error('Upload canceled'));
-    };
-
-    if (onAbort) {
-      onAbort(request);
-    }
-
+    if (onAbort) onAbort(request);
     request.send(formData);
   });
 }
 
-// Upper bound for one bundle request. The backend advertises the authoritative
-// derived limit via /api/ui/config; this value is only the pre-config fallback.
+// Pre-config fallback; /api/ui/config advertises the authoritative backend limit.
 const DEFAULT_ARTIFACT_BUNDLE_LIMIT = 100;
 let artifactBundleLimit = DEFAULT_ARTIFACT_BUNDLE_LIMIT;
 
@@ -225,58 +156,34 @@ export function chunkIds(ids, limit = artifactBundleLimit) {
 
 function withPartSuffix(downloadName, part, total) {
   const dot = downloadName.lastIndexOf('.');
-  if (dot <= 0) {
-    return `${downloadName}-part${part}of${total}`;
-  }
-  return `${downloadName.slice(0, dot)}-part${part}of${total}${downloadName.slice(dot)}`;
+  return dot <= 0
+    ? `${downloadName}-part${part}of${total}`
+    : `${downloadName.slice(0, dot)}-part${part}of${total}${downloadName.slice(dot)}`;
 }
 
 export async function downloadArtifactBundle(artifactIds, downloadName) {
   const chunks = chunkIds(artifactIds);
   for (let index = 0; index < chunks.length; index += 1) {
-    const name = chunks.length === 1
-      ? downloadName
-      : withPartSuffix(downloadName, index + 1, chunks.length);
-    await downloadOneArtifactBundle(chunks[index], name, chunks.length > 1 ? index + 1 : null);
+    const name = chunks.length === 1 ? downloadName : withPartSuffix(downloadName, index + 1, chunks.length);
+    const response = await apiRequest(buildApiUrl('/api/artifact-bundle', { part: chunks.length > 1 ? index + 1 : null }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_ids: chunks[index] }),
+    });
+    triggerBlobDownload(await response.blob(), name);
   }
-}
-
-async function downloadOneArtifactBundle(artifactIds, downloadName, part) {
-  const response = await fetch(buildApiUrl('/api/artifact-bundle', { part }), {
-    method: 'POST',
-    headers: buildHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ artifact_ids: artifactIds }),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
-  }
-  const href = URL.createObjectURL(await response.blob());
-  const anchor = document.createElement('a');
-  anchor.href = href;
-  anchor.download = downloadName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(href);
 }
 
 export async function fetchSharedReferences(ids) {
-  const payload = await apiGet('/api/databases/shared-references', { ids: ids.join(',') });
-  return payload.data;
+  return (await apiGet('/api/databases/shared-references', { ids: ids.join(',') })).data;
 }
 
 export async function fetchReferenceAccessions(ids) {
-  const payload = await apiGet('/api/databases/reference-accessions', { ids: ids.join(',') });
-  return payload.data;
+  return (await apiGet('/api/databases/reference-accessions', { ids: ids.join(',') })).data;
 }
 
 export async function compareDatabases(databaseIds, accession) {
-  const payload = await apiPost('/api/databases/compare', {
-    database_ids: databaseIds,
-    accession,
-  });
-  return payload.data;
+  return (await apiPost('/api/databases/compare', { database_ids: databaseIds, accession })).data;
 }
 
-export { API_BASE, buildHeaders };
+export { API_BASE, formatResultTimestamp, triggerBlobDownload };

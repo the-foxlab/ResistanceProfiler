@@ -20,7 +20,7 @@ vi.mock('./useDashboardLogic', async () => {
       const location = useLocation();
       const navigate = useNavigate();
       return {
-        activeMode: location.pathname.startsWith('/analysis') ? 'analysis' : 'home',
+        pathname: location.pathname,
         navigate,
         setActiveProfileMode: vi.fn(),
         setAnalyzeSubMode: vi.fn(),
@@ -38,7 +38,7 @@ let AppRoutesRenderCount = 0;
 vi.mock('./AppRoutes', () => ({
   AppRoutes: ({ logic }) => {
     AppRoutesRenderCount += 1;
-    return <div data-testid="app-routes">routes:{String(logic.activeMode)}</div>;
+    return <div data-testid="app-routes">routes:{String(logic.pathname)}</div>;
   },
 }));
 
@@ -51,10 +51,6 @@ vi.mock('./components/AppShell', () => ({
       {children}
     </div>
   ),
-}));
-
-vi.mock('./hooks/useMobileClass', () => ({
-  useMobileClass: () => {},
 }));
 
 let App;

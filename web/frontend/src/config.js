@@ -5,16 +5,13 @@ const defaultApiBase =
     ? 'http://127.0.0.1:8000'
     : '';
 
-// URL of the running web app, shown on the About page. In production the
-// backend serves the frontend same-origin (apiBase ''), so the app's own
-// origin is the URL to open; in dev the backend host is the deployed app.
+// URL of the running web app shown on About; same-origin in production, backend host in dev.
 const explorerUrl =
   typeof window !== 'undefined'
     ? (defaultApiBase || window.location.origin)
     : '';
 
-// Maintainer address shown when the deployment does not configure
-// RESPRO_WEB_CONTACT_EMAIL (see AboutPage).
+// Maintainer address shown when RESPRO_WEB_CONTACT_EMAIL is unset (AboutPage).
 export const MAINTAINER_EMAIL = 'jonas.fuchs@uniklinik-freiburg.de';
 
 export const FRONTEND_CONFIG = {
@@ -26,9 +23,6 @@ export const FRONTEND_CONFIG = {
       minDepth: 10,
     },
     jobPollIntervalMs: 2000,
-  },
-  defaults: {
-    sampleName: '',
   },
   ui: {
     explorerUrl,

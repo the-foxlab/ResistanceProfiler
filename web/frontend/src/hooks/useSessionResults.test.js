@@ -30,26 +30,6 @@ describe('useSessionResults — artifact tracking and bundles', () => {
     expect(result.current.reportPaths).toEqual(['id-html', 'id-json']);
   });
 
-  it('bundles the artifact_ids across every session result', async () => {
-    const { result } = renderHook(() => useSessionResults());
-
-    act(() => {
-      result.current.setSessionResults([
-        { artifact_ids: ['a-html', 'a-json'] },
-        { artifact_ids: ['b-html', 'b-json'] },
-      ]);
-    });
-
-    await act(async () => {
-      await result.current.downloadAllSessionArtifacts(() => {});
-    });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
-      artifact_ids: ['a-html', 'a-json', 'b-html', 'b-json'],
-    });
-  });
-
   it('bundles only the selected results', async () => {
     const { result } = renderHook(() => useSessionResults());
 

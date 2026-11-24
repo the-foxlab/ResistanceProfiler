@@ -3,27 +3,18 @@ import themeLightIcon from '../assets/theme-light.svg';
 import themeDarkIcon from '../assets/theme-dark.svg';
 
 /**
- * Theme switch for the top bar. Three icon-only options:
- * System (follows prefers-color-scheme) · Light · Dark. Icons live in
- * src/assets/ as SVG files and are recoloured via the CSS mask pattern
- * (background-color: currentColor), so they follow the theme's text colour.
+ * Three-way theme switch (System · Light · Dark) using CSS-masked SVG icons.
  */
-const ICONS = {
-  system: themeSystemIcon,
-  light: themeLightIcon,
-  dark: themeDarkIcon,
-};
+const THEME_OPTIONS = [
+  { value: 'system', label: 'System', title: 'Follow system preference', icon: themeSystemIcon },
+  { value: 'light', label: 'Light', title: 'Always light', icon: themeLightIcon },
+  { value: 'dark', label: 'Dark', title: 'Always dark', icon: themeDarkIcon },
+];
 
-export function ThemeToggle({ preference, resolved, onChange }) {
-  const options = [
-    { value: 'system', label: 'System', title: 'Follow system preference' },
-    { value: 'light', label: 'Light', title: 'Always light' },
-    { value: 'dark', label: 'Dark', title: 'Always dark' },
-  ];
-
+export function ThemeToggle({ preference, onChange }) {
   return (
     <div className="theme-toggle" role="radiogroup" aria-label="Colour theme">
-      {options.map((option) => (
+      {THEME_OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
@@ -37,7 +28,7 @@ export function ThemeToggle({ preference, resolved, onChange }) {
           <span
             className="theme-toggle-icon"
             aria-hidden="true"
-            style={{ '--icon-src': `url(${ICONS[option.value]})` }}
+            style={{ '--icon-src': `url(${option.icon})` }}
           />
           <span className="theme-toggle-text">{option.label}</span>
         </button>

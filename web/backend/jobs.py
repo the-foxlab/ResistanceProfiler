@@ -1,9 +1,7 @@
-"""
-RQ job functions for background profiling.
+"""RQ job entrypoints for background profiling and report regeneration.
 
-These are top-level importable functions so that RQ can serialize them via
-pickle. All Path arguments are passed as strings for serialization safety and
-converted inside the function.
+Job arguments are primitive strings/numbers/booleans so RQ's ``JSONSerializer``
+round-trips them safely without pickle.
 """
 
 from __future__ import annotations
@@ -18,9 +16,12 @@ from pathlib import Path
 
 from rq import get_current_job
 
+from web.backend.artifact_kinds import RESULTS_JSON, artifact_paths_for_html, sanitize_artifact_stem
 from web.backend.queue import resolve_subprocess_timeout_seconds
 
 logger = logging.getLogger(__name__)
+
+_EXPORT_ARGS = ('--export', 'json', '--export', 'pdf', '--export', 'tsv')
 
 
 def run_profile_fasta(
@@ -34,23 +35,32 @@ def run_profile_fasta(
     artifact_base_name: str | None = None,
     use_example: bool = False,
 ) -> dict:
-    """RQ job wrapper for FASTA profiling."""
-    output_html_path = _build_web_output_html_path(
+    """RQ job entrypoint for FASTA profiling."""
+    fasta = Path(fasta_path) if fasta_path else None
+    output_html = _build_web_output_html_path(
         output_dir=Path(output_dir),
-        input_name=artifact_base_name or input_display_name or (Path(fasta_path).name if fasta_path else 'example'),
+        input_name=artifact_base_name or input_display_name or (fasta.name if fasta else 'example'),
     )
+    extra_args = [
+        *(['--example'] if use_example else ['--fasta', str(fasta)]),
+        '--sample', sample,
+        '--threads', str(threads),
+        '--cache',
+        *(['--input-display-name', input_display_name] if input_display_name else []),
+    ]
     return _run_job_with_logging(
         mode='fasta',
         database_id=Path(project_db).name,
         sample=sample,
-        job_func=lambda: _run_profile_fasta_subprocess(
+        job_func=lambda: _execute_respro_job(
+            mode='fasta',
+            subcommand='fasta',
+            extra_args=extra_args,
             project_db=Path(project_db),
-            output_html_path=output_html_path,
-            fasta_path=Path(fasta_path) if fasta_path else None,
-            sample=sample,
-            threads=threads,
-            input_display_name=input_display_name,
-            use_example=use_example,
+            output_html_path=output_html,
+            default_sample=sample,
+            query_name=_read_first_fasta_name(fasta) if fasta else 'example',
+            include_profile_fields=True,
         ),
     )
 
@@ -69,26 +79,35 @@ def run_profile_vcf(
     input_display_name: str | None = None,
     artifact_base_name: str | None = None,
 ) -> dict:
-    """RQ job wrapper for VCF profiling."""
-    output_html_path = _build_web_output_html_path(
+    """RQ job entrypoint for VCF profiling."""
+    output_html = _build_web_output_html_path(
         output_dir=Path(output_dir),
         input_name=artifact_base_name or input_display_name or Path(vcf_path).name,
     )
+    extra_args = [
+        '--vcf', str(vcf_path),
+        '--ref-fasta', str(ref_fasta_path),
+        '--sample', sample,
+        '--min-af', str(min_af),
+        '--min-depth', str(min_depth),
+        '--threads', str(threads),
+        '--cache',
+        *(['--input-display-name', input_display_name] if input_display_name else []),
+        *(['--bam', str(bam_path)] if bam_path is not None else []),
+    ]
     return _run_job_with_logging(
         mode='vcf',
         database_id=Path(project_db).name,
         sample=sample,
-        job_func=lambda: _run_profile_vcf_subprocess(
+        job_func=lambda: _execute_respro_job(
+            mode='vcf',
+            subcommand='vcf',
+            extra_args=extra_args,
             project_db=Path(project_db),
-            output_html_path=output_html_path,
-            vcf_path=Path(vcf_path),
-            ref_fasta_path=Path(ref_fasta_path),
-            sample=sample,
-            min_af=min_af,
-            min_depth=min_depth,
-            bam_path=Path(bam_path) if bam_path else None,
-            threads=threads,
-            input_display_name=input_display_name,
+            output_html_path=output_html,
+            default_sample=sample,
+            query_name=_read_first_fasta_name(Path(ref_fasta_path)),
+            include_profile_fields=True,
         ),
     )
 
@@ -99,8 +118,8 @@ def run_regenerate_json(
     output_dir: str,
     json_path: str,
 ) -> dict:
-    """RQ job wrapper for regenerating report artifacts from result JSON."""
-    output_html_path = _build_web_output_html_path(
+    """RQ job entrypoint for regenerating reports from an uploaded results JSON."""
+    output_html = _build_web_output_html_path(
         output_dir=Path(output_dir),
         input_name=Path(json_path).name,
     )
@@ -108,248 +127,83 @@ def run_regenerate_json(
         mode='regenerate-json',
         database_id=Path(project_db).name,
         sample='regenerate',
-        job_func=lambda: _run_regenerate_json_subprocess(
+        job_func=lambda: _execute_respro_job(
+            mode='regenerate-json',
+            subcommand='regenerate',
+            extra_args=['--json', str(json_path)],
             project_db=Path(project_db),
-            output_html_path=output_html_path,
-            json_path=Path(json_path),
+            output_html_path=output_html,
+            default_sample='',
+            query_name='',
+            include_profile_fields=False,
         ),
     )
 
 
-def _run_profile_fasta_subprocess(
+def _execute_respro_job(
     *,
+    mode: str,
+    subcommand: str,
+    extra_args: list[str],
     project_db: Path,
     output_html_path: Path,
-    fasta_path: Path | None,
-    sample: str,
-    threads: int,
-    input_display_name: str | None,
-    use_example: bool = False,
+    default_sample: str,
+    query_name: str,
+    include_profile_fields: bool,
 ) -> dict:
-    """Execute FASTA profiling through the respro CLI and return the web API payload."""
+    """Invoke ``respro <subcommand>`` and assemble the web API job result payload."""
     command = [
-        *_respro_command_prefix(),
-        'fasta',
-        '--project',
-        str(project_db),
-    ]
-    if use_example:
-        command.append('--example')
-    else:
-        command.extend(['--fasta', str(fasta_path)])
-    command.extend([
-        '--sample',
-        sample,
-        '--output',
-        str(output_html_path),
-        '--threads',
-        str(threads),
-        '--cache',
-        '--export',
-        'json',
-        '--export',
-        'pdf',
-        '--export',
-        'tsv',
-    ])
-    if input_display_name:
-        command.extend(['--input-display-name', input_display_name])
-
-    _run_respro_command(command)
-    artifacts = _artifact_paths_for_html(output_html_path)
-    run_payload = _load_run_payload(artifacts['json'])
-    return {
-        'mode': 'fasta',
-        'run_id': None,
-        'database_id': project_db.name,
-        'sample_name': run_payload.get('sample_name', sample),
-        'created_at': run_payload.get('created_at', ''),
-        'reference_name': run_payload.get('reference_name', ''),
-        'query_name': _read_first_fasta_name(fasta_path) if fasta_path else 'example',
-        'report_html_path': str(artifacts['html']),
-        'report_json_path': str(artifacts['json']),
-        'report_pdf_path': str(artifacts['pdf']),
-        'report_tsv_path': str(artifacts['tsv']),
-        'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
-        'total_variants': int(run_payload.get('total_variants', 0) or 0),
-    }
-
-
-def _run_profile_vcf_subprocess(
-    *,
-    project_db: Path,
-    output_html_path: Path,
-    vcf_path: Path,
-    ref_fasta_path: Path,
-    sample: str,
-    min_af: float,
-    min_depth: int,
-    bam_path: Path | None,
-    threads: int,
-    input_display_name: str | None,
-) -> dict:
-    """Execute VCF profiling through the respro CLI and return the web API payload."""
-    command = [
-        *_respro_command_prefix(),
-        'vcf',
-        '--project',
-        str(project_db),
-        '--vcf',
-        str(vcf_path),
-        '--ref-fasta',
-        str(ref_fasta_path),
-        '--sample',
-        sample,
-        '--output',
-        str(output_html_path),
-        '--min-af',
-        str(min_af),
-        '--min-depth',
-        str(min_depth),
-        '--threads',
-        str(threads),
-        '--cache',
-        '--export',
-        'json',
-        '--export',
-        'pdf',
-        '--export',
-        'tsv',
-    ]
-    if input_display_name:
-        command.extend(['--input-display-name', input_display_name])
-    if bam_path is not None:
-        command.extend(['--bam', str(bam_path)])
-
-    _run_respro_command(command)
-    artifacts = _artifact_paths_for_html(output_html_path)
-    run_payload = _load_run_payload(artifacts['json'])
-    return {
-        'mode': 'vcf',
-        'run_id': None,
-        'database_id': project_db.name,
-        'sample_name': run_payload.get('sample_name', sample),
-        'created_at': run_payload.get('created_at', ''),
-        'reference_name': run_payload.get('reference_name', ''),
-        'query_name': _read_first_fasta_name(ref_fasta_path),
-        'report_html_path': str(artifacts['html']),
-        'report_json_path': str(artifacts['json']),
-        'report_pdf_path': str(artifacts['pdf']),
-        'report_tsv_path': str(artifacts['tsv']),
-        'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
-        'total_variants': int(run_payload.get('total_variants', 0) or 0),
-    }
-
-
-def _run_regenerate_json_subprocess(
-    *,
-    project_db: Path,
-    output_html_path: Path,
-    json_path: Path,
-) -> dict:
-    """Execute JSON-based regeneration through the respro CLI and return the web API payload."""
-    command = [
-        *_respro_command_prefix(),
-        'regenerate',
-        '--project',
-        str(project_db),
-        '--json',
-        str(json_path),
-        '--output',
-        str(output_html_path),
-        '--export',
-        'json',
-        '--export',
-        'pdf',
-        '--export',
-        'tsv',
+        sys.executable, '-m', 'respro.cli.main', subcommand,
+        '--project', str(project_db),
+        *extra_args,
+        '--output', str(output_html_path),
+        *_EXPORT_ARGS,
     ]
     _run_respro_command(command)
+    artifacts = artifact_paths_for_html(output_html_path)
+    run_payload = _load_run_payload(artifacts[RESULTS_JSON.result_field])
 
-    artifacts = _artifact_paths_for_html(output_html_path)
-    run_payload = _load_run_payload(artifacts['json'])
-    return {
-        'mode': 'regenerate-json',
-        'sample_name': run_payload.get('sample_name', ''),
+    result: dict = {'mode': mode}
+    if include_profile_fields:
+        result['run_id'] = None
+        result['database_id'] = project_db.name
+    result.update({
+        'sample_name': run_payload.get('sample_name', default_sample),
         'created_at': run_payload.get('created_at', ''),
         'reference_name': run_payload.get('reference_name', ''),
-        'query_name': '',
-        'report_html_path': str(artifacts['html']),
-        'report_json_path': str(artifacts['json']),
-        'report_pdf_path': str(artifacts['pdf']),
-        'report_tsv_path': str(artifacts['tsv']),
+        'query_name': query_name,
+        **{field: str(path) for field, path in artifacts.items()},
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
-    }
-
-
-def _respro_command_prefix() -> list[str]:
-    """Return a command prefix that invokes the local respro module with the active interpreter."""
-    return [sys.executable, '-m', 'respro.cli.main']
+    })
+    return result
 
 
 def _run_respro_command(command: list[str]) -> None:
-    """Execute one respro subprocess command and raise a user-facing error on failure.
-
-    The subprocess timeout sits slightly above the RQ job timeout so the worker's
-    own job-kill mechanism fires first; the hard timeout is the last-resort bound
-    that prevents an orphaned CLI process from running indefinitely.
-    """
+    """Execute one ``respro`` CLI subprocess bounded by the hard subprocess timeout."""
     timeout_seconds = resolve_subprocess_timeout_seconds()
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(
-            f'respro CLI subprocess timed out after {timeout_seconds} seconds.'
-        ) from exc
+        raise RuntimeError(f'respro CLI subprocess timed out after {timeout_seconds} seconds.') from exc
     except OSError as exc:
         raise RuntimeError(f'Failed to execute respro CLI subprocess: {exc}') from exc
 
-    if completed.returncode == 0:
-        return
-
-    stderr_text = (completed.stderr or '').strip()
-    stdout_text = (completed.stdout or '').strip()
-    details = stderr_text or stdout_text or f'command exited with code {completed.returncode}'
-    raise ValueError(details)
+    if completed.returncode != 0:
+        details = (completed.stderr or '').strip() or (completed.stdout or '').strip()
+        raise ValueError(details or f'command exited with code {completed.returncode}')
 
 
 def _build_web_output_html_path(*, output_dir: Path, input_name: str) -> Path:
-    """Return a unique HTML report path so session history keeps every run."""
-    output_dir = Path(output_dir)
+    """Return a timestamped HTML report path inside *output_dir* so runs do not collide."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    raw_stem = Path(input_name).stem.strip() or 'profile'
-    raw_stem = raw_stem.removesuffix('.results')
-    safe_stem = ''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in raw_stem) or 'profile'
+    stem = sanitize_artifact_stem(input_name)
     run_stamp = datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')
-    return output_dir / f'{safe_stem}.{run_stamp}.report.html'
-
-
-def _artifact_paths_for_html(output_html_path: Path) -> dict[str, Path]:
-    """Resolve expected report artifact paths for one HTML report target."""
-    html_path = Path(output_html_path)
-    if html_path.name.endswith('.report.html'):
-        stem = html_path.name[:-12]
-    elif html_path.suffix == '.html':
-        stem = html_path.stem
-    else:
-        stem = html_path.name
-    return {
-        'html': html_path,
-        'json': html_path.parent / f'{stem}.results.json',
-        'pdf': html_path.parent / f'{stem}.report.pdf',
-        'tsv': html_path.parent / f'{stem}.results.tsv',
-    }
+    return output_dir / f'{stem}.{run_stamp}.report.html'
 
 
 def _load_run_payload(results_json_path: Path) -> dict:
-    """Load the run block from one exported results JSON file."""
+    """Load and validate the ``run`` object from an exported results JSON artifact."""
     path = Path(results_json_path)
     if not path.is_file():
         raise ValueError('Expected report artifact not found.')
@@ -370,9 +224,8 @@ def _read_first_fasta_name(path: Path) -> str:
     try:
         with Path(path).open('r', encoding='utf-8') as handle:
             for line in handle:
-                if not line.startswith('>'):
-                    continue
-                return line[1:].strip().split(maxsplit=1)[0]
+                if line.startswith('>'):
+                    return line[1:].strip().split(maxsplit=1)[0]
     except OSError:
         return ''
     return ''
@@ -385,55 +238,18 @@ def _run_job_with_logging(
     sample: str,
     job_func: Callable[[], dict],
 ) -> dict:
-    """Run one queued task with explicit lifecycle logs for debugging and operations.
-
-    The ``sample`` argument is accepted so call sites keep a stable signature, but
-    it is intentionally NOT logged: sample names are sensitive metadata and RQ
-    lifecycle logs are not the right place to persist them. Only the job id,
-    mode, and database id are logged routinely.
-    """
-    del sample  # accepted for signature stability; not logged
+    """Execute *job_func* with lifecycle logging (``sample`` is intentionally never logged)."""
+    del sample  # kept for signature stability; sample names are sensitive metadata
     current_job = get_current_job()
     job_id = current_job.id if current_job is not None else 'unknown'
-    logger.info(
-        'Queue job started: job_id=%s mode=%s database_id=%s',
-        job_id,
-        mode,
-        database_id,
-    )
+    logger.info('Queue job started: job_id=%s mode=%s database_id=%s', job_id, mode, database_id)
     try:
         result = job_func()
-    except ValueError:
-        _mark_current_job_non_retryable(current_job)
-        logger.exception(
-            'Queue job failed: job_id=%s mode=%s database_id=%s',
-            job_id,
-            mode,
-            database_id,
-        )
-        raise
-    except Exception:
-        logger.exception(
-            'Queue job failed: job_id=%s mode=%s database_id=%s',
-            job_id,
-            mode,
-            database_id,
-        )
+    except Exception as exc:
+        if isinstance(exc, ValueError) and current_job is not None and getattr(current_job, 'retries_left', None) is not None:
+            current_job.retries_left = 0
+        logger.exception('Queue job failed: job_id=%s mode=%s database_id=%s', job_id, mode, database_id)
         raise
 
-    logger.info(
-        'Queue job finished: job_id=%s mode=%s database_id=%s',
-        job_id,
-        mode,
-        database_id,
-    )
+    logger.info('Queue job finished: job_id=%s mode=%s database_id=%s', job_id, mode, database_id)
     return result
-
-
-def _mark_current_job_non_retryable(current_job) -> None:
-    """Disable retries for deterministic user-input errors handled by this worker job."""
-    if current_job is None:
-        return
-    if getattr(current_job, 'retries_left', None) is None:
-        return
-    current_job.retries_left = 0

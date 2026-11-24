@@ -1,50 +1,49 @@
-"""Profile routes for single and batch submissions."""
+"""Profile routes for single and batch FASTA/VCF submissions."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from rq import Queue
 from slowapi import Limiter
 
+from web.backend.artifact_kinds import sanitize_artifact_stem
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.jobs import run_profile_fasta, run_profile_vcf
 from web.backend.models import (
     BatchProfileFastaPayload,
     BatchProfileVcfPayload,
-    BatchSampleEntry,
     BatchSubmitResponse,
     JobSubmitResponse,
     ProfileFastaPayload,
     ProfileVcfPayload,
 )
+from web.backend.project_dbs import resolve_project_db_path
 from web.backend.queue import build_enqueue_job_options, get_batch_queue, get_queue
-from web.backend.services.session import (
-    Session,
-    record_job,
-    resolve_owned_path,
+from web.backend.rate_limit import consume_sample_quota
+from web.backend.routes.common import (
+    enqueue_batch_jobs,
+    get_session,
+    resolve_owned_file,
+    validate_batch_lengths_and_cap,
 )
+from web.backend.services.session import record_job
+from web.backend.startup_config import StartupConfig
 
 logger = logging.getLogger(__name__)
 
 
 def build_profile_router(
     *,
-    config,
+    config: StartupConfig,
     sample_limit_per_minute: int,
-    consume_sample_quota: Callable[[Request, int, int], None],
-    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
-    resolve_project_db_path,
     limiter: Limiter,
     api_rate_limit: str,
-    get_session: Callable[..., Session],
 ) -> APIRouter:
-    """Build profile submission routes."""
+    """Build single and batch profile submission routes."""
     router = APIRouter()
 
     @router.post('/api/profile/fasta', response_model=JobSubmitResponse)
@@ -55,30 +54,17 @@ def build_profile_router(
         queue: Queue = Depends(get_queue),
     ) -> JobSubmitResponse:
         session = get_session(request)
-        if payload.use_example:
-            fasta_path = None
-            fasta_id = None
-        else:
+        fasta_path: Path | None = None
+        fasta_id: str | None = None
+        if not payload.use_example:
             if not payload.fasta_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail='fasta_id is required when use_example is false.',
-                )
-            fasta_path = _resolve_upload_path(
-                payload.fasta_id,
-                session.session_hash,
-                config.allowed_roots,
-                label='FASTA',
-            )
+                raise HTTPException(status_code=422, detail='fasta_id is required when use_example is false.')
+            fasta_path = _resolve_upload(payload.fasta_id, session.session_hash, config.allowed_roots, 'FASTA')
             fasta_id = payload.fasta_id
-        consume_sample_quota(
-            request,
-            sample_count=1,
-            sample_limit_per_minute=sample_limit_per_minute,
-        )
+
+        consume_sample_quota(request, sample_count=1, sample_limit_per_minute=sample_limit_per_minute)
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
-        enqueue_options = build_enqueue_job_options()
         job = queue.enqueue(
             run_profile_fasta,
             project_db=str(project_db),
@@ -88,13 +74,9 @@ def build_profile_router(
             sample=payload.sample or defaults.profile_sample_name,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
             input_display_name=payload.input_display_name,
-            **enqueue_options,
+            **build_enqueue_job_options(),
         )
-        record_job(
-            session_hash=session.session_hash,
-            upload_ids=[fasta_id] if fasta_id else [],
-            job_id=job.id,
-        )
+        record_job(session_hash=session.session_hash, upload_ids=[fasta_id] if fasta_id else [], job_id=job.id)
         logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 
@@ -106,37 +88,19 @@ def build_profile_router(
         queue: Queue = Depends(get_queue),
     ) -> JobSubmitResponse:
         session = get_session(request)
-        vcf_path = _resolve_upload_path(
-            payload.vcf_id,
-            session.session_hash,
-            config.allowed_roots,
-            label='VCF',
+        vcf_path = _resolve_upload(payload.vcf_id, session.session_hash, config.allowed_roots, 'VCF')
+        ref_fasta_path = _resolve_upload(
+            payload.reference_id, session.session_hash, config.allowed_roots, 'Reference FASTA',
         )
-        ref_fasta_path = _resolve_upload_path(
-            payload.reference_id,
-            session.session_hash,
-            config.allowed_roots,
-            label='Reference FASTA',
+        bam_path = (
+            str(_resolve_upload(payload.bam_id, session.session_hash, config.allowed_roots, 'BAM'))
+            if payload.bam_id
+            else None
         )
-        bam_path: str | None = None
-        bam_id: str | None = None
-        if payload.bam_id:
-            resolved_bam = _resolve_upload_path(
-                payload.bam_id,
-                session.session_hash,
-                config.allowed_roots,
-                label='BAM',
-            )
-            bam_path = str(resolved_bam)
-            bam_id = payload.bam_id
-        consume_sample_quota(
-            request,
-            sample_count=1,
-            sample_limit_per_minute=sample_limit_per_minute,
-        )
+
+        consume_sample_quota(request, sample_count=1, sample_limit_per_minute=sample_limit_per_minute)
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
-        enqueue_options = build_enqueue_job_options()
         job = queue.enqueue(
             run_profile_vcf,
             project_db=str(project_db),
@@ -149,11 +113,9 @@ def build_profile_router(
             bam_path=bam_path,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
             input_display_name=payload.input_display_name,
-            **enqueue_options,
+            **build_enqueue_job_options(),
         )
-        upload_ids = [payload.vcf_id, payload.reference_id]
-        if bam_id is not None:
-            upload_ids.append(bam_id)
+        upload_ids = [payload.vcf_id, payload.reference_id, *([payload.bam_id] if payload.bam_id else [])]
         record_job(session_hash=session.session_hash, upload_ids=upload_ids, job_id=job.id)
         logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
@@ -166,81 +128,64 @@ def build_profile_router(
         queue: Queue = Depends(get_batch_queue),
     ) -> BatchSubmitResponse:
         session = get_session(request)
-        if len(payload.vcf_ids) != len(payload.sample_names):
-            raise HTTPException(
-                status_code=422,
-                detail='vcf_ids and sample_names must have the same length.',
-            )
-        if payload.bam_ids is not None and len(payload.bam_ids) != len(payload.vcf_ids):
-            raise HTTPException(
-                status_code=422,
-                detail='bam_ids and vcf_ids must have the same length.',
-            )
-        input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.vcf_ids,
+        display_names = validate_batch_lengths_and_cap(
+            input_ids=payload.vcf_ids,
+            sample_names=payload.sample_names,
             input_display_names=payload.input_display_names,
-            path_label='vcf_ids',
+            id_field='vcf_ids',
+            max_batch=sample_limit_per_minute,
+            extra_aligned=('bam_ids', payload.bam_ids),
         )
-        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
-        max_batch = sample_limit_per_minute
-        if len(payload.vcf_ids) > max_batch:
-            raise HTTPException(
-                status_code=422,
-                detail=f'Batch size {len(payload.vcf_ids)} exceeds the maximum of {max_batch} samples per batch.',
-            )
-        ref_fasta_path = _resolve_upload_path(
-            payload.reference_id,
-            session.session_hash,
-            config.allowed_roots,
-            label='Reference FASTA',
+        artifact_base_names = _derive_unique_artifact_base_names(display_names)
+        ref_fasta_path = _resolve_upload(
+            payload.reference_id, session.session_hash, config.allowed_roots, 'Reference FASTA',
         )
         consume_sample_quota(
-            request,
-            sample_count=len(payload.vcf_ids),
-            sample_limit_per_minute=sample_limit_per_minute,
+            request, sample_count=len(payload.vcf_ids), sample_limit_per_minute=sample_limit_per_minute,
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
-        enqueue_options = build_enqueue_job_options()
-        validated_vcf_inputs = _validate_batch_upload_ids(
-            upload_ids=payload.vcf_ids,
-            sample_names=payload.sample_names,
-            session_hash=session.session_hash,
-            allowed_roots=config.allowed_roots,
-            path_kind='VCF',
+        validated_vcfs = _validate_batch_uploads(
+            payload.vcf_ids, payload.sample_names, session.session_hash, config.allowed_roots, 'VCF',
         )
-        validated_bam_paths = _validate_batch_bam_ids(
-            bam_ids=payload.bam_ids,
-            sample_count=len(payload.vcf_ids),
-            session_hash=session.session_hash,
-            allowed_roots=config.allowed_roots,
+        bam_paths = (
+            [
+                str(_resolve_upload(bam_id, session.session_hash, config.allowed_roots, 'BAM'))
+                if bam_id is not None
+                else None
+                for bam_id in payload.bam_ids
+            ]
+            if payload.bam_ids is not None
+            else [None] * len(payload.vcf_ids)
         )
 
-        samples = []
-        for index, (vcf_path, sample_name) in enumerate(validated_vcf_inputs):
-            job_id = str(uuid4())
-            queue.enqueue(
-                run_profile_vcf,
-                project_db=str(project_db),
-                output_dir=str(config.results_dir),
-                vcf_path=str(vcf_path),
-                ref_fasta_path=str(ref_fasta_path),
-                sample=sample_name,
-                min_af=payload.min_af,
-                min_depth=payload.min_depth,
-                bam_path=validated_bam_paths[index],
-                threads=payload.threads,
-                input_display_name=input_display_names[index],
-                artifact_base_name=artifact_base_names[index],
-                job_id=job_id,
-                **enqueue_options,
+        job_specs = [
+            (
+                sample_name,
+                [payload.vcf_ids[index], payload.reference_id],
+                {
+                    'project_db': str(project_db),
+                    'output_dir': str(config.results_dir),
+                    'vcf_path': str(vcf_path),
+                    'ref_fasta_path': str(ref_fasta_path),
+                    'sample': sample_name,
+                    'min_af': payload.min_af,
+                    'min_depth': payload.min_depth,
+                    'bam_path': bam_paths[index],
+                    'threads': payload.threads,
+                    'input_display_name': display_names[index],
+                    'artifact_base_name': artifact_base_names[index],
+                },
             )
-            record_job(session_hash=session.session_hash, upload_ids=[payload.vcf_ids[index], payload.reference_id], job_id=job_id)
-            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
-        logger.info(
-            'Batch VCF jobs enqueued: count=%d database_id=%s',
-            len(samples),
-            project_db.name,
+            for index, (vcf_path, sample_name) in enumerate(validated_vcfs)
+        ]
+        samples = enqueue_batch_jobs(
+            queue=queue,
+            session_hash=session.session_hash,
+            job_func=run_profile_vcf,
+            job_specs=job_specs,
+            enqueue_options=build_enqueue_job_options(),
         )
+        logger.info('Batch VCF jobs enqueued: count=%d database_id=%s', len(samples), project_db.name)
         return BatchSubmitResponse(samples=samples, total=len(samples))
 
     @router.post('/api/profile/batch/fasta', response_model=BatchSubmitResponse)
@@ -251,194 +196,90 @@ def build_profile_router(
         queue: Queue = Depends(get_batch_queue),
     ) -> BatchSubmitResponse:
         session = get_session(request)
-        if len(payload.fasta_ids) != len(payload.sample_names):
-            raise HTTPException(
-                status_code=422,
-                detail='fasta_ids and sample_names must have the same length.',
-            )
-        input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.fasta_ids,
+        display_names = validate_batch_lengths_and_cap(
+            input_ids=payload.fasta_ids,
+            sample_names=payload.sample_names,
             input_display_names=payload.input_display_names,
-            path_label='fasta_ids',
+            id_field='fasta_ids',
+            max_batch=sample_limit_per_minute,
         )
-        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
-        max_batch = sample_limit_per_minute
-        if len(payload.fasta_ids) > max_batch:
-            raise HTTPException(
-                status_code=422,
-                detail=f'Batch size {len(payload.fasta_ids)} exceeds the maximum of {max_batch} samples per batch.',
-            )
+        artifact_base_names = _derive_unique_artifact_base_names(display_names)
         consume_sample_quota(
-            request,
-            sample_count=len(payload.fasta_ids),
-            sample_limit_per_minute=sample_limit_per_minute,
+            request, sample_count=len(payload.fasta_ids), sample_limit_per_minute=sample_limit_per_minute,
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
-        enqueue_options = build_enqueue_job_options()
-        validated_fasta_inputs = _validate_batch_upload_ids(
-            upload_ids=payload.fasta_ids,
-            sample_names=payload.sample_names,
-            session_hash=session.session_hash,
-            allowed_roots=config.allowed_roots,
-            path_kind='FASTA',
+        validated_fastas = _validate_batch_uploads(
+            payload.fasta_ids, payload.sample_names, session.session_hash, config.allowed_roots, 'FASTA',
         )
 
-        samples = []
-        for index, (fasta_path, sample_name) in enumerate(validated_fasta_inputs):
-            job_id = str(uuid4())
-            queue.enqueue(
-                run_profile_fasta,
-                project_db=str(project_db),
-                output_dir=str(config.results_dir),
-                fasta_path=str(fasta_path),
-                sample=sample_name,
-                threads=payload.threads,
-                input_display_name=input_display_names[index],
-                artifact_base_name=artifact_base_names[index],
-                job_id=job_id,
-                **enqueue_options,
+        job_specs = [
+            (
+                sample_name,
+                [payload.fasta_ids[index]],
+                {
+                    'project_db': str(project_db),
+                    'output_dir': str(config.results_dir),
+                    'fasta_path': str(fasta_path),
+                    'sample': sample_name,
+                    'threads': payload.threads,
+                    'input_display_name': display_names[index],
+                    'artifact_base_name': artifact_base_names[index],
+                },
             )
-            record_job(session_hash=session.session_hash, upload_ids=[payload.fasta_ids[index]], job_id=job_id)
-            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
-        logger.info(
-            'Batch FASTA jobs enqueued: count=%d database_id=%s',
-            len(samples),
-            project_db.name,
+            for index, (fasta_path, sample_name) in enumerate(validated_fastas)
+        ]
+        samples = enqueue_batch_jobs(
+            queue=queue,
+            session_hash=session.session_hash,
+            job_func=run_profile_fasta,
+            job_specs=job_specs,
+            enqueue_options=build_enqueue_job_options(),
         )
+        logger.info('Batch FASTA jobs enqueued: count=%d database_id=%s', len(samples), project_db.name)
         return BatchSubmitResponse(samples=samples, total=len(samples))
 
     return router
 
 
-def _resolve_upload_path(
-    upload_id: str,
-    session_hash: str,
-    allowed_roots: tuple[Path, ...],
-    *,
-    label: str,
-) -> Path:
-    """Resolve an upload ID to a validated, owned, path-confined file."""
-    try:
-        path = resolve_owned_path(
-            prefix='upload',
-            record_id=upload_id,
-            session_hash=session_hash,
-            allowed_roots=allowed_roots,
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=f'{label} file not found.') from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f'{label} file not found.')
-    return path
+def _resolve_upload(upload_id: str, session_hash: str, allowed_roots: tuple[Path, ...], label: str) -> Path:
+    return resolve_owned_file(
+        prefix='upload',
+        record_id=upload_id,
+        session_hash=session_hash,
+        allowed_roots=allowed_roots,
+        not_found_detail=f'{label} file not found.',
+    )
 
 
-def _resolve_batch_input_display_names(
-    *,
-    input_paths: list[str],
-    input_display_names: list[str] | None,
-    path_label: str,
-) -> list[str]:
-    """Resolve batch input display names, defaulting to uploaded file basenames."""
-    if input_display_names is None:
-        return [Path(path).name for path in input_paths]
-    if len(input_display_names) != len(input_paths):
-        raise HTTPException(
-            status_code=422,
-            detail=f'{path_label} and input_display_names must have the same length.',
-        )
-    return [Path(name).name for name in input_display_names]
-
-
-def _validate_batch_upload_ids(
-    *,
+def _validate_batch_uploads(
     upload_ids: list[str],
     sample_names: list[str],
     session_hash: str,
     allowed_roots: tuple[Path, ...],
     path_kind: Literal['VCF', 'FASTA'],
 ) -> list[tuple[Path, str]]:
-    """Resolve and validate per-sample upload IDs for batch profiling routes."""
-    validated_inputs: list[tuple[Path, str]] = []
-    for upload_id, sample_name in zip(upload_ids, sample_names):
-        try:
-            input_path = resolve_owned_path(
+    return [
+        (
+            resolve_owned_file(
                 prefix='upload',
                 record_id=upload_id,
                 session_hash=session_hash,
                 allowed_roots=allowed_roots,
-            )
-        except LookupError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f'{path_kind} file not found for sample {sample_name!r}.',
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not input_path.is_file():
-            raise HTTPException(status_code=404, detail=f'{path_kind} file not found for sample {sample_name!r}.')
-        validated_inputs.append((input_path, sample_name))
-    return validated_inputs
-
-
-def _validate_batch_bam_ids(
-    *,
-    bam_ids: list[str | None] | None,
-    sample_count: int,
-    session_hash: str,
-    allowed_roots: tuple[Path, ...],
-) -> list[str | None]:
-    """Resolve and validate per-sample optional BAM IDs for the batch VCF route.
-
-    Returns one resolved BAM path string (or ``None``) per sample, positionally aligned with
-    ``vcf_ids``. A ``None`` entry means "no BAM for that sample" — coverage-gap analysis is
-    skipped for it, mirroring the single-VCF ``bam_id`` option. Content matching between the
-    BAM and the VCF/reference is intentionally not checked here: like the single-VCF path, that
-    is deferred to the CLI coverage step, which warns-and-skips unmatched contigs.
-    """
-    if bam_ids is None:
-        return [None] * sample_count
-    resolved: list[str | None] = []
-    for bam_id in bam_ids:
-        if bam_id is None:
-            resolved.append(None)
-            continue
-        try:
-            bam_path = resolve_owned_path(
-                prefix='upload',
-                record_id=bam_id,
-                session_hash=session_hash,
-                allowed_roots=allowed_roots,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail='BAM file not found.') from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not bam_path.is_file():
-            raise HTTPException(status_code=404, detail='BAM file not found.')
-        resolved.append(str(bam_path))
-    return resolved
+                not_found_detail=f'{path_kind} file not found for sample {sample_name!r}.',
+            ),
+            sample_name,
+        )
+        for upload_id, sample_name in zip(upload_ids, sample_names)
+    ]
 
 
 def _derive_unique_artifact_base_names(input_display_names: list[str]) -> list[str]:
-    """Build deterministic unique artifact base names from display names."""
-    seen_counts: dict[str, int] = {}
-    artifact_base_names: list[str] = []
+    """Build deterministic unique artifact stems from display names."""
+    seen: dict[str, int] = {}
+    result: list[str] = []
     for display_name in input_display_names:
-        base_name = _sanitize_artifact_base_name(display_name)
-        duplicate_count = seen_counts.get(base_name, 0)
-        if duplicate_count == 0:
-            artifact_base_names.append(base_name)
-        else:
-            artifact_base_names.append(f'{base_name}_{duplicate_count}')
-        seen_counts[base_name] = duplicate_count + 1
-    return artifact_base_names
-
-
-def _sanitize_artifact_base_name(input_name: str) -> str:
-    """Normalize one input name to a stable report-artifact base name."""
-    raw_stem = Path(input_name).stem.strip() or 'profile'
-    raw_stem = raw_stem.removesuffix('.results')
-    safe_stem = ''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in raw_stem) or 'profile'
-    return safe_stem
+        base = sanitize_artifact_stem(display_name)
+        count = seen.get(base, 0)
+        result.append(base if count == 0 else f'{base}_{count}')
+        seen[base] = count + 1
+    return result

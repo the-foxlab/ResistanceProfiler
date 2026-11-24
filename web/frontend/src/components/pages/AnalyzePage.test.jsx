@@ -57,7 +57,6 @@ function minimalLogic(overrides = {}) {
     setBatchRateLimitCooldown: () => {},
     batchSubmitted: false,
     batchMaxSamples: 25,
-    sampleLimitPerMinute: 25,
     batchVcfCutoffs: {},
     setBatchVcfCutoffs: () => {},
     addBatchVcfFiles: () => {},

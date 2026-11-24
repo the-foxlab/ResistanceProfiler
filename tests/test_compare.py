@@ -125,13 +125,13 @@ def results_dir(tmp_path: Path) -> Path:
 @pytest.fixture()
 def path_validators(results_dir: Path):
     """Return the standard path validation callables used by the app."""
-    from web.backend.main import _is_allowed_artifact_path
+    from web.backend.artifact_kinds import is_allowed_artifact_path
     from web.backend.startup_config import is_path_within_allowed_roots
 
     def _is_within(path: Path, roots: tuple[Path, ...]) -> bool:
         return is_path_within_allowed_roots(path, roots)
 
-    return _is_within, _is_allowed_artifact_path
+    return _is_within, is_allowed_artifact_path
 
 
 # ---------------------------------------------------------------------------

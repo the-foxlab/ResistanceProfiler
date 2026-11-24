@@ -22,19 +22,7 @@
   margin-top: 0.6rem;
 }
 
-@media (max-width: 620px) {
-
-  .comparison-heatmap-container {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .comparison-heatmap-container .js-plotly-plot {
-    width: 100%;
-  }
-}
-
-/* ----- Comparison heatmap ----- */
+/* ── Comparison heatmap ─────────────────────────────────────────────────── */
 .comparison-section {
   display: flex;
   flex-direction: column;
@@ -55,6 +43,7 @@
   min-height: 200px;
   overflow-x: auto;
 }
+
 .comparison-heatmap-container .js-plotly-plot {
   margin: 0 auto;
 }
@@ -90,52 +79,30 @@
   margin: 0 0.25rem;
 }
 
-.comparison-feature-legend-title {
-  font-weight: 600;
-}
-
-.comparison-feature-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.comparison-feature-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-}
-
-.comparison-cell-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.comparison-cell-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  border: 1px solid var(--line-strong);
-}
-
+.comparison-feature-legend-title,
 .comparison-consequence-legend-title {
   font-weight: 600;
 }
 
+.comparison-feature-legend-item,
+.comparison-cell-legend-item,
 .comparison-consequence-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
 }
 
+.comparison-feature-swatch,
+.comparison-cell-swatch,
 .comparison-consequence-swatch {
   display: inline-block;
   width: 12px;
   height: 12px;
   border-radius: 2px;
+}
+
+.comparison-cell-swatch,
+.comparison-consequence-swatch {
   border: 1px solid var(--line-strong);
 }
 
@@ -153,7 +120,7 @@
   cursor: pointer;
 }
 
-/* Compare Databases tab */
+/* ── Compare Databases tab ─────────────────────────────────────────────── */
 .compare-tab {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -168,8 +135,6 @@
   grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
   gap: 0.8rem;
   min-width: 0;
-  /* Both cards share the row height so the Rule overlap tile matches the
-     selector tile instead of floating at its own content height. */
   align-items: stretch;
 }
 
@@ -178,19 +143,11 @@
   max-width: 100%;
 }
 
-@media (max-width: 60rem) {
-  .compare-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .compare-venn-card {
   display: flex;
   flex-direction: column;
 }
 
-/* The placeholder (and the rendered diagram) sit centered in the tile so the
-   card does not look top-heavy next to the selector card. */
 .compare-venn-card .comparison-venn {
   flex: 1;
   display: flex;
@@ -198,13 +155,23 @@
   justify-content: center;
 }
 
+.compare-venn-placeholder {
+  min-height: 8rem;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  text-align: center;
+}
+
 .compare-venn-card .compare-venn-placeholder {
   flex: 1;
   min-height: 14rem;
-  display: grid;
-  place-items: center;
   align-content: center;
-  margin: 0;
   border: none;
 }
 
@@ -240,19 +207,6 @@
 .compare-slot-hint {
   font-size: var(--font-size-xs, 0.75rem);
   color: var(--muted);
-}
-
-.compare-venn-placeholder {
-  min-height: 8rem;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--font-size-sm);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem;
-  text-align: center;
 }
 
 .compare-ref-row {
@@ -300,13 +254,10 @@
   cursor: pointer;
 }
 
-/* In-circle count labels: small and quiet. */
 .comparison-venn .venn-area text.label {
   font-size: var(--font-size-sm);
 }
 
-/* Active region: stronger stroke plus a fill lift so the selection is
-   obvious; the count label just turns bold (same ink in both themes). */
 .comparison-venn .venn-area.is-active path {
   stroke: var(--accent);
   stroke-width: 3px !important;
@@ -489,7 +440,22 @@
   padding: 0.3rem 0;
 }
 
+@media (max-width: 60rem) {
+  .compare-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 620px) {
+  .comparison-heatmap-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .comparison-heatmap-container .js-plotly-plot {
+    width: 100%;
+  }
+
   .compare-ref-row {
     flex-direction: column;
     align-items: stretch;
@@ -526,14 +492,4 @@
   .compare-table-controls button {
     width: 100%;
   }
-}
-
-/* Dark mode: fills/strokes come from the theme-aware venn.js palette; this
-   rule keeps the count labels legible on dark. */
-:root[data-theme='dark'] .comparison-venn .venn-area text.label {
-  fill: var(--muted-strong);
-}
-
-:root[data-theme='dark'] .comparison-venn .venn-area.is-active path {
-  stroke-width: 3px !important;
 }

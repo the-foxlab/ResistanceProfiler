@@ -1,3 +1,5 @@
+export const RANK_TONES = ['rank1', 'rank2', 'rank3', 'rank4', 'rank5'];
+
 // Shared color tokens so all chart components use the same phenotype semantics.
 // Ranks 1-5 mirror the severity ladder in `respro/db/phenotype_ranks.py`
 // (1 susceptible → 5 resistant). Sentinels: unknown (grey), contradictory (slate).

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { downloadArtifactBundle, formatResultTimestamp, formatUserError } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { downloadArtifactBundle, formatUserError } from '../api';
+import { formatReportLabel, selectIndexedItems } from '../utils';
 
 export function useSessionResults() {
   const [sessionResults, setSessionResults] = useState([]);
@@ -7,81 +8,53 @@ export function useSessionResults() {
   const [reportPaths, setReportPaths] = useState([]);
   const [selectedProfileReportPath, setSelectedProfileReportPath] = useState('');
   const [inlineReportPath, setInlineReportPath] = useState('');
-  const [inlineReportLabel, setInlineReportLabel] = useState('');
-  const [isSessionDownloadBusy, setIsSessionDownloadBusy] = useState(false);
+  const [isSessionDownloadBusy] = useState(false);
   const [selectedResultIndices, setSelectedResultIndices] = useState(new Set());
 
-  const addUploadedPath = (path) => {
-    // Track uploaded files so they can be cleaned up when the page closes.
-    setUploadedPaths((prev) => {
-      if (prev.includes(path)) {
-        return prev;
-      }
-      return [...prev, path];
-    });
-  };
+  const addUnique = (setter) => (id) =>
+    setter((prev) => (prev.includes(id) ? prev : [...prev, id]));
 
-  const addReportPath = (path) => {
-    // Track generated reports for the same cleanup endpoint.
-    setReportPaths((prev) => {
-      if (prev.includes(path)) {
-        return prev;
-      }
-      return [...prev, path];
-    });
-  };
+  const addUploadedPath = addUnique(setUploadedPaths);
+  const addReportPath = addUnique(setReportPaths);
 
   const addResultArtifactPaths = (result) => {
     (result.artifact_ids || []).forEach((artifactId) => {
-      if (artifactId) {
-        addReportPath(artifactId);
-      }
+      if (artifactId) addReportPath(artifactId);
     });
   };
 
-  const downloadAllSessionArtifacts = async (setStatusError) => {
-    const artifactIds = sessionResults.flatMap((result) => result.artifact_ids || []);
-    if (artifactIds.length === 0) return;
-    setIsSessionDownloadBusy(true);
-    try {
-      await downloadArtifactBundle(artifactIds, 'respro-session-artifacts.zip');
-    } catch (error) {
-      if (setStatusError) {
-        setStatusError(formatUserError(error.message));
-      }
-    } finally {
-      setIsSessionDownloadBusy(false);
-    }
-  };
-
   const downloadSelectedArtifacts = async (setStatusError) => {
-    const selectedResults = [...selectedResultIndices]
-      .map((i) => sessionResults[i])
-      .filter(Boolean);
-    const artifactIds = selectedResults.flatMap((result) => result.artifact_ids || []);
+    const artifactIds = selectIndexedItems(sessionResults, selectedResultIndices)
+      .flatMap((result) => result.artifact_ids || []);
     if (artifactIds.length === 0) return;
     try {
       await downloadArtifactBundle(artifactIds, 'respro-selected-artifacts.zip');
     } catch (error) {
-      if (setStatusError) {
-        setStatusError(formatUserError(error.message));
-      }
+      if (setStatusError) setStatusError(formatUserError(error.message));
     }
   };
 
-  // Reports are shown newest first for quick access after job completion.
-  const reportOptions = useMemo(() => {
-    return sessionResults
-      .map((result) => ({
-        path: result.report_html_path,
-        jsonPath: result.report_json_path || '',
-        pdfPath: result.report_pdf_path || '',
-        tsvPath: result.report_tsv_path || '',
-        label: `${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`,
-        mode: result.mode,
-      }))
-      .reverse();
-  }, [sessionResults]);
+  // Newest first for quick access in the report selector.
+  const reportOptions = useMemo(
+    () =>
+      sessionResults
+        .map((result) => ({
+          path: result.report_html_path,
+          jsonPath: result.report_json_path || '',
+          pdfPath: result.report_pdf_path || '',
+          tsvPath: result.report_tsv_path || '',
+          label: formatReportLabel(result),
+          mode: result.mode,
+        }))
+        .reverse(),
+    [sessionResults],
+  );
+
+  useEffect(() => {
+    if (selectedProfileReportPath) {
+      setInlineReportPath(selectedProfileReportPath);
+    }
+  }, [selectedProfileReportPath]);
 
   return {
     sessionResults,
@@ -92,16 +65,12 @@ export function useSessionResults() {
     setSelectedProfileReportPath,
     inlineReportPath,
     setInlineReportPath,
-    inlineReportLabel,
-    setInlineReportLabel,
     isSessionDownloadBusy,
     selectedResultIndices,
     setSelectedResultIndices,
     addUploadedPath,
-    addReportPath,
     addResultArtifactPaths,
     reportOptions,
-    downloadAllSessionArtifacts,
     downloadSelectedArtifacts,
   };
 }

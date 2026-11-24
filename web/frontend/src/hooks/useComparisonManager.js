@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { apiPost, formatUserError } from '../api';
+import { selectIndexedItems } from '../utils';
 
 export function useComparisonManager({
   sessionResults,
@@ -12,30 +13,19 @@ export function useComparisonManager({
   const [nonSynonymousOnly, setNonSynonymousOnly] = useState(false);
   const [dbHitsOnly, setDbHitsOnly] = useState(false);
 
-  // Derived: which database the selected comparison results share
-  const comparisonDbId = useMemo(() => {
-    const indices = [...selectedResultIndices];
-    if (indices.length === 0) return null;
-    return sessionResults[indices[0]]?.database_id || null;
+  const firstSelected = useMemo(() => {
+    const firstIdx = selectedResultIndices.values().next().value;
+    return firstIdx === undefined ? null : sessionResults[firstIdx] || null;
   }, [selectedResultIndices, sessionResults]);
 
-  // Derived: which reference the selected comparison results share
-  const comparisonRefName = useMemo(() => {
-    const indices = [...selectedResultIndices];
-    if (indices.length === 0) return null;
-    return sessionResults[indices[0]]?.reference_name || null;
-  }, [selectedResultIndices, sessionResults]);
+  const comparisonDbId = firstSelected?.database_id || null;
+  const comparisonRefName = firstSelected?.reference_name || null;
 
   const selectAllComparable = () => {
-    if (selectedResultIndices.size === 0) return;
-    const firstIdx = [...selectedResultIndices][0];
-    const firstResult = sessionResults[firstIdx];
-    if (!firstResult) return;
-    const targetDbId = firstResult.database_id;
-    const targetRefName = firstResult.reference_name;
+    if (!firstSelected) return;
     const allMatching = new Set();
     sessionResults.forEach((result, idx) => {
-      if (result.database_id === targetDbId && result.reference_name === targetRefName) {
+      if (result.database_id === firstSelected.database_id && result.reference_name === firstSelected.reference_name) {
         allMatching.add(idx);
       }
     });
@@ -46,22 +36,20 @@ export function useComparisonManager({
     const effectiveNonSyn = nonSynOnly !== undefined ? nonSynOnly : nonSynonymousOnly;
     const effectiveDbHits = dbHitsOnlyOverride !== undefined ? dbHitsOnlyOverride : dbHitsOnly;
 
-    const selectedResults = [...selectedResultIndices]
-      .map((i) => sessionResults[i])
-      .filter(Boolean);
-
+    const selectedResults = selectIndexedItems(sessionResults, selectedResultIndices);
     if (selectedResults.length < 2) return;
 
-    const artifactIds = selectedResults
-      .map((r) => r.report_json_path)
-      .filter(Boolean);
-
+    const artifactIds = selectedResults.map((result) => result.report_json_path).filter(Boolean);
     if (artifactIds.length < 2) return;
 
     setIsComparisonBusy(true);
     setComparisonData(null);
     try {
-      const response = await apiPost('/api/compare', { artifact_ids: artifactIds, non_synonymous_only: effectiveNonSyn, db_hits_only: effectiveDbHits });
+      const response = await apiPost('/api/compare', {
+        artifact_ids: artifactIds,
+        non_synonymous_only: effectiveNonSyn,
+        db_hits_only: effectiveDbHits,
+      });
       setComparisonData(response);
     } catch (error) {
       setStatusError(formatUserError(error.message));

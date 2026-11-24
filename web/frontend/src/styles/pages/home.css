@@ -2,8 +2,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  padding: 0.55rem 1rem;
+  min-height: 44px;
+  padding: 0.55rem 1.2rem;
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
   background: var(--accent);
@@ -29,7 +29,6 @@
   text-underline-offset: 3px;
 }
 
-/* Home is a product entry point, not another dashboard card stack. */
 .page-home {
   display: grid;
   gap: clamp(1.5rem, 2.5vw, 2.5rem);
@@ -71,11 +70,6 @@
   margin-top: 0.35rem;
 }
 
-.home-cta-primary {
-  min-height: 44px;
-  padding-inline: 1.2rem;
-}
-
 .home-cta-secondary {
   display: inline-flex;
   align-items: center;
@@ -108,7 +102,11 @@
 }
 
 .home-context h2,
-.home-context p {
+.home-context p,
+.home-capability-card h3,
+.home-capability-card p,
+.home-db-card h3,
+.home-db-card p {
   margin: 0;
 }
 
@@ -157,11 +155,6 @@
   margin-top: 0.1rem;
 }
 
-.home-capability-card h3,
-.home-capability-card p {
-  margin: 0;
-}
-
 .home-capability-card h3 {
   color: var(--ink);
   font-size: 1rem;
@@ -197,18 +190,18 @@
   gap: 1rem;
 }
 
-.home-section-head h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 1.35rem;
-  font-weight: 650;
-}
-
 .home-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.home-section-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 650;
 }
 
 .home-stat-strip {
@@ -245,24 +238,6 @@
   gap: 0.75rem;
 }
 
-@media (max-width: 820px) {
-  .home-db-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 620px) {
-  .home-db-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.home-db-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
 .home-db-card {
   display: flex;
   flex-direction: column;
@@ -270,6 +245,9 @@
   min-width: 0;
   height: 100%;
   padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   color: inherit;
   text-decoration: none;
   transition: border-color 0.16s ease, transform 0.16s ease;
@@ -282,16 +260,6 @@
 
 .home-db-card:hover h3 {
   color: var(--accent);
-}
-
-.home-db-card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.home-db-card h3,
-.home-db-card p {
-  margin: 0;
 }
 
 .home-db-card h3 {
@@ -399,7 +367,6 @@
 }
 
 @media (max-width: 820px) {
-
   .page-home {
     gap: 1.5rem;
     padding-top: 0.25rem;
@@ -412,10 +379,13 @@
   .home-hero h1 {
     font-size: 2.1rem;
   }
+
+  .home-db-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
-
   .home-hero h1 {
     font-size: 1.85rem;
   }
@@ -429,8 +399,9 @@
     flex: 1 1 auto;
   }
 
+  .home-db-grid,
   .home-cards,
-.home-notices {
+  .home-notices {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -451,8 +422,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .home-cta-primary,
-.home-cta-secondary,
-.home-db-card {
+  .home-cta-secondary,
+  .home-db-card {
     transition-duration: 0.01ms;
   }
 }

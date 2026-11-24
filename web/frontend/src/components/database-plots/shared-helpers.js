@@ -2,8 +2,8 @@
  * Shared helpers used across multiple chart-domain modules.
  */
 
-import { PIE_COLORS } from './shared';
-import { isPopulated, buildDrugAliasLookup, labelToRank } from '../../utils';
+import { PIE_COLORS, RANK_TONES } from './shared';
+import { isPopulated, labelToRank } from '../../utils';
 
 export function displayValue(value, fallback = 'n/a') {
   return isPopulated(value) ? String(value) : fallback;
@@ -16,53 +16,38 @@ export function hasUsableAnnotation(value) {
   return String(value).trim().toLowerCase() !== 'unknown';
 }
 
+export function combineRules(rules, formulaRules) {
+  return [
+    ...(Array.isArray(rules) ? rules : []),
+    ...(Array.isArray(formulaRules) ? formulaRules : []),
+  ];
+}
+
+export function buildOrganismByReference(plotMeta) {
+  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
+  const lookup = new Map();
+  references.forEach((reference) => {
+    const referenceName = displayValue(reference.reference_name, 'Unknown reference');
+    const organism = displayValue(reference.reference_organism, 'Unknown organism');
+    lookup.set(referenceName, organism);
+  });
+  return lookup;
+}
+
 export function resolvePhenotypeMode(rules, requestedMode) {
-  // Determine which annotation namespace can be displayed meaningfully.
   const hasPhenotype = rules.some((rule) => hasUsableAnnotation(rule.phenotype));
   const hasClinical = rules.some((rule) => hasUsableAnnotation(rule.clinical_phenotype));
 
+  let activeMode = 'phenotype';
   if (requestedMode === 'clinical' && hasClinical) {
-    return {
-      requestedMode,
-      activeMode: 'clinical',
-      hasPhenotype,
-      hasClinical,
-    };
+    activeMode = 'clinical';
+  } else if (requestedMode === 'phenotype' && hasPhenotype) {
+    activeMode = 'phenotype';
+  } else if (!hasPhenotype && hasClinical) {
+    activeMode = 'clinical';
   }
 
-  if (requestedMode === 'phenotype' && hasPhenotype) {
-    return {
-      requestedMode,
-      activeMode: 'phenotype',
-      hasPhenotype,
-      hasClinical,
-    };
-  }
-
-  if (hasPhenotype) {
-    return {
-      requestedMode,
-      activeMode: 'phenotype',
-      hasPhenotype,
-      hasClinical,
-    };
-  }
-
-  if (hasClinical) {
-    return {
-      requestedMode,
-      activeMode: 'clinical',
-      hasPhenotype,
-      hasClinical,
-    };
-  }
-
-  return {
-    requestedMode,
-    activeMode: 'phenotype',
-    hasPhenotype,
-    hasClinical,
-  };
+  return { requestedMode, activeMode, hasPhenotype, hasClinical };
 }
 
 export function getRuleAnnotationByMode(rule, mode) {
@@ -75,10 +60,8 @@ export function getRuleAnnotationByMode(rule, mode) {
 }
 
 export function classificationTone(label) {
-  // Normalize free-text phenotypes into the 5-rank severity vocabulary that
-  // mirrors `respro/db/phenotype_ranks.py` (see `labelToRank` in utils.js).
-  // Keeping low-level resistance distinct from high-level resistance and
-  // intermediate avoids painting weaker severity classes as fully resistant.
+  // Normalize free-text phenotypes into the 5-rank severity vocabulary mirroring
+  // `respro/db/phenotype_ranks.py` (see `labelToRank` in utils.js).
   const rank = labelToRank(label);
   if (rank === null || rank === 0) {
     return 'unknown';
@@ -90,11 +73,11 @@ export function classificationTone(label) {
 }
 
 export function hasTypedClassification(toneCounts) {
-  return ['rank1', 'rank2', 'rank3', 'rank4', 'rank5'].some((tone) => (toneCounts.get(tone) || 0) > 0);
+  return RANK_TONES.some((tone) => (toneCounts.get(tone) || 0) > 0);
 }
 
 export function limitPieSlices(entries) {
-  // Keep pies readable by limiting legend size and aggregating the tail into "Other".
+  // Limit legend size to 6 slices and aggregate the tail into "Other".
   const visible = entries.slice(0, 6).map(([label, count], index) => ({
     label,
     count,
@@ -113,28 +96,23 @@ export function limitPieSlices(entries) {
   return visible;
 }
 
+const TONE_PRIORITY = {
+  rank5: 8,
+  rank4: 7,
+  rank3: 6,
+  rank2: 5,
+  rank1: 4,
+  contradictory: 2,
+  unknown: 1,
+};
+
 export function dominantTone(toneCounts) {
-  // Used for a quick dominant-color hint when multiple tones occur in one bin.
   // Higher rank = more severe, so ties resolve toward the stronger class.
-  const priority = {
-    rank5: 8,
-    rank4: 7,
-    rank3: 6,
-    rank2: 5,
-    rank1: 4,
-    contradictory: 2,
-    unknown: 1,
-  };
   const entries = Array.from(toneCounts.entries());
   if (entries.length === 0) {
     return 'unknown';
   }
-  entries.sort((a, b) => {
-    if (b[1] !== a[1]) {
-      return b[1] - a[1];
-    }
-    return (priority[b[0]] || 0) - (priority[a[0]] || 0);
-  });
+  entries.sort((a, b) => (b[1] - a[1]) || ((TONE_PRIORITY[b[0]] || 0) - (TONE_PRIORITY[a[0]] || 0)));
   return entries[0][0];
 }
 
@@ -142,7 +120,6 @@ export function extractDoiTokens(value) {
   if (!isPopulated(value)) {
     return [];
   }
-
   return String(value)
     .split(/[;,\n]+/)
     .map((token) => token.trim())
@@ -165,8 +142,5 @@ export function buildDrugGroupLookup(plotMeta) {
 export function formatDrugNameWithAlias(name, aliasLookup) {
   const drugName = displayValue(name, 'Unspecified drug');
   const alias = aliasLookup.get(drugName.trim().toLowerCase()) || '';
-  if (!alias) {
-    return drugName;
-  }
-  return `${drugName} (${alias})`;
+  return alias ? `${drugName} (${alias})` : drugName;
 }

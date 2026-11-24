@@ -610,7 +610,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.activeJobStatus).toBe('canceling');
+      expect(result.current.canCancelJob).toBe(false);
     });
 
     expect(global.fetch.mock.calls.some(([url, options]) => (
@@ -827,7 +827,6 @@ describe('useDashboardLogic - Report Display Flow', () => {
       expect(result.current.selectedProfileReportPath).toBe('/data/results/sample1.report.html');
       expect(result.current.inlineReportPath).toBe('/data/results/sample1.report.html');
     });
-    expect(result.current.inlineReportLabel).toContain('sample1');
   });
 
   it('should build report URL with path parameter', () => {

@@ -1,20 +1,27 @@
 import { useRef, useState } from 'react';
 import { FRONTEND_CONFIG } from '../config';
-import { apiGet, apiDelete, apiPost, apiUpload, formatUserError, formatResultTimestamp, buildApiUrl, formatPathStem } from '../api';
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiUpload,
+  buildArtifactUrl,
+  buildReportUrl,
+  formatPathStem,
+  formatUserError,
+} from '../api';
+import { validateVcfCutoffs } from '../utils';
 
 export function useProfileSubmit({
   setStatusError,
-  addReportPath,
   addUploadedPath,
   addResultArtifactPaths,
   setSessionResults,
   setSelectedProfileReportPath,
   setInlineReportPath,
-  setInlineReportLabel,
   databases,
   selectedDatabaseId,
   activeProfileMode,
-  analyzeSubMode,
   setUploadProgress,
   beginUpload,
   endUpload,
@@ -41,23 +48,10 @@ export function useProfileSubmit({
   const [activeJobStatus, setActiveJobStatus] = useState('');
   const [isCancelingJob, setIsCancelingJob] = useState(false);
   const isCancellationRequested = useRef(false);
-  // The in-flight upload XHR, so a cancel can abort it mid-transfer.
   const currentUploadRef = useRef(null);
-  // True while an upload is being canceled, so the abort error is not surfaced.
   const isUploadCanceledRef = useRef(false);
 
-  const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
-
-  const buildReportUrl = (artifactId) => {
-    return buildApiUrl('/api/report', { artifact_id: artifactId });
-  };
-
-  const buildArtifactUrl = (artifactId) => {
-    return buildApiUrl('/api/artifact', { artifact_id: artifactId });
-  };
-
   const pollJob = async (jobId) => {
-    // Profiling runs asynchronously on the backend, so poll until final state.
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
       const payload = await apiGet(`/api/jobs/${jobId}`);
@@ -69,124 +63,90 @@ export function useProfileSubmit({
     }
   };
 
-  const submitFasta = async () => {
-    const databaseId = selectedDatabaseId;
-    setIsProcessingFasta(true);
+  const runProfileJob = async (endpoint, payloadFactory, setBusy) => {
+    setBusy(true);
     setStatusError('');
     try {
-      const fastaPayload = {
+      const payload = payloadFactory();
+      const submitResponse = await apiPost(endpoint, payload);
+      isCancellationRequested.current = false;
+      setActiveJobId(submitResponse.job_id);
+      setActiveJobStatus('queued');
+      const result = await pollJob(submitResponse.job_id);
+      setSessionResults((prev) => [...prev, result]);
+      addResultArtifactPaths(result);
+      setSelectedProfileReportPath(result.report_html_path);
+      setInlineReportPath(result.report_html_path);
+    } catch (error) {
+      setStatusError(formatUserError(error.message));
+    } finally {
+      setBusy(false);
+      setIsCancelingJob(false);
+      setActiveJobId('');
+      setActiveJobStatus('');
+    }
+  };
+
+  const submitFasta = () =>
+    runProfileJob(
+      '/api/profile/fasta',
+      () => ({
         fasta_id: fastaInput.fasta_id,
         input_display_name: fastaInput.input_display_name,
         sample: fastaInput.sample || formatPathStem(fastaInput.input_display_name),
-        database_id: databaseId,
-        threads: FRONTEND_CONFIG.profile.threads,
-      };
-      const submitResponse = await apiPost('/api/profile/fasta', fastaPayload);
-      isCancellationRequested.current = false;
-      setActiveJobId(submitResponse.job_id);
-      setActiveJobStatus('queued');
-      const result = await pollJob(submitResponse.job_id);
-      // Keep a local history of run results for the report selector.
-      setSessionResults((prev) => [...prev, result]);
-      addResultArtifactPaths(result);
-      setSelectedProfileReportPath(result.report_html_path);
-      setInlineReportPath(result.report_html_path);
-      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-    } catch (error) {
-      setStatusError(formatUserError(error.message));
-    } finally {
-      setIsProcessingFasta(false);
-      setIsCancelingJob(false);
-      setActiveJobId('');
-      setActiveJobStatus('');
-    }
-  };
-
-  const runExampleProfile = async () => {
-    // Profile the per-database example consensus FASTA stored in the selected database.
-    const database = databases.find((item) => item.id === selectedDatabaseId) || null;
-    const sampleName = database
-      ? `${database.display_name || database.id} example`
-      : 'example';
-    setIsProcessingFasta(true);
-    setStatusError('');
-    try {
-      const payload = {
-        use_example: true,
-        sample: sampleName,
         database_id: selectedDatabaseId,
         threads: FRONTEND_CONFIG.profile.threads,
-      };
-      const submitResponse = await apiPost('/api/profile/fasta', payload);
-      isCancellationRequested.current = false;
-      setActiveJobId(submitResponse.job_id);
-      setActiveJobStatus('queued');
-      const result = await pollJob(submitResponse.job_id);
-      setSessionResults((prev) => [...prev, result]);
-      addResultArtifactPaths(result);
-      setSelectedProfileReportPath(result.report_html_path);
-      setInlineReportPath(result.report_html_path);
-      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-    } catch (error) {
-      setStatusError(formatUserError(error.message));
-    } finally {
-      setIsProcessingFasta(false);
-      setIsCancelingJob(false);
-      setActiveJobId('');
-      setActiveJobStatus('');
-    }
+      }),
+      setIsProcessingFasta,
+    );
+
+  const runExampleProfile = () => {
+    const database = databases.find((item) => item.id === selectedDatabaseId) || null;
+    const sample = database ? `${database.display_name || database.id} example` : 'example';
+    return runProfileJob(
+      '/api/profile/fasta',
+      () => ({
+        use_example: true,
+        sample,
+        database_id: selectedDatabaseId,
+        threads: FRONTEND_CONFIG.profile.threads,
+      }),
+      setIsProcessingFasta,
+    );
   };
 
-  const submitVcf = async () => {
-    const databaseId = selectedDatabaseId;
-    setIsProcessingVcf(true);
-    setStatusError('');
-    try {
-      if (!Number.isFinite(vcfInput.min_af) || vcfInput.min_af < 0 || vcfInput.min_af > 1) {
-        throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
-      }
-      if (!Number.isInteger(vcfInput.min_depth) || vcfInput.min_depth < 0) {
-        throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
-      }
+  const submitVcf = () =>
+    runProfileJob(
+      '/api/profile/vcf',
+      () => {
+        validateVcfCutoffs(vcfInput.min_af, vcfInput.min_depth);
+        return {
+          vcf_id: vcfInput.vcf_id,
+          reference_id: vcfInput.reference_id,
+          bam_id: vcfInput.bam_id,
+          input_display_name: vcfInput.input_display_name,
+          sample: vcfInput.sample || formatPathStem(vcfInput.input_display_name),
+          min_af: vcfInput.min_af,
+          min_depth: vcfInput.min_depth,
+          database_id: selectedDatabaseId,
+          threads: FRONTEND_CONFIG.profile.threads,
+        };
+      },
+      setIsProcessingVcf,
+    );
 
-      const vcfPayload = {
-        vcf_id: vcfInput.vcf_id,
-        reference_id: vcfInput.reference_id,
-        bam_id: vcfInput.bam_id,
-        input_display_name: vcfInput.input_display_name,
-        sample: vcfInput.sample || formatPathStem(vcfInput.input_display_name),
-        min_af: vcfInput.min_af,
-        min_depth: vcfInput.min_depth,
-        database_id: databaseId,
-        threads: FRONTEND_CONFIG.profile.threads,
-      };
-      const submitResponse = await apiPost('/api/profile/vcf', vcfPayload);
-      isCancellationRequested.current = false;
-      setActiveJobId(submitResponse.job_id);
-      setActiveJobStatus('queued');
-      const result = await pollJob(submitResponse.job_id);
-      setSessionResults((prev) => [...prev, result]);
-      addResultArtifactPaths(result);
-      setSelectedProfileReportPath(result.report_html_path);
-      setInlineReportPath(result.report_html_path);
-      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-    } catch (error) {
-      setStatusError(formatUserError(error.message));
-    } finally {
-      setIsProcessingVcf(false);
-      setIsCancelingJob(false);
-      setActiveJobId('');
-      setActiveJobStatus('');
+  const runRegenerateFromJson = async () => {
+    if (!jsonInputId) {
+      setStatusError('Upload a valid results JSON file first.');
+      return;
     }
+    await runProfileJob('/api/regenerate/json', () => ({ json_id: jsonInputId }), setIsProcessingRegenerate);
   };
 
   const cancelActiveJob = async () => {
-    if (!activeJobId) {
-      return;
-    }
-
+    if (!activeJobId) return;
     setIsCancelingJob(true);
-  isCancellationRequested.current = true;
+    isCancellationRequested.current = true;
     try {
       await apiDelete(`/api/jobs/${activeJobId}`);
       setActiveJobStatus('canceling');
@@ -198,36 +158,22 @@ export function useProfileSubmit({
   };
 
   const uploadFile = async (file, fileType, onSuccess) => {
-    // Shared upload path for FASTA/VCF/reference/BAM inputs.
     isUploadCanceledRef.current = false;
     beginUpload();
-    setUploadProgress({
-      percent: 0,
-      fileName: `${fileType.toUpperCase()} - ${file.name}`,
-    });
+    setUploadProgress({ percent: 0, fileName: `${fileType.toUpperCase()} - ${file.name}` });
     try {
       const response = await apiUpload(
         `/api/upload/${fileType}`,
         file,
-        (percent) => {
-          setUploadProgress((prev) => ({
-            ...prev,
-            percent,
-          }));
-        },
+        (percent) => setUploadProgress((prev) => ({ ...prev, percent })),
         (request) => {
           currentUploadRef.current = request;
         },
       );
       onSuccess(response.upload_id);
       addUploadedPath(response.upload_id);
-      setUploadProgress((prev) => ({
-        ...prev,
-        percent: 100,
-      }));
+      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
     } catch (error) {
-      // A canceled upload aborts the XHR (surfacing as a network error); do not
-      // report it as a failure since the user explicitly stopped it.
       if (!isUploadCanceledRef.current) {
         setStatusError(formatUserError(error.message));
       }
@@ -238,91 +184,35 @@ export function useProfileSubmit({
   };
 
   const cancelUpload = () => {
-    // Abort the in-flight upload; its onerror rejects the promise and the
-    // finally block clears the in-flight flag so the submit button re-enables.
     if (currentUploadRef.current) {
       isUploadCanceledRef.current = true;
       currentUploadRef.current.abort();
     }
   };
 
-  const uploadFastaFile = async (file) => {
-    await uploadFile(file, 'fasta', (uploadId) => {
-      setFastaInput((prev) => ({ ...prev, fasta_id: uploadId, input_display_name: file.name }));
-    });
-  };
+  const uploadFastaFile = (file) =>
+    uploadFile(file, 'fasta', (uploadId) =>
+      setFastaInput((prev) => ({ ...prev, fasta_id: uploadId, input_display_name: file.name })),
+    );
 
-  const uploadVcfFile = async (file) => {
-    await uploadFile(file, 'vcf', (uploadId) => {
-      setVcfInput((prev) => ({ ...prev, vcf_id: uploadId, input_display_name: file.name }));
-    });
-  };
+  const uploadVcfFile = (file) =>
+    uploadFile(file, 'vcf', (uploadId) =>
+      setVcfInput((prev) => ({ ...prev, vcf_id: uploadId, input_display_name: file.name })),
+    );
 
-  const uploadReferenceFile = async (file) => {
-    await uploadFile(file, 'fasta', (uploadId) => {
-      setVcfInput((prev) => ({ ...prev, reference_id: uploadId }));
-    });
-  };
+  const uploadReferenceFile = (file) =>
+    uploadFile(file, 'fasta', (uploadId) => setVcfInput((prev) => ({ ...prev, reference_id: uploadId })));
 
-  const uploadBamFile = async (file) => {
-    await uploadFile(file, 'bam', (uploadId) => {
-      setVcfInput((prev) => ({ ...prev, bam_id: uploadId }));
-    });
-  };
+  const uploadBamFile = (file) =>
+    uploadFile(file, 'bam', (uploadId) => setVcfInput((prev) => ({ ...prev, bam_id: uploadId })));
 
-  const uploadJsonFile = async (file) => {
-    await uploadFile(file, 'json', (uploadId) => {
-      setJsonInputId(uploadId);
-    });
-  };
+  const uploadJsonFile = (file) =>
+    uploadFile(file, 'json', (uploadId) => setJsonInputId(uploadId));
 
-  const runRegenerateFromJson = async () => {
-    if (!jsonInputId) {
-      setStatusError('Upload a valid results JSON file first.');
-      return;
-    }
-
-    setIsProcessingRegenerate(true);
-    setStatusError('');
-    try {
-      const submitResponse = await apiPost('/api/regenerate/json', {
-        json_id: jsonInputId,
-      });
-      isCancellationRequested.current = false;
-      setActiveJobId(submitResponse.job_id);
-      setActiveJobStatus('queued');
-      const result = await pollJob(submitResponse.job_id);
-      setSessionResults((prev) => [...prev, result]);
-      addResultArtifactPaths(result);
-      setSelectedProfileReportPath(result.report_html_path);
-      setInlineReportPath(result.report_html_path);
-      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-    } catch (error) {
-      setStatusError(formatUserError(error.message));
-    } finally {
-      setIsProcessingRegenerate(false);
-      setIsCancelingJob(false);
-      setActiveJobId('');
-      setActiveJobStatus('');
-    }
-  };
-
-  const isProfileBusy = activeProfileMode === 'fasta'
-    ? isProcessingFasta
-    : activeProfileMode === 'vcf'
-      ? isProcessingVcf
-      : false;
-
+  const isProfileBusy =
+    activeProfileMode === 'fasta' ? isProcessingFasta : activeProfileMode === 'vcf' ? isProcessingVcf : false;
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
-
-  const runSelectedProfile = async () => {
-    // Dispatch to the selected profiling workflow from one button handler.
-    if (activeProfileMode === 'fasta') {
-      await submitFasta();
-      return;
-    }
-    await submitVcf();
-  };
+  const runSelectedProfile = () => (activeProfileMode === 'fasta' ? submitFasta() : submitVcf());
 
   return {
     vcfInput,
@@ -330,12 +220,7 @@ export function useProfileSubmit({
     fastaInput,
     setFastaInput,
     jsonInputId,
-    setJsonInputId,
-    isProcessingFasta,
-    isProcessingVcf,
-    isProcessingRegenerate,
-    activeJobId,
-    activeJobStatus,
+    isRegenerateBusy: isProcessingRegenerate,
     isCancelingJob,
     buildReportUrl,
     buildArtifactUrl,

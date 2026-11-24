@@ -1,9 +1,4 @@
-"""
-Job queue factory for the web backend.
-
-Provides a FastAPI-compatible dependency that creates an RQ queue connected to
-Redis. Override `get_queue` in tests by injecting a queue backed by fakeredis.
-"""
+"""Job queue factory and RQ runtime settings for the web backend."""
 
 from __future__ import annotations
 
@@ -12,13 +7,14 @@ from dataclasses import dataclass
 
 import redis
 from rq import Queue, Retry
+from rq.serializers import JSONSerializer
 
-from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
+from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV, parse_csv_tokens, parse_int_env
 
 
 @dataclass(frozen=True)
 class QueueRuntimeSettings:
-    """Queue runtime settings resolved from defaults and environment."""
+    """Queue timeout, retry, and result-TTL settings resolved from defaults and env."""
 
     timeout_seconds: int
     retry_max: int
@@ -27,14 +23,7 @@ class QueueRuntimeSettings:
 
 
 def build_enqueue_job_options() -> dict[str, int | Retry]:
-    """Return standard timeout/retry/TTL options for all profiling queue submissions.
-
-    ``ttl`` / ``result_ttl`` / ``failure_ttl`` are set explicitly and aligned to
-    ``RESPRO_WEB_RESULT_TTL`` so RQ job metadata (which can contain sample names,
-    absolute paths, and exception output) does not outlive the documented result
-    TTL. Without these, RQ's installed defaults apply (``DEFAULT_FAILURE_TTL`` is
-    ~365 days), leaking job metadata long after the result files are swept.
-    """
+    """Return timeout, retry, and TTL kwargs aligned to ``RESPRO_WEB_RESULT_TTL``."""
     settings = resolve_queue_runtime_settings()
     options: dict[str, int | Retry] = {
         'job_timeout': settings.timeout_seconds,
@@ -43,121 +32,63 @@ def build_enqueue_job_options() -> dict[str, int | Retry]:
         'failure_ttl': settings.result_ttl_seconds,
     }
     if settings.retry_max > 0:
-        interval: int | list[int]
-        if len(settings.retry_intervals_seconds) == 1:
-            interval = settings.retry_intervals_seconds[0]
-        else:
-            interval = list(settings.retry_intervals_seconds)
-        options['retry'] = Retry(max=settings.retry_max, interval=interval)
+        intervals = settings.retry_intervals_seconds
+        options['retry'] = Retry(
+            max=settings.retry_max,
+            interval=intervals[0] if len(intervals) == 1 else list(intervals),
+        )
     return options
 
 
 def get_queue() -> Queue:
-    """Return the standard profiling RQ queue connected to Redis."""
+    """Return the standard profiling RQ queue."""
     return _build_queue(WEB_BACKEND_CONFIG.defaults.profile_queue_name)
 
 
 def get_batch_queue() -> Queue:
-    """Return the batch profiling RQ queue connected to Redis."""
+    """Return the batch profiling RQ queue."""
     return _build_queue(WEB_BACKEND_CONFIG.defaults.batch_queue_name)
 
 
 def _build_queue(queue_name: str) -> Queue:
-    """Create an RQ queue with shared runtime settings and Redis connection.
-
-    Uses ``rq.serializers.JSONSerializer`` instead of RQ's default ``pickle``-
-    based serializer so that anything able to write to Redis cannot achieve
-    worker code execution via a crafted pickle payload. Job arguments in this
-    codebase are primitive strings/numbers/lists/dicts, which JSON round-trips
-    losslessly.
-    """
-    from rq.serializers import JSONSerializer
-
+    """Build an RQ queue using ``JSONSerializer`` so Redis payloads cannot trigger pickle RCE."""
     redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
     runtime = resolve_queue_runtime_settings()
-    connection = redis.Redis.from_url(redis_url)
     return Queue(
         queue_name,
-        connection=connection,
+        connection=redis.Redis.from_url(redis_url),
         default_timeout=runtime.timeout_seconds,
         serializer=JSONSerializer,
     )
 
 
 def resolve_queue_runtime_settings() -> QueueRuntimeSettings:
-    """Resolve queue timeout/retry settings from environment with validated defaults."""
+    """Resolve and validate queue timeout, retry, and TTL settings from environment."""
     defaults = WEB_BACKEND_CONFIG.defaults
-    timeout_seconds = _parse_non_negative_int(
-        os.getenv(WEB_ENV.job_timeout, str(defaults.job_timeout_seconds)),
-        setting_name=WEB_ENV.job_timeout,
-    )
-    retry_max = _parse_non_negative_int(
-        os.getenv(WEB_ENV.job_retry_max, str(defaults.job_retry_max)),
-        setting_name=WEB_ENV.job_retry_max,
-    )
-    retry_intervals_seconds = _parse_retry_intervals(
-        os.getenv(
-            WEB_ENV.job_retry_intervals,
-            ','.join(str(value) for value in defaults.job_retry_intervals_seconds),
-        )
-    )
-    result_ttl_seconds = _parse_positive_int(
-        os.getenv(WEB_ENV.result_ttl, str(defaults.result_ttl_seconds)),
-        setting_name=WEB_ENV.result_ttl,
-    )
+    default_intervals = ','.join(str(v) for v in defaults.job_retry_intervals_seconds)
     return QueueRuntimeSettings(
-        timeout_seconds=timeout_seconds,
-        retry_max=retry_max,
-        retry_intervals_seconds=retry_intervals_seconds,
-        result_ttl_seconds=result_ttl_seconds,
+        timeout_seconds=parse_int_env(WEB_ENV.job_timeout, defaults.job_timeout_seconds, min_value=0, allow_empty=False),
+        retry_max=parse_int_env(WEB_ENV.job_retry_max, defaults.job_retry_max, min_value=0, allow_empty=False),
+        retry_intervals_seconds=_parse_retry_intervals(os.getenv(WEB_ENV.job_retry_intervals, default_intervals)),
+        result_ttl_seconds=parse_int_env(WEB_ENV.result_ttl, defaults.result_ttl_seconds, min_value=1, allow_empty=False),
     )
 
 
 def resolve_subprocess_timeout_seconds() -> int:
-    """Return the hard timeout for respro CLI subprocesses.
-
-    Sits slightly above the RQ job timeout so the worker's own job-kill mechanism
-    fires first; this timeout is the last-resort bound against orphaned processes.
-    """
+    """Return the hard CLI subprocess timeout (60s above the RQ job timeout)."""
     return resolve_queue_runtime_settings().timeout_seconds + 60
 
 
-def _parse_non_negative_int(raw_value: str, *, setting_name: str) -> int:
-    """Parse a non-negative integer setting and fail fast on invalid values."""
-    try:
-        parsed = int(raw_value.strip())
-    except ValueError as exc:
-        raise ValueError(f'{setting_name} must be an integer value.') from exc
-    if parsed < 0:
-        raise ValueError(f'{setting_name} must be >= 0.')
-    return parsed
-
-
-def _parse_positive_int(raw_value: str, *, setting_name: str) -> int:
-    """Parse a strictly positive integer setting and fail fast on invalid values."""
-    try:
-        parsed = int(raw_value.strip())
-    except ValueError as exc:
-        raise ValueError(f'{setting_name} must be an integer value.') from exc
-    if parsed <= 0:
-        raise ValueError(f'{setting_name} must be > 0.')
-    return parsed
-
-
 def _parse_retry_intervals(raw_value: str) -> tuple[int, ...]:
-    """Parse comma-separated retry intervals and enforce positive values."""
-    entries = [item.strip() for item in raw_value.split(',') if item.strip()]
+    entries = parse_csv_tokens(raw_value)
     if not entries:
         raise ValueError(f'{WEB_ENV.job_retry_intervals} must include at least one retry interval.')
-
     parsed: list[int] = []
     for entry in entries:
         try:
             interval = int(entry)
         except ValueError as exc:
-            raise ValueError(
-                f'{WEB_ENV.job_retry_intervals} must contain integer seconds values.'
-            ) from exc
+            raise ValueError(f'{WEB_ENV.job_retry_intervals} must contain integer seconds values.') from exc
         if interval <= 0:
             raise ValueError(f'{WEB_ENV.job_retry_intervals} intervals must be > 0 seconds.')
         parsed.append(interval)

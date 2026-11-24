@@ -354,16 +354,16 @@ class TestStartupWiring:
 
 class TestMaintainedDbUpdateThread:
     def test_does_not_start_thread_when_interval_zero(self, tmp_path: Path) -> None:
-        from web.backend.main import _start_maintained_db_update_thread
+        from web.backend.background import start_maintained_db_update_thread
 
         app_state = MagicMock()
-        with patch('web.backend.main._maintained_db_update_loop') as loop_mock:
-            _start_maintained_db_update_thread(tmp_path, 0, app_state)
+        with patch('web.backend.background._maintained_db_update_loop') as loop_mock:
+            start_maintained_db_update_thread(tmp_path, 0, app_state)
         time.sleep(0.02)
         assert loop_mock.call_count == 0
 
     def test_starts_thread_and_calls_check_when_interval_positive(self, tmp_path: Path) -> None:
-        from web.backend.main import _start_maintained_db_update_thread
+        from web.backend.background import start_maintained_db_update_thread
 
         app_state = MagicMock()
         app_state.project_db_uuid_index = {}
@@ -376,42 +376,42 @@ class TestMaintainedDbUpdateThread:
         try:
             with (
                 patch(
-                    'web.backend.main.check_and_update_maintained_databases',
+                    'web.backend.background.check_and_update_maintained_databases',
                     side_effect=fake_check,
                 ),
-                patch('web.backend.main.refresh_project_db_uuid_index', return_value={'u': tmp_path / 'x.db'}),
+                patch('web.backend.background.build_project_db_uuid_index', return_value={'u': tmp_path / 'x.db'}),
             ):
-                _start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
+                start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
                 assert called.wait(timeout=2)
             assert app_state.project_db_uuid_index == {'u': tmp_path / 'x.db'}
         finally:
             stop_event.set()
 
     def test_interval_resolver_reads_env_and_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from web.backend.main import _resolve_maintained_db_update_interval
+        from web.backend.background import resolve_maintained_db_update_interval
 
         default = 604800
         monkeypatch.delenv('RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS', raising=False)
-        assert _resolve_maintained_db_update_interval() == default
+        assert resolve_maintained_db_update_interval() == default
         monkeypatch.setenv('RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS', '123')
-        assert _resolve_maintained_db_update_interval() == 123
+        assert resolve_maintained_db_update_interval() == 123
         monkeypatch.setenv('RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS', '0')
-        assert _resolve_maintained_db_update_interval() == 0
+        assert resolve_maintained_db_update_interval() == 0
 
     def test_interval_resolver_falls_back_on_invalid(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from web.backend.main import _resolve_maintained_db_update_interval
+        from web.backend.background import resolve_maintained_db_update_interval
 
         monkeypatch.setenv('RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS', 'not-a-number')
-        assert _resolve_maintained_db_update_interval() == 604800
+        assert resolve_maintained_db_update_interval() == 604800
         monkeypatch.setenv('RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS', '-5')
-        assert _resolve_maintained_db_update_interval() == 604800
+        assert resolve_maintained_db_update_interval() == 604800
 
 
 # ── stale UUID index refresh ───────────────────────────────────────────────────
 
 class TestStaleUuidIndexRefresh:
     def test_weekly_loop_clears_and_updates_app_state_index(self, tmp_path: Path) -> None:
-        from web.backend.main import _start_maintained_db_update_thread
+        from web.backend.background import start_maintained_db_update_thread
 
         # A real mutable dict seeded with a stale entry; the loop clears and replaces it.
         app_state = MagicMock()
@@ -429,11 +429,11 @@ class TestStaleUuidIndexRefresh:
         try:
             with (
                 patch(
-                    'web.backend.main.check_and_update_maintained_databases'
+                    'web.backend.background.check_and_update_maintained_databases'
                 ),
-                patch('web.backend.main.refresh_project_db_uuid_index', side_effect=fake_refresh),
+                patch('web.backend.background.build_project_db_uuid_index', side_effect=fake_refresh),
             ):
-                _start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
+                start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
                 assert refreshed_event.wait(timeout=2)
 
             # The same dict object, now emptied and repopulated with the refreshed index.

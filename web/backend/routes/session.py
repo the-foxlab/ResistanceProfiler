@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,35 +13,51 @@ from web.backend.models import (
     SessionCleanupResponse,
     session_cleanup_payload_model,
 )
-from web.backend.services.session import (
-    Session,
-    delete_owned_record,
-    resolve_owned_path,
-)
+from web.backend.routes.common import get_session
+from web.backend.services.session import delete_owned_record, resolve_owned_path
 
 logger = logging.getLogger(__name__)
 
 
+def _delete_owned_batch(
+    prefix: str,
+    record_ids: list[str],
+    session_hash: str,
+    allowed_roots: tuple[Path, ...],
+) -> int:
+    """Delete caller-owned files for *record_ids*, silently skipping unknown/foreign IDs."""
+    deleted = 0
+    for record_id in record_ids:
+        try:
+            path = resolve_owned_path(
+                prefix=prefix,
+                record_id=record_id,
+                session_hash=session_hash,
+                allowed_roots=allowed_roots,
+            )
+        except (LookupError, ValueError):
+            continue
+        if path.is_file():
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError as exc:
+                logger.warning('Failed to delete %s %s: %s', prefix, record_id, exc)
+        delete_owned_record(prefix=prefix, record_id=record_id)
+    return deleted
+
+
 def build_session_router(
     *,
-    uploads_dir: Path,
-    results_dir: Path,
     allowed_roots: tuple[Path, ...],
     artifact_max_ids: int,
     limiter: Limiter,
     api_rate_limit: str,
-    get_session: Callable[..., Session],
 ) -> APIRouter:
-    """Build session cleanup routes.
-
-    Cleanup deletes only files the calling session owns, referenced by opaque
-    ``upload_id`` / ``artifact_id`` tokens. Tokens that do not belong to the
-    caller are silently skipped so that a foreign ID cannot be used to enumerate
-    or delete another session's data.
-    """
+    """Build session-scoped cleanup routes."""
     router = APIRouter()
 
-    async def cleanup_session_uploads(
+    def cleanup_session_uploads(
         request: Request,
         payload: SessionCleanupPayload,
     ) -> SessionCleanupResponse:
@@ -55,47 +70,13 @@ def build_session_router(
                     f'At most {artifact_max_ids} can be cleaned up at once.'
                 ),
             )
-        deleted_count = 0
-        for upload_id in payload.upload_ids:
-            try:
-                path = resolve_owned_path(
-                    prefix='upload',
-                    record_id=upload_id,
-                    session_hash=session.session_hash,
-                    allowed_roots=allowed_roots,
-                )
-            except (LookupError, ValueError):
-                continue
-            if path.is_file():
-                try:
-                    path.unlink()
-                    deleted_count += 1
-                except OSError as exc:
-                    logger.warning('Failed to delete upload %s: %s', upload_id, exc)
-            delete_owned_record(prefix='upload', record_id=upload_id)
-        for artifact_id in payload.artifact_ids:
-            try:
-                path = resolve_owned_path(
-                    prefix='artifact',
-                    record_id=artifact_id,
-                    session_hash=session.session_hash,
-                    allowed_roots=allowed_roots,
-                )
-            except (LookupError, ValueError):
-                continue
-            if path.is_file():
-                try:
-                    path.unlink()
-                    deleted_count += 1
-                except OSError as exc:
-                    logger.warning('Failed to delete artifact %s: %s', artifact_id, exc)
-            delete_owned_record(prefix='artifact', record_id=artifact_id)
-        return SessionCleanupResponse(deleted_count=deleted_count)
+        deleted = _delete_owned_batch('upload', payload.upload_ids, session.session_hash, allowed_roots)
+        deleted += _delete_owned_batch('artifact', payload.artifact_ids, session.session_hash, allowed_roots)
+        return SessionCleanupResponse(deleted_count=deleted)
 
-    # Bind this app's payload bounds before FastAPI inspects the wrapped endpoint.
+    # Bind this app's payload bounds before FastAPI inspects annotations.
     cleanup_session_uploads.__annotations__['payload'] = session_cleanup_payload_model(artifact_max_ids)
     router.post('/api/session/cleanup', response_model=SessionCleanupResponse)(
         limiter.limit(api_rate_limit)(cleanup_session_uploads),
     )
-
     return router

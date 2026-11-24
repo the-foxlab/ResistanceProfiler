@@ -5,17 +5,34 @@
 import { PIE_COLORS } from './shared';
 import { buildDrugAliasLookup } from '../../utils';
 import {
+  buildOrganismByReference,
+  combineRules,
   displayValue,
   formatDrugNameWithAlias,
   extractDoiTokens,
   limitPieSlices,
 } from './shared-helpers';
 
-export function buildRulesPerDrugPie(rules, plotMeta) {
-  // Counts raw rule rows per drug (not unique mutations).
-  const aliasLookup = buildDrugAliasLookup(plotMeta);
-  const counts = new Map();
+function buildCountPie({ key, title, centerLabel, entries, total }) {
+  const ordered = entries
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
 
+  if (ordered.length === 0) {
+    return null;
+  }
+
+  return {
+    key,
+    title,
+    total: total ?? ordered.length,
+    centerLabel,
+    slices: limitPieSlices(ordered),
+  };
+}
+
+function buildRulesPerDrugPie(rules, aliasLookup) {
+  const counts = new Map();
   rules.forEach((rule) => {
     const drugName = displayValue(rule.drug, 'Unspecified drug');
     const key = drugName.trim().toLowerCase();
@@ -27,33 +44,17 @@ export function buildRulesPerDrugPie(rules, plotMeta) {
     counts.set(key, entry);
   });
 
-  if (counts.size === 0) {
-    return null;
-  }
-
-  const ordered = Array.from(counts.values())
-    .map((entry) => [entry.label, entry.count])
-    .sort((a, b) => b[1] - a[1]);
-  return {
+  return buildCountPie({
     key: 'rules-per-drug',
     title: 'Mutations per Drug',
-    total: counts.size,
     centerLabel: 'drugs',
-    slices: limitPieSlices(ordered),
-  };
+    entries: Array.from(counts.values(), (entry) => [entry.label, entry.count]),
+  });
 }
 
-export function buildDoiPerDrugPie(rules, formulaRules, plotMeta) {
-  // Counts unique publication identifiers per drug across single and formula rules.
-  const aliasLookup = buildDrugAliasLookup(plotMeta);
+function buildDoiPerDrugPie(rules, formulaRules, aliasLookup) {
   const counts = new Map();
-
-  const allRows = [
-    ...(Array.isArray(rules) ? rules : []),
-    ...(Array.isArray(formulaRules) ? formulaRules : []),
-  ];
-
-  allRows.forEach((rule) => {
+  combineRules(rules, formulaRules).forEach((rule) => {
     const drugName = displayValue(rule.drug, 'Unspecified drug');
     const key = drugName.trim().toLowerCase();
     const entry = counts.get(key) || {
@@ -64,59 +65,34 @@ export function buildDoiPerDrugPie(rules, formulaRules, plotMeta) {
     counts.set(key, entry);
   });
 
-  const ordered = Array.from(counts.values())
-    .map((entry) => [entry.label, entry.doiSet.size])
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1]);
-
-  if (ordered.length === 0) {
-    return null;
-  }
-
-  const total = ordered.reduce((sum, [, count]) => sum + count, 0);
-  return {
+  const entries = Array.from(counts.values(), (entry) => [entry.label, entry.doiSet.size]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  return buildCountPie({
     key: 'dois-per-drug',
     title: 'Publications per Drug',
-    total,
     centerLabel: 'publications',
-    slices: limitPieSlices(ordered),
-  };
+    entries,
+    total,
+  });
 }
 
-export function buildMutationsPerGenePie(rules) {
-  // Counts rule rows grouped by gene.
+function buildMutationsPerGenePie(rules) {
   const counts = new Map();
-
   rules.forEach((rule) => {
     const geneName = displayValue(rule.feature, 'Unknown gene');
     counts.set(geneName, (counts.get(geneName) || 0) + 1);
   });
 
-  if (counts.size === 0) {
-    return null;
-  }
-
-  const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  return {
+  return buildCountPie({
     key: 'mutations-per-gene',
     title: 'Mutations per Gene',
-    total: counts.size,
     centerLabel: 'features',
-    slices: limitPieSlices(ordered),
-  };
+    entries: Array.from(counts.entries()),
+  });
 }
 
-export function buildEntriesPerOrganismPie(rules, plotMeta) {
-  // Map rule reference -> organism using metadata from the backend plot payload.
-  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
-  const organismByReference = new Map();
-
-  references.forEach((reference) => {
-    const referenceName = displayValue(reference.reference_name, 'Unknown reference');
-    const organism = displayValue(reference.reference_organism, 'Unknown organism');
-    organismByReference.set(referenceName, organism);
-  });
-
+function buildEntriesPerOrganismPie(rules, plotMeta) {
+  const organismByReference = buildOrganismByReference(plotMeta);
   const counts = new Map();
   rules.forEach((rule) => {
     const referenceName = displayValue(rule.reference_name, 'Unknown reference');
@@ -124,22 +100,15 @@ export function buildEntriesPerOrganismPie(rules, plotMeta) {
     counts.set(organism, (counts.get(organism) || 0) + 1);
   });
 
-  if (counts.size === 0) {
-    return null;
-  }
-
-  const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  return {
+  return buildCountPie({
     key: 'entries-per-organism',
     title: 'Mutations per Organism',
-    total: counts.size,
     centerLabel: 'organisms',
-    slices: limitPieSlices(ordered),
-  };
+    entries: Array.from(counts.entries()),
+  });
 }
 
-export function buildRuleTypePie(rules, formulaRules) {
-  // Show how many rows are single-rule entries vs combination (formula) entries.
+function buildRuleTypePie(rules, formulaRules) {
   const singleCount = Array.isArray(rules) ? rules.length : 0;
   const combinationCount = Array.isArray(formulaRules) ? formulaRules.length : 0;
 
@@ -165,21 +134,14 @@ export function buildRuleTypePie(rules, formulaRules) {
 }
 
 export function buildSummaryPies(rules, formulaRules, plotMeta) {
-  // Compose all headline pies shown in the summary row.
+  const aliasLookup = buildDrugAliasLookup(plotMeta);
   const pies = [
     buildRuleTypePie(rules, formulaRules),
-    buildRulesPerDrugPie(rules, plotMeta),
-    buildDoiPerDrugPie(rules, formulaRules, plotMeta),
+    buildRulesPerDrugPie(rules, aliasLookup),
+    buildDoiPerDrugPie(rules, formulaRules, aliasLookup),
     buildMutationsPerGenePie(rules),
     buildEntriesPerOrganismPie(rules, plotMeta),
   ].filter(Boolean);
 
-  if (pies.length === 0) {
-    return null;
-  }
-
-  return {
-    key: 'database-summary-pies',
-    pies,
-  };
+  return pies.length > 0 ? { key: 'database-summary-pies', pies } : null;
 }

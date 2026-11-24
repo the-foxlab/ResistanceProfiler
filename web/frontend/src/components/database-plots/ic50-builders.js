@@ -5,10 +5,14 @@
 import { PIE_COLORS } from './shared';
 import { isPopulated, buildDrugAliasLookup } from '../../utils';
 import {
+  buildOrganismByReference,
+  combineRules,
   displayValue,
   formatDrugNameWithAlias,
   buildDrugGroupLookup,
 } from './shared-helpers';
+
+const NATURAL_COMPARE_OPTS = { numeric: true, sensitivity: 'base' };
 
 export function parseNumericMeasurement(value) {
   if (!isPopulated(value)) {
@@ -36,241 +40,191 @@ export function scoreCategorySort(a, b) {
   const bIsNumeric = Number.isFinite(bNumeric);
 
   if (aIsNumeric && bIsNumeric) {
-    if (aNumeric !== bNumeric) {
-      return aNumeric - bNumeric;
-    }
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    return aNumeric !== bNumeric
+      ? aNumeric - bNumeric
+      : a.localeCompare(b, undefined, NATURAL_COMPARE_OPTS);
   }
-
   if (aIsNumeric !== bIsNumeric) {
     return aIsNumeric ? -1 : 1;
   }
-
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  return a.localeCompare(b, undefined, NATURAL_COMPARE_OPTS);
 }
 
 export function buildLogTicks(minValue, maxValue) {
   const safeMin = Math.max(minValue, 1e-6);
   const safeMax = Math.max(maxValue, safeMin);
-  const logMin = Math.log10(safeMin);
-  const logMax = Math.log10(safeMax);
-  const minExponent = Math.floor(logMin) - 1;
-  const maxExponent = Math.ceil(logMax) + 1;
-  const tickEntries = [];
+  const minExponent = Math.floor(Math.log10(safeMin)) - 1;
+  const maxExponent = Math.ceil(Math.log10(safeMax)) + 1;
+  const ticksByValue = new Map();
+
+  const recordTick = (rawValue, isMajor) => {
+    if (rawValue < safeMin || rawValue > safeMax) {
+      return;
+    }
+    const rounded = Math.round(Math.log10(rawValue) * 1e6) / 1e6;
+    ticksByValue.set(rounded, Boolean(ticksByValue.get(rounded)) || isMajor);
+  };
 
   for (let exponent = minExponent; exponent <= maxExponent; exponent += 1) {
     const decadeScale = 10 ** exponent;
+    recordTick(decadeScale, true);
+    for (let multiplier = 2; multiplier <= 9; multiplier += 1) {
+      recordTick(multiplier * decadeScale, false);
+    }
+  }
 
-    // Major ticks at powers of ten.
-    const majorValue = 1 * decadeScale;
-    if (majorValue >= safeMin && majorValue <= safeMax) {
-      tickEntries.push({
-        value: Math.log10(majorValue),
-        isMajor: true,
-      });
+  const sorted = Array.from(ticksByValue.entries()).sort((a, b) => a[0] - b[0]);
+  return {
+    ticks: sorted.map(([value]) => value),
+    majorTicks: sorted.filter(([, isMajor]) => isMajor).map(([value]) => value),
+  };
+}
+
+function collectIc50ByOrganism(allRules, organismByReference) {
+  const groups = new Map();
+
+  allRules.forEach((rule) => {
+    const referenceName = displayValue(rule.reference_name, 'Unknown reference');
+    const organism = organismByReference.get(referenceName) || 'Unknown organism';
+    if (!groups.has(organism)) {
+      groups.set(organism, { organism, byDrug: new Map(), skippedNonPositive: 0 });
     }
 
-    // Minor ticks at 2..9 within each decade.
-    for (let multiplier = 2; multiplier <= 9; multiplier += 1) {
-      const tickValue = multiplier * decadeScale;
-      if (tickValue >= safeMin && tickValue <= safeMax) {
-        tickEntries.push({
-          value: Math.log10(tickValue),
-          isMajor: false,
-        });
+    const group = groups.get(organism);
+    const drug = displayValue(rule.drug, 'Unspecified drug');
+    if (!group.byDrug.has(drug)) {
+      group.byDrug.set(drug, { ic50Values: [], foldValues: [] });
+    }
+
+    const bucket = group.byDrug.get(drug);
+    for (const [field, target] of [['ic50', bucket.ic50Values], ['fold_ic50', bucket.foldValues]]) {
+      const value = parseNumericMeasurement(rule[field]);
+      if (value === null) continue;
+      if (value > 0) {
+        target.push(value);
+      } else {
+        group.skippedNonPositive += 1;
+      }
+    }
+  });
+
+  return groups;
+}
+
+function computeGlobalIc50Axis(groups) {
+  let minVal = Number.POSITIVE_INFINITY;
+  let maxVal = Number.NEGATIVE_INFINITY;
+
+  for (const group of groups.values()) {
+    for (const bucket of group.byDrug.values()) {
+      const values = bucket.ic50Values.length > 0 ? bucket.ic50Values : bucket.foldValues;
+      for (const value of values) {
+        if (value > 0) {
+          minVal = Math.min(minVal, value);
+          maxVal = Math.max(maxVal, value);
+        }
       }
     }
   }
 
-  const roundedEntries = tickEntries
-    .map((entry) => ({
-      value: Math.round(entry.value * 1000000) / 1000000,
-      isMajor: entry.isMajor,
-    }))
-    .sort((a, b) => a.value - b.value);
+  if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
+    return null;
+  }
+  if (minVal === maxVal) {
+    minVal /= 2;
+    maxVal *= 2;
+  }
 
-  const merged = [];
-  roundedEntries.forEach((entry) => {
-    const existing = merged.find((item) => item.value === entry.value);
-    if (existing) {
-      existing.isMajor = existing.isMajor || entry.isMajor;
-      return;
-    }
-    merged.push(entry);
+  const tickConfig = buildLogTicks(minVal, maxVal);
+  const minLog = Math.log10(minVal);
+  const maxLog = Math.log10(maxVal);
+  return {
+    xDomain: minLog === maxLog ? [minLog - 0.3, maxLog + 0.3] : [minLog, maxLog],
+    xTicks: tickConfig.ticks,
+    majorTicks: tickConfig.majorTicks,
+  };
+}
+
+function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
+  const drugEntries = Array.from(group.byDrug.entries())
+    .map(([drug, bucket]) => {
+      const useIc50 = bucket.ic50Values.length > 0;
+      return {
+        drug,
+        displayDrug: formatDrugNameWithAlias(drug, drugAliasLookup),
+        values: useIc50 ? bucket.ic50Values : bucket.foldValues,
+        metricLabel: useIc50 ? 'IC50' : 'Fold IC50',
+      };
+    })
+    .filter((entry) => entry.values.length > 0)
+    .sort((a, b) => a.drug.localeCompare(b.drug));
+
+  if (drugEntries.length === 0) {
+    return null;
+  }
+
+  const laneLabels = {};
+  const points = [];
+  const metricLabels = new Set();
+
+  drugEntries.forEach((entry, laneIdx) => {
+    const lane = laneIdx + 1;
+    laneLabels[String(lane)] = entry.displayDrug;
+    metricLabels.add(entry.metricLabel);
+
+    entry.values.forEach((value, valueIdx) => {
+      // Small deterministic jitter reduces overplotting while preserving lane readability.
+      const jitter = ((valueIdx % 7) - 3) / 14;
+      points.push({
+        x: Math.log10(value),
+        y: lane + jitter,
+        lane,
+        drug: entry.displayDrug,
+        value,
+        metricLabel: entry.metricLabel,
+        color: PIE_COLORS[laneIdx % PIE_COLORS.length],
+      });
+    });
   });
 
+  const metricLabelList = Array.from(metricLabels).map((label) => label.replace('IC50', 'IC₅₀'));
+  const singleMetric = metricLabelList.length === 1 ? metricLabelList[0] : null;
+  const subtitleMetricHint = singleMetric || 'IC₅₀ preferred, Fold IC₅₀ fallback';
+  const xAxisUnitLabel = singleMetric
+    ? (singleMetric === 'IC₅₀' ? 'IC₅₀ (µM, log scale)' : `${singleMetric} (log scale)`)
+    : 'IC₅₀ (µM, log scale) / Fold IC₅₀ (log scale)';
+
   return {
-    ticks: merged.map((entry) => entry.value),
-    majorTicks: merged.filter((entry) => entry.isMajor).map((entry) => entry.value),
+    kind: 'ic50-distribution',
+    key: `ic50::${group.organism}`,
+    title: group.organism,
+    subtitle: `Log-scaled ${subtitleMetricHint} distribution across ${drugEntries.length} drug(s)`,
+    footer: group.skippedNonPositive > 0
+      ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
+      : 'Each point is one rule-level measurement',
+    xAxisLabel: xAxisUnitLabel,
+    yAxisLabel: 'Drug',
+    ...globalAxis,
+    yDomain: [0.5, drugEntries.length + 0.5],
+    yTicks: drugEntries.map((_, idx) => idx + 1),
+    laneLabels,
+    points,
   };
 }
 
 export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
   // Build one strip-plot per organism with one y-lane per drug and log-scaled IC50 on x.
-  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
-  const organismByReference = new Map();
+  const organismByReference = buildOrganismByReference(plotMeta);
   const drugAliasLookup = buildDrugAliasLookup(plotMeta);
-  const allRules = [
-    ...(Array.isArray(rules) ? rules : []),
-    ...(Array.isArray(formulaRules) ? formulaRules : []),
-  ];
+  const groups = collectIc50ByOrganism(combineRules(rules, formulaRules), organismByReference);
+  const globalAxis = computeGlobalIc50Axis(groups);
 
-  references.forEach((reference) => {
-    const referenceName = displayValue(reference.reference_name, 'Unknown reference');
-    const organism = displayValue(reference.reference_organism, 'Unknown organism');
-    organismByReference.set(referenceName, organism);
-  });
-
-  const groups = new Map();
-  allRules.forEach((rule) => {
-    const referenceName = displayValue(rule.reference_name, 'Unknown reference');
-    const organism = organismByReference.get(referenceName) || 'Unknown organism';
-    if (!groups.has(organism)) {
-      groups.set(organism, {
-        organism,
-        byDrug: new Map(),
-        skippedNonPositive: 0,
-      });
-    }
-
-    const group = groups.get(organism);
-    const drug = displayValue(rule.drug, 'Unspecified drug');
-    const displayDrug = formatDrugNameWithAlias(drug, drugAliasLookup);
-    if (!group.byDrug.has(drug)) {
-      group.byDrug.set(drug, {
-        ic50Values: [],
-        foldValues: [],
-      });
-    }
-
-    const drugBucket = group.byDrug.get(drug);
-    const ic50Value = parseNumericMeasurement(rule.ic50);
-    if (ic50Value !== null) {
-      if (ic50Value > 0) {
-        drugBucket.ic50Values.push(ic50Value);
-      } else {
-        group.skippedNonPositive += 1;
-      }
-    }
-
-    const foldValue = parseNumericMeasurement(rule.fold_ic50);
-    if (foldValue !== null) {
-      if (foldValue > 0) {
-        drugBucket.foldValues.push(foldValue);
-      } else {
-        group.skippedNonPositive += 1;
-      }
-    }
-  });
-
-  // Compute global IC50 range across all organisms
-  let globalMinValue = Number.POSITIVE_INFINITY;
-  let globalMaxValue = Number.NEGATIVE_INFINITY;
-  for (const group of groups.values()) {
-    for (const bucket of group.byDrug.values()) {
-      const values = bucket.ic50Values.length > 0 ? bucket.ic50Values : bucket.foldValues;
-      for (const v of values) {
-        if (v > 0) {
-          globalMinValue = Math.min(globalMinValue, v);
-          globalMaxValue = Math.max(globalMaxValue, v);
-        }
-      }
-    }
-  }
-  if (!Number.isFinite(globalMinValue) || !Number.isFinite(globalMaxValue)) {
+  if (!globalAxis) {
     return [];
   }
-  if (globalMinValue === globalMaxValue) {
-    globalMinValue = globalMinValue / 2;
-    globalMaxValue = globalMaxValue * 2;
-  }
-  const globalTickConfig = buildLogTicks(globalMinValue, globalMaxValue);
-  const globalMinLog = Math.log10(globalMinValue);
-  const globalMaxLog = Math.log10(globalMaxValue);
-  const globalXDomain = globalMinLog === globalMaxLog
-    ? [globalMinLog - 0.3, globalMaxLog + 0.3]
-    : [globalMinLog, globalMaxLog];
 
   const plots = Array.from(groups.values())
-    .map((group) => {
-      const drugEntries = Array.from(group.byDrug.entries())
-        .map(([drug, bucket]) => {
-          const useIc50 = bucket.ic50Values.length > 0;
-          const values = useIc50 ? bucket.ic50Values : bucket.foldValues;
-          return {
-            drug,
-            displayDrug: formatDrugNameWithAlias(drug, drugAliasLookup),
-            values,
-            metricLabel: useIc50 ? 'IC50' : 'Fold IC50',
-          };
-        })
-        .filter((entry) => entry.values.length > 0)
-        .sort((a, b) => a.drug.localeCompare(b.drug));
-
-      if (drugEntries.length === 0) {
-        return null;
-      }
-
-      const laneLabels = {};
-      const points = [];
-      const metricLabels = new Set();
-
-      drugEntries.forEach((entry, laneIdx) => {
-        const lane = laneIdx + 1;
-        laneLabels[String(lane)] = entry.displayDrug;
-        metricLabels.add(entry.metricLabel);
-
-        entry.values.forEach((value, valueIdx) => {
-          // Small deterministic jitter to reduce overplotting while keeping lane readability.
-          const jitter = ((valueIdx % 7) - 3) / 14;
-          points.push({
-            x: Math.log10(value),
-            y: lane + jitter,
-            lane,
-            drug: entry.displayDrug,
-            value,
-            metricLabel: entry.metricLabel,
-            color: PIE_COLORS[laneIdx % PIE_COLORS.length],
-          });
-        });
-      });
-
-      const metricLabelList = Array.from(metricLabels).map((label) => label.replace('IC50', 'IC₅₀'));
-      const axisMetricLabel = metricLabelList.length === 1
-        ? metricLabelList[0]
-        : metricLabelList.includes('IC₅₀')
-          ? 'IC₅₀ / Fold IC₅₀'
-          : metricLabelList.join(' / ');
-      const subtitleMetricHint = metricLabelList.length === 1
-        ? metricLabelList[0]
-        : 'IC₅₀ preferred, Fold IC₅₀ fallback';
-      const xAxisUnitLabel = metricLabelList.length === 1
-        ? (metricLabelList[0] === 'IC₅₀'
-          ? 'IC₅₀ (µM, log scale)'
-          : `${metricLabelList[0]} (log scale)`)
-        : 'IC₅₀ (µM, log scale) / Fold IC₅₀ (log scale)';
-
-      return {
-        kind: 'ic50-distribution',
-        key: `ic50::${group.organism}`,
-        title: group.organism,
-        subtitle: `Log-scaled ${subtitleMetricHint} distribution across ${drugEntries.length} drug(s)`,
-        footer: group.skippedNonPositive > 0
-          ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
-          : 'Each point is one rule-level measurement',
-        xScale: 'log',
-        xTickMode: 'ic50-log',
-        xAxisLabel: xAxisUnitLabel,
-        yAxisLabel: 'Drug',
-        xDomain: globalXDomain,
-        xTicks: globalTickConfig.ticks,
-        majorTicks: globalTickConfig.majorTicks,
-        yDomain: [0.5, drugEntries.length + 0.5],
-        yTicks: drugEntries.map((_, idx) => idx + 1),
-        laneLabels,
-        points,
-      };
-    })
+    .map((group) => buildOrganismIc50Plot(group, drugAliasLookup, globalAxis))
     .filter(Boolean)
     .sort((a, b) => a.title.localeCompare(b.title));
 
@@ -278,37 +232,55 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
     return [];
   }
 
-  return [
-    {
-      sectionKey: 'ic50-distribution',
-      sectionHeading: 'IC50 distribution',
-      layout: 'grid',
-      plots,
-    },
-  ];
+  return [{
+    sectionKey: 'ic50-distribution',
+    sectionHeading: 'IC50 distribution',
+    layout: 'grid',
+    plots,
+  }];
+}
+
+function buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels) {
+  if (orderedScoreLabels.length === 0) {
+    return [];
+  }
+  return Array.from(sectionPlots.values())
+    .map((group) => {
+      const bars = orderedScoreLabels.map((scoreLabel) => ({
+        scoreLabel,
+        count: group.byScore.get(scoreLabel) || 0,
+        color: '#0f766e',
+      }));
+      const totalRules = bars.reduce((sum, entry) => sum + entry.count, 0);
+
+      return {
+        kind: 'score-counts',
+        key: `score::${sectionKey}::${group.groupKey}`,
+        title: group.displayDrugName,
+        subtitle: `${group.organism} - ${totalRules} rule(s) grouped by score`,
+        organismSortKey: group.organism,
+        footer: 'Rule counts grouped by score value',
+        xAxisLabel: 'Score',
+        yAxisLabel: 'Rule count',
+        bars,
+      };
+    })
+    .sort((a, b) => (
+      a.organismSortKey.localeCompare(b.organismSortKey, undefined, NATURAL_COMPARE_OPTS)
+      || a.title.localeCompare(b.title, undefined, NATURAL_COMPARE_OPTS)
+    ));
 }
 
 export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
   // Build one count-per-score bar chart per drug within each organism.
-  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
-  const organismByReference = new Map();
+  const organismByReference = buildOrganismByReference(plotMeta);
   const drugAliasLookup = buildDrugAliasLookup(plotMeta);
   const drugGroupLookup = buildDrugGroupLookup(plotMeta);
   const hasDrugGroups = drugGroupLookup.size > 0;
-  const allRules = [
-    ...(Array.isArray(rules) ? rules : []),
-    ...(Array.isArray(formulaRules) ? formulaRules : []),
-  ];
   const allScoreLabels = new Set();
-
-  references.forEach((reference) => {
-    const referenceName = displayValue(reference.reference_name, 'Unknown reference');
-    const organism = displayValue(reference.reference_organism, 'Unknown organism');
-    organismByReference.set(referenceName, organism);
-  });
-
   const groups = new Map();
-  allRules.forEach((rule) => {
+
+  combineRules(rules, formulaRules).forEach((rule) => {
     if (!isPopulated(rule.score)) {
       return;
     }
@@ -321,7 +293,6 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     const referenceName = displayValue(rule.reference_name, 'Unknown reference');
     const organism = organismByReference.get(referenceName) || 'Unknown organism';
     const drugName = displayValue(rule.drug, 'Unspecified drug');
-
     const scoreGroupName = hasDrugGroups
       ? (drugGroupLookup.get(drugName.trim().toLowerCase()) || 'Ungrouped')
       : 'Score counts';
@@ -332,13 +303,10 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
       groups.set(sectionKey, new Map());
     }
     const sectionPlots = groups.get(sectionKey);
-
     if (!sectionPlots.has(plotKey)) {
       sectionPlots.set(plotKey, {
-        groupName: scoreGroupName,
         groupKey: plotKey,
         organism,
-        drugName,
         displayDrugName: formatDrugNameWithAlias(drugName, drugAliasLookup),
         byScore: new Map(),
       });
@@ -348,57 +316,12 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     group.byScore.set(scoreLabel, (group.byScore.get(scoreLabel) || 0) + 1);
   });
 
-  const orderedScoreLabels = Array.from(allScoreLabels.values())
-    .sort((a, b) => scoreCategorySort(a, b));
-
+  const orderedScoreLabels = Array.from(allScoreLabels).sort(scoreCategorySort);
   const sectionEntries = Array.from(groups.entries())
-    .map(([sectionKey, sectionPlots]) => {
-      const plots = Array.from(sectionPlots.values())
-        .map((group) => {
-          const scoreEntries = orderedScoreLabels.map((scoreLabel) => ({
-            scoreLabel,
-            count: group.byScore.get(scoreLabel) || 0,
-          }));
-
-          if (scoreEntries.length === 0) {
-            return null;
-          }
-
-          const totalRules = scoreEntries.reduce((sum, entry) => sum + entry.count, 0);
-
-          return {
-            kind: 'score-counts',
-            key: `score::${sectionKey}::${group.groupKey}`,
-            title: group.displayDrugName,
-            subtitle: `${group.organism} - ${totalRules} rule(s) grouped by score`,
-            organismSortKey: group.organism,
-            footer: 'Rule counts grouped by score value',
-            xAxisLabel: 'Score',
-            yAxisLabel: 'Rule count',
-            bars: scoreEntries.map((entry) => ({
-              scoreLabel: entry.scoreLabel,
-              count: entry.count,
-              color: '#0f766e',
-            })),
-          };
-        })
-        .filter(Boolean)
-        .sort((a, b) => {
-          const organismOrder = a.organismSortKey.localeCompare(b.organismSortKey, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          });
-          if (organismOrder !== 0) {
-            return organismOrder;
-          }
-          return a.title.localeCompare(b.title, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          });
-        });
-
-      return { sectionKey, plots };
-    })
+    .map(([sectionKey, sectionPlots]) => ({
+      sectionKey,
+      plots: buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels),
+    }))
     .filter((section) => section.plots.length > 0);
 
   if (sectionEntries.length === 0) {
@@ -406,14 +329,12 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
   }
 
   if (!hasDrugGroups) {
-    return [
-      {
-        sectionKey: 'score-distribution',
-        sectionHeading: 'Score counts',
-        layout: 'score-grid',
-        plots: sectionEntries[0].plots,
-      },
-    ];
+    return [{
+      sectionKey: 'score-distribution',
+      sectionHeading: 'Score counts',
+      layout: 'score-grid',
+      plots: sectionEntries[0].plots,
+    }];
   }
 
   return sectionEntries
@@ -424,15 +345,8 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
       plots: section.plots,
     }))
     .sort((a, b) => {
-      if (a.sectionHeading === 'Ungrouped') {
-        return 1;
-      }
-      if (b.sectionHeading === 'Ungrouped') {
-        return -1;
-      }
-      return a.sectionHeading.localeCompare(b.sectionHeading, undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      });
+      if (a.sectionHeading === 'Ungrouped') return 1;
+      if (b.sectionHeading === 'Ungrouped') return -1;
+      return a.sectionHeading.localeCompare(b.sectionHeading, undefined, NATURAL_COMPARE_OPTS);
     });
 }

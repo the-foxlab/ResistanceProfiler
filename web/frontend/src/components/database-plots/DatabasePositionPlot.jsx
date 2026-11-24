@@ -1,26 +1,15 @@
 import Plotly from 'plotly.js-dist-min';
-import { useContext, useRef, useEffect, useState } from 'react';
 
 import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS, baseLayout, axisTitleFont } from './shared';
-import { ThemeContext } from '../../hooks/useTheme';
+import { STATIC_PLOT_CONFIG, usePlotlyChart } from './usePlotlyChart';
 
 export function DatabasePositionPlot({ plot }) {
-  const containerRef = useRef(null);
-  const [plotError, setPlotError] = useState('');
-  const theme = useContext(ThemeContext);
-
-  useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    setPlotError('');
-
-    // Legend labels come from the annotations observed in the database
-    // (plot.toneLabels); the canonical map is only a fallback.
-    const labelFor = (tone) => plot.toneLabels?.[tone] || CLASSIFICATION_LABELS[tone] || 'Rules';
-
-    try {
+  const { containerRef, plotError } = usePlotlyChart({
+    deps: [plot],
+    render: (el) => {
+      // Prefer database wording observed in plot.toneLabels; canonical map is fallback.
+      const labelFor = (tone) => plot.toneLabels?.[tone] || CLASSIFICATION_LABELS[tone] || 'Rules';
+      const base = baseLayout();
       const xLabels = plot.positions.map((p) => p.label);
 
       const traces = plot.tones.map((tone) => ({
@@ -32,27 +21,26 @@ export function DatabasePositionPlot({ plot }) {
           color: CLASSIFICATION_COLORS[tone] || CLASSIFICATION_COLORS.count,
         },
         customdata: plot.positions.map((p) => [p.rangeStart, p.rangeEnd]),
-        hovertemplate: 'Range: %{customdata[0]}-%{customdata[1]}<br>' + labelFor(tone) + ': %{y}<extra></extra>',
+        hovertemplate: `Range: %{customdata[0]}-%{customdata[1]}<br>${labelFor(tone)}: %{y}<extra></extra>`,
       }));
 
-      const positionsLength = plot.positions.length;
-      const xaxisConfig = positionsLength > 24
+      const xaxisTickConfig = plot.positions.length > 24
         ? { tickmode: 'auto', nticks: 25 }
         : { tickmode: 'auto', dtick: 1 };
 
       const layout = {
-        ...baseLayout(),
+        ...base,
         barmode: 'stack',
         bargap: 0.15,
         xaxis: {
-          ...baseLayout().xaxis,
+          ...base.xaxis,
           showgrid: false,
           title: { text: plot.xAxisLabel || 'Amino-acid position', font: axisTitleFont() },
           tickangle: -45,
-          ...xaxisConfig,
+          ...xaxisTickConfig,
         },
         yaxis: {
-          ...baseLayout().yaxis,
+          ...base.yaxis,
           title: { text: 'Mutation count', font: axisTitleFont() },
           showgrid: true,
           rangemode: 'tozero',
@@ -63,46 +51,9 @@ export function DatabasePositionPlot({ plot }) {
         dragmode: false,
       };
 
-      const config = { responsive: true, displayModeBar: false, scrollZoom: false };
-
-      Plotly.react(containerRef.current, traces, layout, config);
-    } catch (err) {
-      setPlotError(String(err.message || err));
-    }
-
-    return () => {
-      if (containerRef.current) {
-        Plotly.purge(containerRef.current);
-      }
-    };
-  }, [plot, theme]);
-
-  // Re-render on window resize (debounced)
-  useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    let timeoutId = null;
-    const handleResize = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        if (containerRef.current) {
-          try {
-            Plotly.react(containerRef.current, containerRef.current.data, containerRef.current.layout, containerRef.current._config);
-          } catch (_) {
-            // ignore re-render errors on resize
-          }
-        }
-      }, 300);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      clearTimeout(timeoutId);
-    };
-  }, [plot, theme]);
+      Plotly.react(el, traces, layout, STATIC_PLOT_CONFIG);
+    },
+  });
 
   return (
     <section className="database-plot-card">

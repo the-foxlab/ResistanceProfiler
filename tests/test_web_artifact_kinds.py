@@ -57,7 +57,7 @@ class TestArtifactKindRegistry:
             assert kind.internal_suffix in message
 
     def test_backend_path_guard_accepts_every_registry_suffix(self) -> None:
-        from web.backend.main import _is_allowed_artifact_path
+        from web.backend.artifact_kinds import is_allowed_artifact_path
 
         for kind in ARTIFACT_KINDS:
-            assert _is_allowed_artifact_path(Path(f'/data/results/sample{kind.internal_suffix}'))
+            assert is_allowed_artifact_path(Path(f'/data/results/sample{kind.internal_suffix}'))

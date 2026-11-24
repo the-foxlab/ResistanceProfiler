@@ -1,7 +1,4 @@
-/* Database metadata: identity header, not a metadata box. The name is the
-   hero, description is muted prose, people/links sit in a spec-sheet grid,
-   and provenance (UUID, timestamps) is demoted to a muted footer line. No
-   inner border/background — a hairline divider separates it from the plots. */
+/* Database metadata: identity header, spec-sheet grid, and provenance footer. */
 .database-meta-panel {
   display: grid;
   gap: 0.8rem;
@@ -29,7 +26,6 @@
   letter-spacing: -0.01em;
 }
 
-/* Schema version as a quiet neutral chip next to the name. */
 .database-meta-chip {
   display: inline-flex;
   align-items: center;
@@ -51,7 +47,6 @@
   line-height: 1.5;
 }
 
-/* Spec-sheet grid: micro-labels above values, one column per fact. */
 .database-meta-specs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -79,7 +74,6 @@
   color: var(--ink);
 }
 
-/* Provenance demoted to one muted footer line with dot separators. */
 .database-meta-provenance {
   display: flex;
   align-items: baseline;
@@ -106,10 +100,6 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.8rem;
-}
-
-.database-plots-tile .workspace-output-header {
-  margin-bottom: 0.8rem;
 }
 
 .database-plot-card {
@@ -248,10 +238,6 @@
   grid-column: 1 / -1;
 }
 
-.database-reference-section-wide .database-reference-plot-grid {
-  grid-template-columns: 1fr;
-}
-
 .database-reference-section-score .database-reference-plot-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -272,8 +258,7 @@
 
 .database-chart-scroll {
   display: block;
-  overflow-x: hidden;
-  overflow-y: hidden;
+  overflow: hidden;
   padding-bottom: 0.15rem;
   width: 100%;
   max-width: 100%;
@@ -343,9 +328,7 @@
   flex-wrap: nowrap;
 }
 
-/* The algorithms panel keeps the side-by-side label/value rows — its values
-   are wide tables, so the spec-sheet micro-grid used by the metadata header
-   would squeeze them. */
+/* Algorithms panel keeps wide side-by-side rows for threshold tables. */
 .database-algorithms-panel .database-meta-row {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
@@ -364,10 +347,7 @@
   white-space: nowrap;
 }
 
-.database-meta-row-heading {
-  grid-column: 1 / -1;
-}
-
+.database-meta-row-heading,
 .database-meta-row-table {
   grid-column: 1 / -1;
 }
@@ -388,10 +368,11 @@
 }
 
 @media (max-width: 980px) {
-
   .database-plot-grid,
-.database-summary-row,
-.database-reference-plot-grid {
+  .database-summary-row,
+  .database-reference-plot-grid,
+  .database-meta-specs,
+  .database-meta-panel {
     grid-template-columns: 1fr;
   }
 
@@ -399,14 +380,6 @@
     min-width: 0;
     grid-template-columns: 1fr;
     gap: 0.2rem;
-  }
-
-  .database-meta-specs {
-    grid-template-columns: 1fr;
-  }
-
-  .database-meta-panel {
-    grid-template-columns: 1fr;
   }
 
   .database-algorithms-panel .database-meta-row-table {
@@ -425,7 +398,6 @@
 }
 
 @media (max-width: 620px) {
-
   .database-plot-card {
     padding: 0.75rem;
   }
@@ -434,18 +406,14 @@
     width: 100%;
   }
 
-  .database-phenotype-switch-controls {
-    flex-wrap: wrap;
-    gap: 0.4rem;
-  }
-
+  .database-phenotype-switch-controls,
   .database-bin-size-control {
     flex-wrap: wrap;
     gap: 0.4rem;
   }
 
   .database-plot-canvas .js-plotly-plot,
-.database-pie-chart-wrap .js-plotly-plot {
+  .database-pie-chart-wrap .js-plotly-plot {
     width: 100%;
   }
 

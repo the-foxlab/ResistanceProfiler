@@ -6,7 +6,7 @@
  * (required for React Fast Refresh) and so the conversion is unit-testable.
  */
 
-function regionKey(region) {
+export function regionKey(region) {
   return [...region].sort().join(',');
 }
 
