@@ -1,3 +1,4 @@
+import { useOptionalBatchAnalyzeLogic } from '../../../DashboardContext';
 import { ArtifactTableCells } from '../../ArtifactTableCells';
 import { InfoButton } from '../../InfoButton';
 import { Spinner } from '../../Spinner';
@@ -25,7 +26,7 @@ function BatchUploadedFilesTable({
         <p className="field-optional">
           {batchFiles.length} / {batchMaxSamples} files
           {batchFiles.length >= batchMaxSamples ? (
-            <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
+            <span style={{ color: 'var(--color-error)', marginLeft: '0.4em' }}>Limit reached</span>
           ) : null}
         </p>
         <button
@@ -52,51 +53,55 @@ function BatchUploadedFilesTable({
             </tr>
           </thead>
           <tbody>
-            {batchFiles.map((file, index) => (
-              <tr key={file.uploadId}>
-                <td className="batch-uploaded-cell-name" title={file.name}>{file.name}</td>
-                <td className="batch-uploaded-cell-size field-optional">{Math.round(file.size / 1024)} KB</td>
-                {isVcf ? (
-                  <td className="batch-uploaded-cell-bam-name" title={file.bamName || 'No BAM'}>
-                    {file.bamName || '—'}
+            {batchFiles.map((file) => {
+              const rowId = file.rowId ?? file.uploadId;
+              return (
+                <tr key={rowId}>
+                  <td className="batch-uploaded-cell-name" title={file.name}>{file.name}</td>
+                  <td className="batch-uploaded-cell-size field-optional">{Math.round(file.size / 1024)} KB</td>
+                  {isVcf ? (
+                    <td className="batch-uploaded-cell-bam-name" title={file.bamName || 'No BAM'}>
+                      {file.bamName || '—'}
+                    </td>
+                  ) : null}
+                  {isVcf ? (
+                    <td className="batch-uploaded-cell-bam-size field-optional">
+                      {file.bamSize != null ? `${Math.round(file.bamSize / 1024)} KB` : '—'}
+                    </td>
+                  ) : null}
+                  {isVcf ? (
+                    <td className="batch-uploaded-cell-bam-upload">
+                      <label className="batch-uploaded-bam-attach">
+                        <input
+                          type="file"
+                          accept=".bam"
+                          disabled={batchSubmitting}
+                          aria-label={file.bamName ? `Replace BAM for ${file.name}` : `Attach BAM to ${file.name}`}
+                          onChange={(event) => {
+                            const selected = event.target.files?.[0];
+                            event.target.value = '';
+                            if (selected) {
+                              attachBatchBam(rowId, selected);
+                            }
+                          }}
+                        />
+                      </label>
+                    </td>
+                  ) : null}
+                  <td className="batch-uploaded-cell-remove">
+                    <button
+                      type="button"
+                      className="button-link batch-remove-file-btn"
+                      onClick={() => removeBatchFile(rowId)}
+                      disabled={batchSubmitting}
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      ✕
+                    </button>
                   </td>
-                ) : null}
-                {isVcf ? (
-                  <td className="batch-uploaded-cell-bam-size field-optional">
-                    {file.bamSize != null ? `${Math.round(file.bamSize / 1024)} KB` : '—'}
-                  </td>
-                ) : null}
-                {isVcf ? (
-                  <td className="batch-uploaded-cell-bam-upload">
-                    <label className="batch-uploaded-bam-attach">
-                      <input
-                        type="file"
-                        accept=".bam"
-                        disabled={batchSubmitting}
-                        aria-label={file.bamName ? `Replace BAM for ${file.name}` : `Attach BAM to ${file.name}`}
-                        onChange={(event) => {
-                          if (event.target.files?.[0]) {
-                            attachBatchBam(index, event.target.files[0]);
-                          }
-                          event.target.value = '';
-                        }}
-                      />
-                    </label>
-                  </td>
-                ) : null}
-                <td className="batch-uploaded-cell-remove">
-                  <button
-                    type="button"
-                    className="button-link batch-remove-file-btn"
-                    onClick={() => removeBatchFile(index)}
-                    disabled={batchSubmitting}
-                    aria-label={`Remove ${file.name}`}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -104,7 +109,9 @@ function BatchUploadedFilesTable({
   );
 }
 
-export function BatchAnalyzePanel({ logic }) {
+export function BatchAnalyzePanel({ logic: logicProp }) {
+  const contextLogic = useOptionalBatchAnalyzeLogic();
+  const logic = logicProp ?? contextLogic;
   const {
     selectedDatabase,
     buildReportUrl,
@@ -117,6 +124,7 @@ export function BatchAnalyzePanel({ logic }) {
     batchSamples,
     isBatchUploading,
     batchSubmitting,
+    isBatchPolling = false,
     isBatchDownloadBusy,
     batchError,
     batchRateLimitCooldown,
@@ -132,6 +140,7 @@ export function BatchAnalyzePanel({ logic }) {
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,
+    stopBatchPolling,
     downloadAllBatchArtifacts,
     resetBatch,
   } = logic;
@@ -143,9 +152,10 @@ export function BatchAnalyzePanel({ logic }) {
       : batchJsonFiles;
 
   const onMultiFiles = (addFn) => async (event) => {
-    if (!event.target.files) return;
-    await addFn(event.target.files);
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
+    if (files.length === 0) return;
+    await addFn(files);
   };
 
   return (
@@ -170,8 +180,10 @@ export function BatchAnalyzePanel({ logic }) {
                   accept=".fasta,.fa,.fna"
                   disabled={batchSubmitting}
                   onChange={(event) => {
-                    if (event.target.files?.[0]) {
-                      uploadBatchReferenceFasta(event.target.files[0]);
+                    const selected = event.target.files?.[0];
+                    event.target.value = '';
+                    if (selected) {
+                      uploadBatchReferenceFasta(selected);
                     }
                   }}
                 />
@@ -258,13 +270,25 @@ export function BatchAnalyzePanel({ logic }) {
             ) : null}
           </div>
           {batchRateLimitCooldown > 0 ? <p className="status">{`Rate limit reached. Try again in ${batchRateLimitCooldown}s.`}</p> : null}
-          {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}
+          {batchError ? <p className="status" role="alert" style={{ color: 'var(--color-error)' }}>{batchError}</p> : null}
         </>
       ) : (
         <>
-          {batchError ? (
-            <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p>
+          {batchRateLimitCooldown > 0 ? (
+            <p className="status">{`Rate limit reached. Retrying in ${batchRateLimitCooldown}s.`}</p>
           ) : null}
+          {batchError ? (
+            <p className="status" role="alert" style={{ color: 'var(--color-error)' }}>{batchError}</p>
+          ) : null}
+          {isBatchPolling ? (
+            <p className="status"><Spinner /> Polling batch status...</p>
+          ) : null}
+          {!isBatchPolling
+            && !batchSubmitting
+            && !batchError
+            && batchSamples.some((sample) => sample.status === 'queued' || sample.status === 'running') ? (
+              <p className="status">Batch status polling stopped. Completed results remain available below.</p>
+            ) : null}
           <div className="table-wrap mutation-table-wrap">
             <table>
               <thead>
@@ -310,6 +334,15 @@ export function BatchAnalyzePanel({ logic }) {
             >
               {isBatchDownloadBusy ? <><Spinner /> Preparing...</> : 'Download all'}
             </button>
+            {isBatchPolling ? (
+              <button
+                type="button"
+                className="button-link report-action-btn"
+                onClick={() => stopBatchPolling?.()}
+              >
+                Stop polling
+              </button>
+            ) : null}
             <button type="button" className="analyze-primary" onClick={() => resetBatch()}>
               New batch
             </button>

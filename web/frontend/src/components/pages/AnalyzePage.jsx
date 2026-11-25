@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
-
+import { memo } from 'react';
+import { useOptionalAnalyzePageLogic } from '../../DashboardContext';
 import { AnalyzeHeader } from './analyze/AnalyzeHeader';
 import { BatchAnalyzePanel } from './analyze/BatchAnalyzePanel';
 import { ReportPreviewSection } from './analyze/ReportPreviewSection';
 import { SingleAnalyzePanel } from './analyze/SingleAnalyzePanel';
 
-export function AnalyzePage({ logic }) {
+export const AnalyzePage = memo(function AnalyzePage({ logic: logicProp }) {
+  const contextLogic = useOptionalAnalyzePageLogic();
+  const logic = logicProp ?? contextLogic;
   const {
     uploadProgress,
     isUploading,
@@ -22,28 +24,12 @@ export function AnalyzePage({ logic }) {
     setBatchMode,
     batchSubmitting,
     batchSubmitted,
-    batchRateLimitCooldown,
-    setBatchRateLimitCooldown,
     inlineReportPath,
     buildReportUrl,
     PROFILE_MODES,
   } = logic;
 
   const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
-
-  useEffect(() => {
-    if (batchRateLimitCooldown <= 0) return undefined;
-    const timer = setInterval(() => {
-      setBatchRateLimitCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [batchRateLimitCooldown, setBatchRateLimitCooldown]);
 
   return (
     <>
@@ -67,8 +53,8 @@ export function AnalyzePage({ logic }) {
           isAnalyzeScopeLocked={isAnalyzeScopeLocked}
           profileModes={PROFILE_MODES}
         />
-        {analyzeSubMode === 'single' ? <SingleAnalyzePanel logic={logic} /> : null}
-        {analyzeSubMode === 'batch' ? <BatchAnalyzePanel logic={logic} /> : null}
+        {analyzeSubMode === 'single' ? <SingleAnalyzePanel logic={logicProp} /> : null}
+        {analyzeSubMode === 'batch' ? <BatchAnalyzePanel logic={logicProp} /> : null}
       </article>
 
       <ReportPreviewSection
@@ -78,4 +64,4 @@ export function AnalyzePage({ logic }) {
       />
     </>
   );
-}
+});

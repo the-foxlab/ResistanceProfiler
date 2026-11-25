@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchSharedReferences, fetchReferenceAccessions, compareDatabases } from '../api';
+import {
+  fetchSharedReferences,
+  fetchReferenceAccessions,
+  compareDatabases,
+  isAbortError,
+} from '../api';
 import { downloadTsv } from '../utils';
 import { regionKey } from '../components/vennAreas';
 import { getCompareState, setCompareState } from '../components/pages/compareSessionState';
@@ -25,7 +30,7 @@ export function useDatabaseCompare(databases) {
   const [accessionsByDb, setAccessionsByDb] = useState(null);
   const [sharedRefs, setSharedRefs] = useState(persisted.sharedRefs);
   const [sharedRefsLoading, setSharedRefsLoading] = useState(false);
-  const [accession, setAccession] = useState(persisted.accession);
+  const [accession, setAccessionState] = useState(persisted.accession);
   const [response, setResponse] = useState(persisted.response);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState('');
@@ -33,8 +38,39 @@ export function useDatabaseCompare(databases) {
   const [expandedKey, setExpandedKey] = useState(persisted.expandedKey);
   const [tableSearch, setTableSearch] = useState(persisted.tableSearch);
   const loadedRefsKeyRef = useRef(persisted.sharedRefsKey);
+  const isMountedRef = useRef(true);
+  const accessionsRequestIdRef = useRef(0);
+  const accessionsAbortRef = useRef(null);
+  const sharedRefsRequestIdRef = useRef(0);
+  const sharedRefsAbortRef = useRef(null);
+  const compareRequestIdRef = useRef(0);
+  const compareAbortRef = useRef(null);
+  const currentCompareKeyRef = useRef('');
 
   const selectedIds = useMemo(() => slots.filter(Boolean), [slots]);
+  currentCompareKeyRef.current = `${selectedIds.join(',')}::${accession}`;
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      accessionsRequestIdRef.current += 1;
+      sharedRefsRequestIdRef.current += 1;
+      compareRequestIdRef.current += 1;
+      if (accessionsAbortRef.current) {
+        accessionsAbortRef.current.abort();
+        accessionsAbortRef.current = null;
+      }
+      if (sharedRefsAbortRef.current) {
+        sharedRefsAbortRef.current.abort();
+        sharedRefsAbortRef.current = null;
+      }
+      if (compareAbortRef.current) {
+        compareAbortRef.current.abort();
+        compareAbortRef.current = null;
+      }
+    };
+  }, []);
 
   const selectedDatabases = useMemo(
     () => selectedIds
@@ -46,56 +82,125 @@ export function useDatabaseCompare(databases) {
 
   // Load each database's accessions once so downstream slots only offer comparable DBs.
   useEffect(() => {
+    const requestId = ++accessionsRequestIdRef.current;
+    if (accessionsAbortRef.current) {
+      accessionsAbortRef.current.abort();
+      accessionsAbortRef.current = null;
+    }
     if (databases.length === 0) {
       setAccessionsByDb(null);
       return undefined;
     }
-    let cancelled = false;
-    fetchReferenceAccessions(databases.map((db) => db.id))
+    const controller = new AbortController();
+    accessionsAbortRef.current = controller;
+    fetchReferenceAccessions(databases.map((db) => db.id), { signal: controller.signal })
       .then((data) => {
-        if (!cancelled) setAccessionsByDb(data.items || {});
+        if (
+          !isMountedRef.current
+          || requestId !== accessionsRequestIdRef.current
+          || controller.signal.aborted
+        ) {
+          return;
+        }
+        setAccessionsByDb(data?.items || {});
       })
-      .catch(() => {
-        if (!cancelled) setAccessionsByDb(null);
+      .catch((err) => {
+        if (
+          !isMountedRef.current
+          || requestId !== accessionsRequestIdRef.current
+          || controller.signal.aborted
+          || isAbortError(err)
+        ) {
+          return;
+        }
+        setAccessionsByDb(null);
+      })
+      .finally(() => {
+        if (accessionsAbortRef.current === controller) {
+          accessionsAbortRef.current = null;
+        }
       });
     return () => {
-      cancelled = true;
+      accessionsRequestIdRef.current += 1;
+      controller.abort();
+      if (accessionsAbortRef.current === controller) {
+        accessionsAbortRef.current = null;
+      }
     };
   }, [databases]);
 
   useEffect(() => {
     const selectionKey = selectedIds.join(',');
     if (selectedIds.length < MIN_COMPARE_DATABASES) {
+      sharedRefsRequestIdRef.current += 1;
+      if (sharedRefsAbortRef.current) {
+        sharedRefsAbortRef.current.abort();
+        sharedRefsAbortRef.current = null;
+      }
       loadedRefsKeyRef.current = '';
+      setSharedRefsLoading(false);
       setSharedRefs([]);
-      setAccession('');
+      setAccessionState('');
       return undefined;
     }
     if (loadedRefsKeyRef.current === selectionKey) {
+      setSharedRefsLoading(false);
       return undefined;
     }
-    loadedRefsKeyRef.current = selectionKey;
-    let cancelled = false;
+    const requestId = ++sharedRefsRequestIdRef.current;
+    if (sharedRefsAbortRef.current) {
+      sharedRefsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    sharedRefsAbortRef.current = controller;
+
+    loadedRefsKeyRef.current = '';
+    setSharedRefs([]);
+    setAccessionState('');
     setSharedRefsLoading(true);
     setError('');
-    fetchSharedReferences(selectedIds)
+    fetchSharedReferences(selectedIds, { signal: controller.signal })
       .then((data) => {
-        if (cancelled) return;
-        const items = data.items || [];
+        if (
+          !isMountedRef.current
+          || requestId !== sharedRefsRequestIdRef.current
+          || controller.signal.aborted
+        ) {
+          return;
+        }
+        loadedRefsKeyRef.current = selectionKey;
+        const items = Array.isArray(data?.items) ? [...data.items] : [];
         setSharedRefs(items);
-        setAccession(items.length > 0 ? items[0].accession : '');
+        setAccessionState(items.length > 0 ? items[0].accession : '');
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (
+          !isMountedRef.current
+          || requestId !== sharedRefsRequestIdRef.current
+          || controller.signal.aborted
+          || isAbortError(err)
+        ) {
+          return;
+        }
+        loadedRefsKeyRef.current = '';
         setSharedRefs([]);
-        setAccession('');
-        setError(err.message || 'Failed to load shared references.');
+        setAccessionState('');
+        setError(err?.message || 'Failed to load shared references.');
       })
       .finally(() => {
-        if (!cancelled) setSharedRefsLoading(false);
+        if (sharedRefsAbortRef.current === controller) {
+          sharedRefsAbortRef.current = null;
+        }
+        if (isMountedRef.current && requestId === sharedRefsRequestIdRef.current) {
+          setSharedRefsLoading(false);
+        }
       });
     return () => {
-      cancelled = true;
+      sharedRefsRequestIdRef.current += 1;
+      controller.abort();
+      if (sharedRefsAbortRef.current === controller) {
+        sharedRefsAbortRef.current = null;
+      }
     };
   }, [selectedIds]);
 
@@ -112,7 +217,18 @@ export function useDatabaseCompare(databases) {
     });
   }, [slots, accession, response, regionFilter, expandedKey, tableSearch, sharedRefs]);
 
-  const handleSlotChange = (index, value) => {
+  const invalidateCompare = useCallback(() => {
+    compareRequestIdRef.current += 1;
+    if (compareAbortRef.current) {
+      compareAbortRef.current.abort();
+      compareAbortRef.current = null;
+    }
+    setIsBusy(false);
+  }, []);
+
+  const handleSlotChange = useCallback((index, value) => {
+    invalidateCompare();
+    setError('');
     setSlots((current) => {
       const next = [...current];
       next[index] = value;
@@ -125,7 +241,13 @@ export function useDatabaseCompare(databases) {
     setRegionFilter('all');
     setExpandedKey('');
     setTableSearch('');
-  };
+  }, [invalidateCompare]);
+
+  const setAccession = useCallback((nextAccession) => {
+    invalidateCompare();
+    setError('');
+    setAccessionState(nextAccession);
+  }, [invalidateCompare]);
 
   const sharesAccession = useCallback(
     (candidateId, otherId) => {
@@ -147,24 +269,54 @@ export function useDatabaseCompare(databases) {
   };
 
   const runCompare = useCallback(async () => {
-    if (selectedIds.length < MIN_COMPARE_DATABASES || !accession) {
+    if (selectedIds.length < MIN_COMPARE_DATABASES || !accession || sharedRefsLoading) {
       return;
     }
+    const requestId = ++compareRequestIdRef.current;
+    if (compareAbortRef.current) {
+      compareAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    compareAbortRef.current = controller;
+    const requestKey = `${selectedIds.join(',')}::${accession}`;
+
     setIsBusy(true);
     setError('');
     try {
-      const data = await compareDatabases(selectedIds, accession);
+      const data = await compareDatabases(selectedIds, accession, { signal: controller.signal });
+      if (
+        !isMountedRef.current
+        || requestId !== compareRequestIdRef.current
+        || controller.signal.aborted
+        || currentCompareKeyRef.current !== requestKey
+      ) {
+        return;
+      }
       setResponse({ ...data, databases: selectedDatabases });
       setRegionFilter('all');
       setExpandedKey('');
       setTableSearch('');
     } catch (err) {
+      if (
+        !isMountedRef.current
+        || requestId !== compareRequestIdRef.current
+        || controller.signal.aborted
+        || isAbortError(err)
+        || currentCompareKeyRef.current !== requestKey
+      ) {
+        return;
+      }
       setResponse(null);
-      setError(err.message || 'Comparison failed.');
+      setError(err?.message || 'Comparison failed.');
     } finally {
-      setIsBusy(false);
+      if (compareAbortRef.current === controller) {
+        compareAbortRef.current = null;
+      }
+      if (isMountedRef.current && requestId === compareRequestIdRef.current) {
+        setIsBusy(false);
+      }
     }
-  }, [selectedIds, selectedDatabases, accession]);
+  }, [selectedIds, selectedDatabases, accession, sharedRefsLoading]);
 
   // Keep reference identity stable so clicking/expanding rows does not recreate Venn.
   const handleRegionClick = useCallback((region) => {
@@ -218,7 +370,12 @@ export function useDatabaseCompare(databases) {
     downloadTsv(headers, rows, 'database-comparison.tsv');
   };
 
-  const canCompare = selectedIds.length >= MIN_COMPARE_DATABASES && Boolean(accession) && !isBusy;
+  const canCompare = (
+    selectedIds.length >= MIN_COMPARE_DATABASES
+    && Boolean(accession)
+    && !sharedRefsLoading
+    && !isBusy
+  );
 
   return {
     slots,

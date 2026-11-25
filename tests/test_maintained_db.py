@@ -5,10 +5,15 @@ Tests for the maintained-db IO client and databases CLI command.
 from __future__ import annotations
 
 import dataclasses
+import http.server
+import io
 import json
 import re
+import socketserver
+import threading
 import urllib.error
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,6 +28,7 @@ from respro.io.maintained_db import (
     list_maintained_databases,
     list_maintained_databases_with_checksums,
     list_output_files,
+    validate_maintained_db_name,
 )
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -30,16 +36,30 @@ from respro.io.maintained_db import (
 def _json_mock(payload: object) -> MagicMock:
     """Context-manager mock returning payload as JSON bytes."""
     body = json.dumps(payload).encode()
+    buf = io.BytesIO(body)
+    resp = MagicMock(read=MagicMock(side_effect=buf.read))
+
+    def _enter(*_args: Any) -> MagicMock:
+        buf.seek(0)
+        return resp
+
     mock = MagicMock()
-    mock.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=body)))
+    mock.__enter__ = MagicMock(side_effect=_enter)
     mock.__exit__ = MagicMock(return_value=False)
     return mock
 
 
 def _bytes_mock(content: bytes) -> MagicMock:
     """Context-manager mock returning raw bytes."""
+    buf = io.BytesIO(content)
+    resp = MagicMock(read=MagicMock(side_effect=buf.read))
+
+    def _enter(*_args: Any) -> MagicMock:
+        buf.seek(0)
+        return resp
+
     mock = MagicMock()
-    mock.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=content)))
+    mock.__enter__ = MagicMock(side_effect=_enter)
     mock.__exit__ = MagicMock(return_value=False)
     return mock
 
@@ -1043,3 +1063,333 @@ class TestMaintainedDbDownloadCommand:
 
         assert result.exit_code != 0
         assert isinstance(result.exception, SystemExit)
+
+
+# ── S3 / S4 security & streaming hardening ────────────────────────────────────
+
+class TestMaintainedDbSecurityHardening:
+    @pytest.mark.parametrize(
+        'valid_name',
+        ['hsv_daehne_jaki', 'stanford-hiv', 'who-influenza', 'db.v1', 'A1_b-2.3'],
+    )
+    def test_validate_maintained_db_name_accepts_safe_names(self, valid_name: str) -> None:
+        assert validate_maintained_db_name(valid_name) == valid_name
+
+    @pytest.mark.parametrize(
+        'bad_name',
+        [
+            '',
+            '.',
+            '..',
+            '.hidden',
+            '-leading-dash',
+            '../escape',
+            'a/b',
+            'a\\b',
+            '/abs',
+            'bad\x00name',
+            'bad name',
+            'bad\nname',
+            'badname\n',
+            'a' * 129,
+        ],
+    )
+    def test_validate_maintained_db_name_rejects_unsafe_names(self, bad_name: str) -> None:
+        with pytest.raises(ValueError):
+            validate_maintained_db_name(bad_name)
+
+    def test_unsafe_db_name_rejected_before_manifest_fetch(self) -> None:
+        with patch('urllib.request.urlopen') as mock_open:
+            with pytest.raises(ValueError):
+                list_output_files('../escape')
+            with pytest.raises(ValueError):
+                fetch_database_metadata('a/b')
+        mock_open.assert_not_called()
+
+    @pytest.mark.parametrize('bad_source', ['../escape', 'a/b', '/abs', '.', '..', 'bad\x00db', 'bad db'])
+    def test_manifest_rejects_unsafe_source_name(self, bad_source: str) -> None:
+        manifest = json.loads(json.dumps(_MANIFEST))
+        manifest['databases'][0]['source_name'] = bad_source
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            with pytest.raises(RuntimeError, match='source_name'):
+                list_maintained_databases()
+
+    @pytest.mark.parametrize(
+        'field,bad_path',
+        [
+            ('rules_path', '/etc/passwd'),
+            ('rules_path', 'databases/../secret.tsv'),
+            ('rules_path', 'databases/./rules.tsv'),
+            ('rules_path', 'databases\\rules.tsv'),
+            ('rules_path', 'https://evil.example/rules.tsv'),
+            ('rules_path', 'file:///etc/passwd'),
+            ('rules_path', '//evil.example/rules.tsv'),
+            ('rules_path', 'databases/a/rules.tsv?token=1'),
+            ('rules_path', 'databases/a/rules.tsv#frag'),
+            ('rules_path', 'databases/%2e%2e/rules.tsv'),
+            ('rules_path', 'databases/a%2fb/rules.tsv'),
+            ('rules_path', 'databases/a%5cb/rules.tsv'),
+            ('rules_path', 'databases/a\x00b/rules.tsv'),
+            ('metadata_path', 'databases/a//metadata.json'),
+            ('formula_rules_path', '../formula.tsv'),
+            ('example_fasta_path', 'https://evil.example/ex.fasta'),
+        ],
+    )
+    def test_manifest_rejects_unsafe_relative_paths(self, field: str, bad_path: str) -> None:
+        manifest = json.loads(json.dumps(_MANIFEST))
+        manifest['databases'][0][field] = bad_path
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            with pytest.raises(RuntimeError, match='Malformed manifest'):
+                list_maintained_databases()
+
+    def test_rejects_untrusted_download_url_from_mocked_listing(self, tmp_path: Path) -> None:
+        from respro.io import maintained_db
+
+        for bad_url in (
+            'https://evil.example/rules.tsv',
+            'http://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases/x/rules.tsv',
+            'https://raw.githubusercontent.com:8443/the-foxlab/respro-databases/main/databases/x/rules.tsv',
+            'https://user:pass@raw.githubusercontent.com/the-foxlab/respro-databases/main/databases/x/rules.tsv',
+            'https://raw.githubusercontent.com/the-foxlab/respro-databases/main/other/rules.tsv',
+            'file:///etc/passwd',
+        ):
+            with patch(
+                'respro.io.maintained_db.list_output_files',
+                return_value=[
+                    {'name': 'rules.tsv', 'download_url': bad_url},
+                    {
+                        'name': 'metadata.json',
+                        'download_url': 'https://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases/x/metadata.json',
+                    },
+                ],
+            ), patch('urllib.request.urlopen') as mock_open:
+                with pytest.raises(RuntimeError, match='Blocked'):
+                    maintained_db.download_database_files('hsv_daehne_jaki', tmp_path)
+            mock_open.assert_not_called()
+
+    def test_http_redirects_blocked_cross_origin_out_of_prefix_and_hop_limit(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from respro.io import maintained_db
+
+        foreign_hits: list[str] = []
+        secret_hits: list[str] = []
+
+        class _ForeignHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                foreign_hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'ok')
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        class _PrimaryHandler(http.server.BaseHTTPRequestHandler):
+            foreign_port = 0
+
+            def do_GET(self) -> None:
+                if self.path == '/databases/manifest.json':
+                    payload = json.dumps({
+                        'databases': [
+                            {
+                                'source_name': 'db1',
+                                'rules_path': 'databases/db1/rules.tsv',
+                                'metadata_path': 'databases/db1/metadata.json',
+                                'formula_rules_path': '',
+                                'metadata': {},
+                            }
+                        ]
+                    }).encode('utf-8')
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                elif self.path == '/databases/db1/cross':
+                    self.send_response(302)
+                    self.send_header('Location', f'http://127.0.0.2:{self.foreign_port}/steal')
+                    self.end_headers()
+                elif self.path == '/databases/db1/out_prefix':
+                    self.send_response(302)
+                    self.send_header('Location', '/secret/file.txt')
+                    self.end_headers()
+                elif self.path == '/databases/db1/to_file':
+                    self.send_response(302)
+                    self.send_header('Location', 'file:///etc/passwd')
+                    self.end_headers()
+                elif self.path.startswith('/databases/db1/hop/'):
+                    hop = int(self.path.rsplit('/', 1)[-1])
+                    if hop < 8:
+                        self.send_response(301)
+                        self.send_header('Location', f'/databases/db1/hop/{hop + 1}')
+                        self.end_headers()
+                    else:
+                        self.send_response(200)
+                        self.end_headers()
+                        self.wfile.write(b'reached')
+                elif self.path == '/databases/db1/valid_redir':
+                    self.send_response(302)
+                    self.send_header('Location', '/databases/db1/target.txt')
+                    self.end_headers()
+                elif self.path == '/databases/db1/target.txt':
+                    body = b'valid-data'
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == '/secret/file.txt':
+                    secret_hits.append(self.path)
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'secret')
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        srv_foreign = socketserver.TCPServer(('127.0.0.2', 0), _ForeignHandler)
+        _PrimaryHandler.foreign_port = srv_foreign.server_address[1]
+        srv_primary = socketserver.TCPServer(('127.0.0.1', 0), _PrimaryHandler)
+        port_a = srv_primary.server_address[1]
+        threading.Thread(target=srv_foreign.serve_forever, daemon=True).start()
+        threading.Thread(target=srv_primary.serve_forever, daemon=True).start()
+        try:
+            base = f'http://127.0.0.1:{port_a}/databases'
+            monkeypatch.setattr(
+                maintained_db,
+                'CLI_CONFIG',
+                dataclasses.replace(
+                    maintained_db.CLI_CONFIG,
+                    urls=dataclasses.replace(maintained_db.CLI_CONFIG.urls, github_respro_db_raw=base),
+                ),
+            )
+            with pytest.raises(RuntimeError, match='cross-origin'):
+                maintained_db._download_file(f'{base}/db1/cross', tmp_path / 'a.txt', 'cross')
+            with pytest.raises(RuntimeError, match='out-of-prefix'):
+                maintained_db._download_file(f'{base}/db1/out_prefix', tmp_path / 'b.txt', 'out_prefix')
+            with pytest.raises(RuntimeError, match='scheme'):
+                maintained_db._download_file(f'{base}/db1/to_file', tmp_path / 'c.txt', 'to_file')
+            with pytest.raises(RuntimeError, match='maximum redirects'):
+                maintained_db._download_file(f'{base}/db1/hop/1', tmp_path / 'd.txt', 'hop')
+
+            assert foreign_hits == []
+            assert secret_hits == []
+
+            ok = maintained_db._download_file(f'{base}/db1/valid_redir', tmp_path / 'ok.txt', 'valid')
+            assert ok.read_bytes() == b'valid-data'
+        finally:
+            srv_primary.shutdown()
+            srv_foreign.shutdown()
+
+    def test_genbank_cross_origin_redirect_is_not_retried(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from respro.io import maintained_db
+
+        class _GenbankRedirectHandler(http.server.BaseHTTPRequestHandler):
+            hits = 0
+
+            def do_GET(self) -> None:
+                type(self).hits += 1
+                self.send_response(302)
+                self.send_header('Location', 'http://127.0.0.2:9/evil.gb')
+                self.end_headers()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        srv = socketserver.TCPServer(('127.0.0.1', 0), _GenbankRedirectHandler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            monkeypatch.setattr(
+                maintained_db,
+                'CLI_CONFIG',
+                dataclasses.replace(
+                    maintained_db.CLI_CONFIG,
+                    urls=dataclasses.replace(
+                        maintained_db.CLI_CONFIG.urls,
+                        ncbi_nuccore_efetch=f'http://127.0.0.1:{port}/{{accession}}.gb',
+                    ),
+                ),
+            )
+            with pytest.raises(RuntimeError, match='cross-origin'):
+                _fetch_genbank_records(['X04770'], tmp_path)
+            assert _GenbankRedirectHandler.hits == 1
+        finally:
+            srv.shutdown()
+
+    def test_streaming_byte_caps_and_partial_temp_cleanup(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from respro.io import maintained_db
+
+        monkeypatch.setattr(maintained_db, '_MAX_MANIFEST_BYTES', 32)
+        monkeypatch.setattr(maintained_db, '_MAX_DOWNLOAD_BYTES', 32)
+        monkeypatch.setattr(maintained_db, '_MAX_GENBANK_BYTES', 32)
+
+        # 1. Manifest Content-Length and chunk overflow
+        over_hdr = MagicMock()
+        over_hdr.__enter__ = MagicMock(
+            return_value=MagicMock(headers={'Content-Length': '64'}, read=MagicMock(return_value=b'{}'))
+        )
+        over_hdr.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=over_hdr):
+            with pytest.raises(RuntimeError, match='maximum allowed size'):
+                list_maintained_databases()
+
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(b'{"databases": [], "pad": "1234567890"}')):
+            with pytest.raises(RuntimeError, match='maximum allowed size'):
+                list_maintained_databases()
+
+        # 2. _download_file cap + partial cleanup
+        dest = tmp_path / 'rules.tsv'
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(b'x' * 40)):
+            with pytest.raises(RuntimeError, match='maximum allowed size'):
+                maintained_db._download_file(
+                    'https://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases/a/rules.tsv',
+                    dest,
+                    'rules.tsv',
+                )
+        assert not dest.exists()
+        assert list(tmp_path.iterdir()) == []
+
+        # 3. _download_file mid-stream OSError leaves no .part file
+        err_resp = MagicMock()
+        err_resp.__enter__ = MagicMock(
+            return_value=MagicMock(headers={}, read=MagicMock(side_effect=[b'abc', OSError('drop')]))
+        )
+        err_resp.__exit__ = MagicMock(return_value=False)
+        with patch('urllib.request.urlopen', return_value=err_resp):
+            with pytest.raises(RuntimeError, match='Network error'):
+                maintained_db._download_file(
+                    'https://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases/a/rules.tsv',
+                    dest,
+                    'rules.tsv',
+                )
+        assert list(tmp_path.iterdir()) == []
+
+        # 4. GenBank chunk overflow + chunk-boundary LOCUS check + cleanup
+        gb_dir = tmp_path / 'gb'
+        gb_dir.mkdir()
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(b'LOCUS ' + b'A' * 40)):
+            with pytest.raises(RuntimeError, match='maximum allowed size'):
+                _fetch_genbank_records(['X04770'], gb_dir)
+        assert list(gb_dir.iterdir()) == []
+
+        # Chunk boundary splits 'LOC' and 'US'
+        monkeypatch.setattr(maintained_db, '_STREAM_CHUNK_BYTES', 3)
+        monkeypatch.setattr(maintained_db, '_MAX_GENBANK_BYTES', 128)
+        split_gb = b'LOCUS   X04770\n//\n'
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(split_gb)):
+            paths = _fetch_genbank_records(['X04770'], gb_dir)
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == split_gb

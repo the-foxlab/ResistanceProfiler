@@ -11,8 +11,26 @@
 import githubIconSrc from '../assets/icon-github.svg';
 import websiteIconSrc from '../assets/website.svg';
 import { PROJECT_LICENSE_URL } from '../constants';
+import { sanitizeEmailAddress, sanitizeHttpUrl } from '../utils';
+
+function sanitizeLegalHref(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith('/')
+    && !trimmed.startsWith('//')
+    && !/[\s\u0000-\u001F\u007F\\?#]/.test(trimmed)
+    && (trimmed === '/legal' || trimmed.endsWith('/legal'))
+  ) {
+    return trimmed;
+  }
+  return sanitizeHttpUrl(trimmed);
+}
 
 export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
+  const safeLegalLink = sanitizeLegalHref(legalLink);
+  const safeContactEmail = sanitizeEmailAddress(contactEmail);
   const projectLinks = (
     <>
       <a className="app-footer-icon-link" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
@@ -25,7 +43,7 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
       </a>
       <span className="app-footer-sep" aria-hidden="true">·</span>
       <a className="app-footer-icon-link" href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html" target="_blank" rel="noreferrer" title="Jonas Fuchs Team website" aria-label="Jonas Fuchs Team website">
-        <img className="page-link-icon website-link-icon" src={websiteIconSrc} alt="" aria-hidden="true" />
+        <img className="page-link-icon" src={websiteIconSrc} alt="" aria-hidden="true" />
         <span>Fuchs Lab</span>
       </a>
     </>
@@ -35,16 +53,16 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
     <footer className="app-footer">
       <div className="app-footer-group">
         {projectLinks}
-        {legalLink && (
+        {safeLegalLink && (
           <>
             <span className="app-footer-sep" aria-hidden="true">·</span>
-            <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
+            <a href={safeLegalLink} target="_blank" rel="noreferrer">Legal notice</a>
           </>
         )}
-        {contactEmail && (
+        {safeContactEmail && (
           <>
             <span className="app-footer-sep" aria-hidden="true">·</span>
-            <a href={`mailto:${contactEmail}`}>Contact</a>
+            <a href={`mailto:${safeContactEmail}`}>Contact</a>
           </>
         )}
       </div>

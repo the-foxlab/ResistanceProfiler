@@ -12,7 +12,8 @@
 
 services:
   redis:
-    image: redis:7-alpine
+    # Pinned multi-arch Redis 7.4.10 Alpine index digest for reproducible stacks.
+    image: redis:7.4.10-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     restart: unless-stopped
     # ── Redis authentication ───────────────────────────────────────────────
     # Redis is an execution trust boundary: RQ's default serializer uses pickle,
@@ -33,6 +34,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+    # Local build tag for `--build` development; for production hosting, use
+    # production/docker-compose.web.yml with an immutable `:sha-<commit>` or
+    # `@sha256:` image reference (and `read_only: true` + sized `/tmp` tmpfs).
     image: respro-web:latest
     # Bind to loopback only by default so the zero-config stack is
     # not exposed to the LAN/public interface. Single-command local startup
@@ -45,6 +49,8 @@ services:
       - '127.0.0.1:8000:8000'
     volumes:
       - ./data:/data:rw
+      # Only needed for path-mode imprint (self-hosted HTML, must be readable by UID 1001):
+      # - ./imprint.html:/data/imprint.html:ro
     #env_file:
     #  - .env
     environment:
@@ -58,7 +64,11 @@ services:
       # ── Deployment mode and security (REQUIRED for public hosting) ─────
       # - RESPRO_WEB_DEPLOYMENT_MODE=online
       # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
-      # - RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+      # Host reverse-proxy traffic via Docker's published loopback port arrives
+      # from the Compose bridge gateway IP (not 127.0.0.1). Inspect the exact
+      # gateway with `docker network inspect <project>_default`, or use canonical
+      # CIDRs with no host bits (Uvicorn requires canonical network addresses):
+      # - RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12
       # ── Rate limiting and batch sizes ──────────────────────────────────────
       # - RESPRO_WEB_UPLOAD_RATE_LIMIT=25/minute
       # - RESPRO_WEB_API_RATE_LIMIT=120/minute
@@ -87,12 +97,13 @@ services:
       - redis
 
   respro-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
     image: respro-web:latest
     command: sh -c "exec python -m web.backend.worker"
     volumes:
       - ./data:/data:rw
-      # Only needed for path-mode imprint (self-hosted HTML):
-      # - ./imprint.html:/data/imprint.html:ro
     environment:
       # ── Redis and job queue (must match respro-web) ────────────────────────
       - REDIS_URL=redis://:${RESPRO_REDIS_PASSWORD:-change-me-local-only}@redis:6379/0

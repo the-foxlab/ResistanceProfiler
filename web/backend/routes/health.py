@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import sqlite3
 from pathlib import Path
 
 import redis
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
+from web.backend.config import (
+    WEB_BACKEND_CONFIG,
+    WEB_ENV,
+    redact_redis_url,
+    sanitize_redis_client_error,
+)
 from web.backend.models import ApiEnvelope
 from web.backend.project_dbs import list_project_db_paths
 from web.backend.startup_config import StartupConfig
@@ -20,17 +27,35 @@ logger = logging.getLogger(__name__)
 
 def _is_redis_connected() -> bool:
     redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
+    client: redis.Redis | None = None
     try:
-        return bool(redis.Redis.from_url(redis_url).ping())
+        client = redis.Redis.from_url(
+            redis_url,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
+        )
+        return bool(client.ping())
     except (redis.RedisError, OSError, RuntimeError) as exc:
-        logger.debug('Readiness check: Redis unavailable at %s: %s', redis_url, exc)
+        logger.debug(
+            'Readiness check: Redis unavailable at %s: %s',
+            redact_redis_url(redis_url),
+            sanitize_redis_client_error(str(exc), redis_url),
+        )
         return False
+    finally:
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()
+            pool = getattr(client, 'connection_pool', None)
+            if pool is not None:
+                with contextlib.suppress(Exception):
+                    pool.disconnect()
 
 
 def _project_database_catalog_readiness(project_databases_dir: Path) -> tuple[bool, int]:
     try:
         db_paths = list_project_db_paths(project_databases_dir)
-    except (FileNotFoundError, OSError, ValueError) as exc:
+    except (FileNotFoundError, OSError, sqlite3.Error, ValueError) as exc:
         logger.debug('Readiness check: project database catalog unavailable in %s: %s', project_databases_dir, exc)
         return False, 0
     return bool(db_paths), len(db_paths)

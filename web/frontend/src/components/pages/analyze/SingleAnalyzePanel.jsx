@@ -1,4 +1,5 @@
 import fileIconSrc from '../../../assets/file.svg';
+import { useOptionalSingleAnalyzeLogic } from '../../../DashboardContext';
 import { InfoButton } from '../../InfoButton';
 import { Spinner } from '../../Spinner';
 import { VcfCutoffsFields } from './VcfCutoffsFields';
@@ -9,7 +10,9 @@ const REPORT_DOWNLOAD_ACTIONS = [
   { key: 'tsvPath', label: 'Download TSV' },
 ];
 
-export function SingleAnalyzePanel({ logic }) {
+export function SingleAnalyzePanel({ logic: logicProp }) {
+  const contextLogic = useOptionalSingleAnalyzeLogic();
+  const logic = logicProp ?? contextLogic;
   const {
     selectedDatabase,
     vcfInput,
@@ -45,16 +48,18 @@ export function SingleAnalyzePanel({ logic }) {
   ) || null;
   const isRegenerate = activeProfileMode === 'regenerate';
   const isActiveRunBusy = isRegenerate ? isRegenerateBusy : isProfileBusy;
-  const isSubmitDisabled = isUploading || (
+  const isAnyRunBusy = isProfileBusy || isRegenerateBusy;
+  const isSubmitDisabled = isUploading || isAnyRunBusy || (
     isRegenerate
-      ? (isRegenerateBusy || !jsonInputId)
+      ? !jsonInputId
       : activeProfileMode === 'vcf'
-        ? (isProfileBusy || !vcfInput.vcf_id || !vcfInput.reference_id)
-        : (isProfileBusy || !fastaInput.fasta_id)
+        ? (!vcfInput.vcf_id || !vcfInput.reference_id)
+        : !fastaInput.fasta_id
   );
 
   const onSingleFile = (uploadFn) => (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (file) {
       uploadFn(file);
     }
@@ -72,7 +77,7 @@ export function SingleAnalyzePanel({ logic }) {
                 title="Upload one VCF (.vcf or .vcf.gz) with standard headers. The VCF may be multi-chrom; each CHROM must match one record in the reference FASTA by header name."
               />
             </span>
-            <input type="file" accept=".vcf,.vcf.gz" disabled={isProfileBusy} onChange={onSingleFile(uploadVcfFile)} />
+            <input type="file" accept=".vcf,.vcf.gz" disabled={isAnyRunBusy} onChange={onSingleFile(uploadVcfFile)} />
           </label>
           <label data-tour-target="vcf-reference">
             <span className="input-label-row">
@@ -82,7 +87,7 @@ export function SingleAnalyzePanel({ logic }) {
                 title="Reference FASTA must match the VCF coordinate system. May be multi-record (one FASTA record per VCF CHROM); each record header must match a CHROM name."
               />
             </span>
-            <input type="file" accept=".fasta,.fa,.fna" disabled={isProfileBusy} onChange={onSingleFile(uploadReferenceFile)} />
+            <input type="file" accept=".fasta,.fa,.fna" disabled={isAnyRunBusy} onChange={onSingleFile(uploadReferenceFile)} />
           </label>
           <label data-tour-target="vcf-bam">
             <span className="label-text input-label-row">
@@ -92,23 +97,23 @@ export function SingleAnalyzePanel({ logic }) {
                 title="Optional sorted BAM. A BAM index is generated automatically. Used for coverage evaluation."
               />
             </span>
-            <input type="file" accept=".bam" disabled={isProfileBusy} onChange={onSingleFile(uploadBamFile)} />
+            <input type="file" accept=".bam" disabled={isAnyRunBusy} onChange={onSingleFile(uploadBamFile)} />
           </label>
           <label data-tour-target="vcf-sample-name">
             Sample name
             <input
               className="sample-name-input"
               value={vcfInput.sample}
-              disabled={isProfileBusy}
-              onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
+              disabled={isAnyRunBusy}
+              onChange={(event) => setVcfInput((prev) => ({ ...prev, sample: event.target.value }))}
             />
           </label>
           <VcfCutoffsFields
             minAf={vcfInput.min_af}
             minDepth={vcfInput.min_depth}
-            disabled={isProfileBusy}
-            onChangeMinAf={(value) => setVcfInput({ ...vcfInput, min_af: value })}
-            onChangeMinDepth={(value) => setVcfInput({ ...vcfInput, min_depth: value })}
+            disabled={isAnyRunBusy}
+            onChangeMinAf={(value) => setVcfInput((prev) => ({ ...prev, min_af: value }))}
+            onChangeMinDepth={(value) => setVcfInput((prev) => ({ ...prev, min_depth: value }))}
             freqTourTarget="vcf-frequency-cutoff"
             covTourTarget="vcf-coverage-cutoff"
             freqHelpLabel="Frequency cutoff help"
@@ -125,15 +130,15 @@ export function SingleAnalyzePanel({ logic }) {
             <span className="input-label-row">
               FASTA file <InfoButton label="FASTA help" title="Upload one consensus FASTA sequence file." />
             </span>
-            <input type="file" accept=".fasta,.fa,.fna,.faa" disabled={isProfileBusy} onChange={onSingleFile(uploadFastaFile)} />
+            <input type="file" accept=".fasta,.fa,.fna,.faa" disabled={isAnyRunBusy} onChange={onSingleFile(uploadFastaFile)} />
           </label>
           <label>
             Sample name
             <input
               className="sample-name-input"
               value={fastaInput.sample}
-              disabled={isProfileBusy}
-              onChange={(event) => setFastaInput({ ...fastaInput, sample: event.target.value })}
+              disabled={isAnyRunBusy}
+              onChange={(event) => setFastaInput((prev) => ({ ...prev, sample: event.target.value }))}
             />
           </label>
         </div>
@@ -149,7 +154,7 @@ export function SingleAnalyzePanel({ logic }) {
                 title="Upload a prior results JSON exported by ResistanceProfiler. This is matched by a unique db ID. After db updates, the json regenerate will not work."
               />
             </span>
-            <input type="file" accept=".json" onChange={onSingleFile(uploadJsonFile)} />
+            <input type="file" accept=".json" disabled={isAnyRunBusy} onChange={onSingleFile(uploadJsonFile)} />
           </label>
         </div>
       ) : null}
@@ -177,13 +182,14 @@ export function SingleAnalyzePanel({ logic }) {
           <span className="field-optional" style={{ marginLeft: '0.5rem' }}>using {selectedDatabase.display_name}</span>
         ) : null}
         {statusError ? (
-          <p className="status" style={{ color: 'var(--color-error, #c2410c)', marginLeft: '1rem' }}>{statusError}</p>
+          <p className="status" role="alert" style={{ color: 'var(--color-error)', marginLeft: '1rem' }}>{statusError}</p>
         ) : null}
       </div>
 
       {reportOptions.length > 0 ? (
         <div className="inline-actions report-actions analyze-report-actions">
           <select
+            aria-label="Select session report"
             value={selectedProfileReportPath}
             onChange={(event) => setSelectedProfileReportPath(event.target.value)}
           >

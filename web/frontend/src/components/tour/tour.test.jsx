@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { Link, MemoryRouter } from 'react-router';
 
 import { TourProvider, useTour, TOUR_VERSION, TOUR_STORAGE_KEY } from './TourContext';
 import { TourOverlay } from './TourOverlay';
@@ -30,7 +30,9 @@ function TourApp({ steps, initialPath = '/' }) {
           <div data-tour-target="sidebar-results" data-testid="target-sidebar-results" />
           <div data-tour-target="sidebar-database" data-testid="target-sidebar-database" />
           <div data-tour-target="sidebar-mutations" data-testid="target-sidebar-mutations" />
-          <div className="top-bar-nav" data-testid="target-topnav" />
+          <div className="top-bar-nav" data-testid="target-topnav">
+            <div data-tour-target="nav-about" data-testid="target-nav-about" />
+          </div>
         </div>
         <TourOverlay steps={steps} />
       </TourProvider>
@@ -208,5 +210,47 @@ describe('guided tour integration', () => {
     expect(container.querySelector('.tour-tooltip')).not.toBeNull();
     expect(() => fireEvent.keyDown(document, { key: 'Escape' })).not.toThrow();
     setItemSpy.mockRestore();
+  });
+
+  it('hides the coach card on navigation away from /analysis without persisting dismissal or stealing link focus', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/analysis']}>
+        <TourProvider steps={STEPS}>
+          <nav>
+            <Link to="/databases">Databases</Link>
+          </nav>
+          <main id="main-content" tabIndex={-1}>content</main>
+          <TourOverlay steps={STEPS} />
+        </TourProvider>
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('.tour-coach-card')).not.toBeNull();
+    const dbLink = screen.getByRole('link', { name: 'Databases' });
+    dbLink.focus();
+    fireEvent.click(dbLink);
+
+    expect(container.querySelector('.tour-coach-card')).toBeNull();
+    expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBeNull();
+    expect(document.activeElement).toBe(dbLink);
+  });
+
+  it('allows Alt+ArrowLeft and Alt+ArrowRight browser history shortcuts during the active tour', () => {
+    render(<TourApp steps={STEPS} initialPath="/analysis" />);
+    fireEvent.click(screen.getByRole('button', { name: /start tour/i }));
+    expect(screen.getByText(STEPS[0].title)).toBeInTheDocument();
+
+    const altRight = new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(altRight);
+    expect(altRight.defaultPrevented).toBe(false);
+    expect(screen.getByText(STEPS[0].title)).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    expect(screen.getByText(STEPS[1].title)).toBeInTheDocument();
+
+    const altLeft = new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(altLeft);
+    expect(altLeft.defaultPrevented).toBe(false);
+    expect(screen.getByText(STEPS[1].title)).toBeInTheDocument();
   });
 });

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import shutil
@@ -17,7 +18,6 @@ from web.backend.project_dbs import (
     build_project_db_uuid_index,
     list_project_db_paths,
     resolve_project_db_path,
-    resolve_regenerate_project_db_path,
 )
 from web.backend.services.maintained_bootstrap import (
     bootstrap_missing_maintained_databases,
@@ -34,8 +34,8 @@ __all__ = [
     'is_path_within_allowed_roots',
     'list_project_db_paths',
     'load_startup_config',
+    'resolve_maintained_bootstrap_enabled',
     'resolve_project_db_path',
-    'resolve_regenerate_project_db_path',
 ]
 
 
@@ -78,10 +78,11 @@ def load_startup_config() -> StartupConfig:
     project_databases_dir = (data_dir / 'project_databases').resolve()
     uploads_dir = (data_dir / 'uploads').resolve()
     results_dir = (data_dir / 'results').resolve()
-    maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
+    maintained_bootstrap = resolve_maintained_bootstrap_enabled()
     imprint = _resolve_imprint()
     contact_email = _resolve_contact_email()
     deployment_mode = env_str(WEB_ENV.deployment_mode, WEB_BACKEND_CONFIG.defaults.deployment_mode)
+    _validate_startup_policy(deployment_mode)
 
     parsed_roots = parse_csv_tokens(os.getenv(WEB_ENV.allowed_roots, ''))
     allowed_roots = (
@@ -95,21 +96,35 @@ def load_startup_config() -> StartupConfig:
         directory.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_project_db(data_dir=data_dir, project_databases_dir=project_databases_dir)
 
+    bootstrap_error: Exception | None = None
     if maintained_bootstrap:
         logger.info('Maintained database bootstrap enabled — downloading missing databases')
-        bootstrap_missing_maintained_databases(project_databases_dir)
         try:
-            check_and_update_maintained_databases(project_databases_dir)
-        except Exception:  # noqa: BLE001 — update failures must never block startup
-            logger.exception('Maintained database update check failed — continuing with existing databases')
+            bootstrap_missing_maintained_databases(project_databases_dir)
+        except Exception as exc:  # noqa: BLE001 — fail-soft if valid local DBs exist
+            bootstrap_error = exc
+            logger.warning('Maintained database bootstrap failed (%s) — checking local databases', exc)
+        else:
+            try:
+                check_and_update_maintained_databases(project_databases_dir)
+            except Exception:  # noqa: BLE001 — update failures must never block startup
+                logger.exception('Maintained database update check failed — continuing with existing databases')
 
     project_db_uuid_index = build_project_db_uuid_index(project_databases_dir)
     if not project_db_uuid_index:
+        if bootstrap_error is not None:
+            raise FileNotFoundError(
+                f'No project database found in {project_databases_dir} and maintained bootstrap failed: {bootstrap_error}'
+            ) from bootstrap_error
         raise FileNotFoundError(
             f'No project database found in {project_databases_dir}. '
             'Add a .db file or enable maintained bootstrap.'
         )
-    _validate_startup_policy(deployment_mode)
+    if bootstrap_error is not None:
+        logger.warning(
+            'Maintained database bootstrap failed; continuing startup with %d existing local project database(s).',
+            len(project_db_uuid_index),
+        )
 
     return StartupConfig(
         project_databases_dir=project_databases_dir,
@@ -147,10 +162,21 @@ def _resolve_imprint() -> ImprintConfig | None:
     raw = os.getenv(WEB_ENV.imprint, '').strip()
     if not raw:
         return None
-    if '://' in raw and urlparse(raw).scheme:
-        scheme = urlparse(raw).scheme.lower()
+    if '://' in raw or raw.lower().startswith(('javascript:', 'data:', 'vbscript:')):
+        if any(ord(ch) < 32 or ch == '\x7f' or ch.isspace() for ch in raw):
+            raise ValueError('RESPRO_WEB_IMPRINT URL must not contain whitespace or control characters.')
+        parsed = urlparse(raw)
+        scheme = parsed.scheme.lower()
         if scheme not in ('http', 'https'):
             raise ValueError(f'RESPRO_WEB_IMPRINT URL must use http or https scheme, got {scheme!r}: {raw}')
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError('RESPRO_WEB_IMPRINT URL must not contain embedded credentials.')
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError(f'RESPRO_WEB_IMPRINT URL contains an invalid port: {raw}') from exc
+        if not parsed.netloc or not parsed.hostname:
+            raise ValueError(f'RESPRO_WEB_IMPRINT URL must include a host: {raw}')
         return ImprintConfig(kind='url', url=raw)
 
     path = Path(raw).expanduser().resolve()
@@ -180,7 +206,7 @@ def _validate_data_dir(data_dir: Path) -> None:
         pass
 
 
-def _resolve_maintained_bootstrap_enabled() -> bool:
+def resolve_maintained_bootstrap_enabled() -> bool:
     """Parse ``RESPRO_WEB_MAINTAINED_BOOTSTRAP`` leniently, failing fast on invalid tokens."""
     raw = os.getenv(WEB_ENV.maintained_bootstrap, str(WEB_BACKEND_CONFIG.defaults.maintained_bootstrap))
     normalized = raw.strip().lower()
@@ -191,16 +217,67 @@ def _resolve_maintained_bootstrap_enabled() -> bool:
     raise ValueError(f'Invalid boolean for {WEB_ENV.maintained_bootstrap}: {raw!r}')
 
 
+# Backward-compatible alias for main.py until M2 updates its import.
+_resolve_maintained_bootstrap_enabled = resolve_maintained_bootstrap_enabled
+
+
+def _validate_trusted_proxies_env() -> None:
+    """Validate ``RESPRO_WEB_TRUSTED_PROXIES`` as non-empty IP/CIDR tokens (no wildcards)."""
+    tokens = parse_csv_tokens(os.getenv(WEB_ENV.trusted_proxies, ''))
+    if not tokens:
+        raise RuntimeError(
+            "RESPRO_WEB_DEPLOYMENT_MODE='online' requires RESPRO_WEB_TRUSTED_PROXIES "
+            'to be set to one or more IP addresses or CIDR ranges.'
+        )
+    for token in tokens:
+        if token == '*':
+            raise RuntimeError(
+                "RESPRO_WEB_DEPLOYMENT_MODE='online' does not allow wildcard '*' in "
+                'RESPRO_WEB_TRUSTED_PROXIES; specify explicit proxy IPs or CIDRs.'
+            )
+        try:
+            ipaddress.ip_address(token)
+            continue
+        except ValueError:
+            pass
+        try:
+            network = ipaddress.ip_network(token, strict=False)
+        except ValueError as exc:
+            raise RuntimeError(
+                f'Invalid entry {token!r} in RESPRO_WEB_TRUSTED_PROXIES: '
+                'expected an IP address or CIDR range.'
+            ) from exc
+        if network.prefixlen == 0:
+            raise RuntimeError(
+                f'RESPRO_WEB_TRUSTED_PROXIES entry {token!r} trusts all addresses '
+                "in 'online' mode; specify explicit proxy IPs or CIDRs."
+            )
+
+
+def _validate_online_cors_env() -> None:
+    """Reject wildcard CORS in ``online`` mode and warn on localhost fallback."""
+    origins = parse_csv_tokens(os.getenv(WEB_ENV.cors_origins, ''))
+    if not origins:
+        logger.warning(
+            "RESPRO_WEB_DEPLOYMENT_MODE='online' with %s unset — falling back to localhost CORS defaults %s",
+            WEB_ENV.cors_origins,
+            WEB_BACKEND_CONFIG.defaults.cors_local_origins,
+        )
+        return
+    if any('*' in origin for origin in origins):
+        raise RuntimeError(
+            "RESPRO_WEB_DEPLOYMENT_MODE='online' does not allow wildcard '*' in "
+            f'{WEB_ENV.cors_origins}; specify explicit frontend origin(s).'
+        )
+
+
 def _validate_startup_policy(deployment_mode: str) -> None:
-    """Enforce deployment safety rules (``online`` mode requires ``RESPRO_WEB_TRUSTED_PROXIES``)."""
+    """Enforce deployment safety rules for ``local`` and ``online`` modes."""
     if deployment_mode == 'local':
         return
     if deployment_mode == 'online':
-        if not os.getenv(WEB_ENV.trusted_proxies, '').strip():
-            raise RuntimeError(
-                "RESPRO_WEB_DEPLOYMENT_MODE='online' requires RESPRO_WEB_TRUSTED_PROXIES "
-                'to be set so forwarded client IPs are trusted only from known proxies.'
-            )
+        _validate_trusted_proxies_env()
+        _validate_online_cors_env()
         return
     raise RuntimeError(
         f"Unknown RESPRO_WEB_DEPLOYMENT_MODE={deployment_mode!r}. Valid modes are 'local', 'online'."

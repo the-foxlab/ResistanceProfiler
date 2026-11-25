@@ -2,7 +2,7 @@
  * IC50 and score distribution chart builders.
  */
 
-import { PIE_COLORS } from './shared';
+import { currentTheme, pieColorsForTheme, scoreBarColorForTheme } from './shared';
 import { isPopulated, buildDrugAliasLookup } from '../../utils';
 import {
   buildOrganismByReference,
@@ -87,23 +87,31 @@ function collectIc50ByOrganism(allRules, organismByReference) {
     const referenceName = displayValue(rule.reference_name, 'Unknown reference');
     const organism = organismByReference.get(referenceName) || 'Unknown organism';
     if (!groups.has(organism)) {
-      groups.set(organism, { organism, byDrug: new Map(), skippedNonPositive: 0 });
+      groups.set(organism, { organism, byDrug: new Map() });
     }
 
     const group = groups.get(organism);
     const drug = displayValue(rule.drug, 'Unspecified drug');
     if (!group.byDrug.has(drug)) {
-      group.byDrug.set(drug, { ic50Values: [], foldValues: [] });
+      group.byDrug.set(drug, { ic50Values: [], foldValues: [], skippedIc50: 0, skippedFold: 0 });
     }
 
     const bucket = group.byDrug.get(drug);
-    for (const [field, target] of [['ic50', bucket.ic50Values], ['fold_ic50', bucket.foldValues]]) {
-      const value = parseNumericMeasurement(rule[field]);
-      if (value === null) continue;
-      if (value > 0) {
-        target.push(value);
+    const ic50Value = parseNumericMeasurement(rule.ic50);
+    if (ic50Value !== null) {
+      if (ic50Value > 0) {
+        bucket.ic50Values.push(ic50Value);
       } else {
-        group.skippedNonPositive += 1;
+        bucket.skippedIc50 += 1;
+      }
+    }
+
+    const foldValue = parseNumericMeasurement(rule.fold_ic50);
+    if (foldValue !== null) {
+      if (foldValue > 0) {
+        bucket.foldValues.push(foldValue);
+      } else {
+        bucket.skippedFold += 1;
       }
     }
   });
@@ -145,7 +153,8 @@ function computeGlobalIc50Axis(groups) {
   };
 }
 
-function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
+function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis, theme = currentTheme()) {
+  const palette = pieColorsForTheme(theme);
   const drugEntries = Array.from(group.byDrug.entries())
     .map(([drug, bucket]) => {
       const useIc50 = bucket.ic50Values.length > 0;
@@ -162,6 +171,11 @@ function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
   if (drugEntries.length === 0) {
     return null;
   }
+
+  const skippedNonPositive = Array.from(group.byDrug.values()).reduce(
+    (sum, bucket) => sum + bucket.skippedIc50 + (bucket.ic50Values.length > 0 ? 0 : bucket.skippedFold),
+    0,
+  );
 
   const laneLabels = {};
   const points = [];
@@ -182,7 +196,7 @@ function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
         drug: entry.displayDrug,
         value,
         metricLabel: entry.metricLabel,
-        color: PIE_COLORS[laneIdx % PIE_COLORS.length],
+        color: palette[laneIdx % palette.length],
       });
     });
   });
@@ -199,8 +213,8 @@ function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
     key: `ic50::${group.organism}`,
     title: group.organism,
     subtitle: `Log-scaled ${subtitleMetricHint} distribution across ${drugEntries.length} drug(s)`,
-    footer: group.skippedNonPositive > 0
-      ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
+    footer: skippedNonPositive > 0
+      ? `${skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
       : 'Each point is one rule-level measurement',
     xAxisLabel: xAxisUnitLabel,
     yAxisLabel: 'Drug',
@@ -212,7 +226,7 @@ function buildOrganismIc50Plot(group, drugAliasLookup, globalAxis) {
   };
 }
 
-export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
+export function buildIc50DistributionSections(rules, formulaRules, plotMeta, theme = currentTheme()) {
   // Build one strip-plot per organism with one y-lane per drug and log-scaled IC50 on x.
   const organismByReference = buildOrganismByReference(plotMeta);
   const drugAliasLookup = buildDrugAliasLookup(plotMeta);
@@ -224,7 +238,7 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
   }
 
   const plots = Array.from(groups.values())
-    .map((group) => buildOrganismIc50Plot(group, drugAliasLookup, globalAxis))
+    .map((group) => buildOrganismIc50Plot(group, drugAliasLookup, globalAxis, theme))
     .filter(Boolean)
     .sort((a, b) => a.title.localeCompare(b.title));
 
@@ -240,16 +254,17 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
   }];
 }
 
-function buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels) {
+function buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels, theme = currentTheme()) {
   if (orderedScoreLabels.length === 0) {
     return [];
   }
+  const barColor = scoreBarColorForTheme(theme);
   return Array.from(sectionPlots.values())
     .map((group) => {
       const bars = orderedScoreLabels.map((scoreLabel) => ({
         scoreLabel,
         count: group.byScore.get(scoreLabel) || 0,
-        color: '#0f766e',
+        color: barColor,
       }));
       const totalRules = bars.reduce((sum, entry) => sum + entry.count, 0);
 
@@ -271,7 +286,7 @@ function buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels) {
     ));
 }
 
-export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
+export function buildScoreDistributionSections(rules, formulaRules, plotMeta, theme = currentTheme()) {
   // Build one count-per-score bar chart per drug within each organism.
   const organismByReference = buildOrganismByReference(plotMeta);
   const drugAliasLookup = buildDrugAliasLookup(plotMeta);
@@ -320,7 +335,7 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
   const sectionEntries = Array.from(groups.entries())
     .map(([sectionKey, sectionPlots]) => ({
       sectionKey,
-      plots: buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels),
+      plots: buildScoreSectionPlots(sectionKey, sectionPlots, orderedScoreLabels, theme),
     }))
     .filter((section) => section.plots.length > 0);
 

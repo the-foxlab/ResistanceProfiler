@@ -371,14 +371,16 @@
   .database-plot-grid,
   .database-summary-row,
   .database-reference-plot-grid,
+  .database-reference-section-score .database-reference-plot-grid,
   .database-meta-specs,
   .database-meta-panel {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .database-meta-row {
+  .database-meta-row,
+  .database-algorithms-panel .database-meta-row {
     min-width: 0;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.2rem;
   }
 
@@ -425,5 +427,24 @@
   .database-reference-section-score .database-plot-card {
     flex: 1 1 220px;
     min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .database-phenotype-switch button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .database-phenotype-switch button.active {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+
+  .database-legend-dot {
+    forced-color-adjust: none;
   }
 }

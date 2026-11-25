@@ -1,6 +1,12 @@
 import Plotly from 'plotly.js-dist-min';
 
-import { baseLayout, axisTitleFont } from './shared';
+import {
+  PIE_COLORS,
+  baseLayout,
+  axisTitleFont,
+  pieColorsForTheme,
+  scoreBarColorForTheme,
+} from './shared';
 import { STATIC_PLOT_CONFIG, usePlotlyChart } from './usePlotlyChart';
 
 function formatIc50Tick(value) {
@@ -21,14 +27,15 @@ function formatIc50Tick(value) {
   return String(Math.round(ic50Value * 100) / 100);
 }
 
-function renderScoreCountPlot(container, plot) {
-  const base = baseLayout();
+function renderScoreCountPlot(container, plot, theme) {
+  const base = baseLayout(theme);
+  const barColor = scoreBarColorForTheme(theme);
   const trace = {
     type: 'bar',
     x: plot.bars.map((b) => b.scoreLabel),
     y: plot.bars.map((b) => b.count),
     marker: {
-      color: plot.bars.map((b) => b.color),
+      color: plot.bars.map((b) => (!b.color || b.color === '#0f766e' || b.color === '#2dd4bf' ? barColor : b.color)),
       opacity: 0.82,
     },
     hovertemplate: 'Score: %{x}<br>Count: %{y}<extra></extra>',
@@ -40,12 +47,12 @@ function renderScoreCountPlot(container, plot) {
     xaxis: {
       ...base.xaxis,
       showgrid: false,
-      title: { text: plot.xAxisLabel || 'Score', font: axisTitleFont() },
+      title: { text: plot.xAxisLabel || 'Score', font: axisTitleFont(theme) },
       tickangle: 0,
     },
     yaxis: {
       ...base.yaxis,
-      title: { text: plot.yAxisLabel || 'Rule count', font: axisTitleFont() },
+      title: { text: plot.yAxisLabel || 'Rule count', font: axisTitleFont(theme) },
       showgrid: true,
       rangemode: 'tozero',
     },
@@ -60,8 +67,9 @@ function renderScoreCountPlot(container, plot) {
   Plotly.react(container, [trace], layout, STATIC_PLOT_CONFIG);
 }
 
-function renderIc50DistributionPlot(container, plot) {
-  const base = baseLayout();
+function renderIc50DistributionPlot(container, plot, theme) {
+  const base = baseLayout(theme);
+  const palette = pieColorsForTheme(theme);
   const majorTickSet = new Set(
     (plot.majorTicks || []).map((tick) => Math.round(tick * 1e6) / 1e6),
   );
@@ -74,13 +82,24 @@ function renderIc50DistributionPlot(container, plot) {
 
   const yTickLabels = (plot.yTicks || []).map((t) => plot.laneLabels[String(Math.round(t))] || '');
 
+  const pointColors = plot.points.map((p) => {
+    if (Number.isInteger(p.lane) && p.lane >= 1) {
+      return palette[(p.lane - 1) % palette.length];
+    }
+    const lightIdx = PIE_COLORS.indexOf(p.color);
+    if (lightIdx >= 0) {
+      return palette[lightIdx % palette.length];
+    }
+    return p.color || palette[0];
+  });
+
   const trace = {
     type: 'scatter',
     mode: 'markers',
     x: plot.points.map((p) => p.x),
     y: plot.points.map((p) => p.y),
     marker: {
-      color: plot.points.map((p) => p.color),
+      color: pointColors,
       opacity: 0.78,
       size: 8,
     },
@@ -97,7 +116,7 @@ function renderIc50DistributionPlot(container, plot) {
     xaxis: {
       ...base.xaxis,
       type: 'linear',
-      title: { text: plot.xAxisLabel || 'IC₅₀ (log scale)', font: axisTitleFont(), standoff: 18 },
+      title: { text: plot.xAxisLabel || 'IC₅₀ (log scale)', font: axisTitleFont(theme), standoff: 18 },
       tickvals: plot.xTicks,
       ticktext,
       range: plot.xDomain,
@@ -128,11 +147,11 @@ function renderIc50DistributionPlot(container, plot) {
 export function DatabaseDrugDistributionPlot({ plot }) {
   const { containerRef, plotError } = usePlotlyChart({
     deps: [plot],
-    render: (el) => {
+    render: (el, activeTheme) => {
       if (plot.kind === 'score-counts') {
-        renderScoreCountPlot(el, plot);
+        renderScoreCountPlot(el, plot, activeTheme);
       } else {
-        renderIc50DistributionPlot(el, plot);
+        renderIc50DistributionPlot(el, plot, activeTheme);
       }
     },
   });
@@ -150,7 +169,7 @@ export function DatabaseDrugDistributionPlot({ plot }) {
       </div>
       <p className="database-plot-footer">{plot.footer}</p>
       {plotError && (
-        <p className="status" style={{ color: '#c2410c' }}>Chart error: {plotError}</p>
+        <p className="status" style={{ color: 'var(--color-error)' }}>Chart error: {plotError}</p>
       )}
     </section>
   );

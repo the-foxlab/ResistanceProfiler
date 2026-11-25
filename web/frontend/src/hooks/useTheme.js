@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Theme preference ('light' | 'dark' | 'system') synced to `<html data-theme="...">`.
@@ -7,10 +7,13 @@ import { createContext, useCallback, useEffect, useState } from 'react';
 const STORAGE_KEY = 'respro-theme';
 export const ThemeContext = createContext('light');
 
+function normalizePreference(value) {
+  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+}
+
 function readStoredTheme() {
   try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+    return normalizePreference(localStorage.getItem(STORAGE_KEY));
   } catch {
     return 'system';
   }
@@ -18,7 +21,7 @@ function readStoredTheme() {
 
 function resolveTheme(preference) {
   if (preference !== 'system') return preference;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
 }
 
 function applyTheme(preference) {
@@ -30,8 +33,10 @@ function applyTheme(preference) {
 export function useTheme() {
   const [preference, setPreference] = useState(readStoredTheme);
   const [resolved, setResolved] = useState(() => resolveTheme(preference));
+  const preferenceRef = useRef(preference);
 
   useEffect(() => {
+    preferenceRef.current = preference;
     setResolved(applyTheme(preference));
     try {
       if (preference === 'system') {
@@ -45,10 +50,11 @@ export function useTheme() {
   }, [preference]);
 
   useEffect(() => {
-    if (!window.matchMedia) return undefined;
+    if (typeof window.matchMedia !== 'function') return undefined;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (!mq || typeof mq.addEventListener !== 'function') return undefined;
     const onChange = () => {
-      if (readStoredTheme() === 'system') {
+      if (preferenceRef.current === 'system') {
         setResolved(applyTheme('system'));
       }
     };
@@ -56,6 +62,10 @@ export function useTheme() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  const setTheme = useCallback((next) => setPreference(next), []);
+  const setTheme = useCallback((next) => {
+    const normalized = normalizePreference(next);
+    preferenceRef.current = normalized;
+    setPreference(normalized);
+  }, []);
   return { preference, resolved, setTheme };
 }

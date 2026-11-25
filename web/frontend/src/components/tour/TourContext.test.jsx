@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 
 import { TourProvider, useTour, TOUR_VERSION, TOUR_STORAGE_KEY } from './TourContext';
 
 // Helper: render the provider and expose the hook state via a consumer.
 function TourConsumer({ onState }) {
   const tour = useTour();
+  const navigate = useNavigate();
   if (onState) {
     onState(tour);
   }
@@ -21,6 +22,9 @@ function TourConsumer({ onState }) {
       <button type="button" onClick={() => tour.prevStep()}>prev</button>
       <button type="button" onClick={() => tour.dismissTour()}>dismiss</button>
       <button type="button" onClick={() => tour.declineTour()}>decline</button>
+      <button type="button" onClick={() => navigate('/databases')}>go-databases</button>
+      <button type="button" onClick={() => navigate('/analysis/reports')}>go-reports</button>
+      <button type="button" onClick={() => navigate('/analysis')}>go-analysis</button>
     </div>
   );
 }
@@ -160,19 +164,37 @@ describe('TourContext', () => {
       expect(screen.getByTestId('is-active').textContent).toBe('false');
       expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBe(TOUR_VERSION);
     });
+
+    it('clears isPrompting when navigating away from /analysis without writing localStorage', () => {
+      renderTour(sampleSteps, '/analysis');
+      expect(screen.getByTestId('is-prompting').textContent).toBe('true');
+
+      fireEvent.click(screen.getByText('go-databases'));
+      expect(screen.getByTestId('is-prompting').textContent).toBe('false');
+      expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBeNull();
+
+      fireEvent.click(screen.getByText('go-analysis'));
+      expect(screen.getByTestId('is-prompting').textContent).toBe('true');
+
+      fireEvent.click(screen.getByText('go-reports'));
+      expect(screen.getByTestId('is-prompting').textContent).toBe('false');
+      expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBeNull();
+    });
   });
 
   describe('storage failure (fail-open)', () => {
-    it('does not crash when localStorage.setItem throws and still activates in-session', () => {
+    it('does not crash when localStorage.setItem throws and suppresses re-prompting for the session', () => {
       const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
         throw new Error('private mode');
       });
       expect(() => renderTour(sampleSteps)).not.toThrow();
+      expect(screen.getByTestId('is-prompting').textContent).toBe('true');
       fireEvent.click(screen.getByText('start'));
       expect(screen.getByTestId('is-active').textContent).toBe('true');
-      // dismiss must not throw even though storage write fails.
+      // dismiss must not throw even though storage write fails, and must not re-open prompt.
       expect(() => fireEvent.click(screen.getByText('dismiss'))).not.toThrow();
       expect(screen.getByTestId('is-active').textContent).toBe('false');
+      expect(screen.getByTestId('is-prompting').textContent).toBe('false');
       setItemSpy.mockRestore();
     });
 

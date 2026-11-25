@@ -25,6 +25,7 @@
 
 .dashboard-body:has(.sidebar-rail.collapsed) .dashboard-main {
   margin-left: 68px;
+  width: calc(100% - 68px);
 }
 
 .dashboard-body:not(:has(.sidebar-rail)) .dashboard-main {
@@ -40,7 +41,7 @@
   z-index: 1100;
   padding: 0.5rem 0.9rem;
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--on-accent);
   border-radius: 0 0 8px 8px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -548,8 +549,6 @@
   }
 
   .brand-logo-wrap {
-    grid-column: 1;
-    grid-row: 1;
     margin-left: 0;
   }
 
@@ -733,19 +732,39 @@
     display: none;
   }
 
-  .topbar-db-bar .header-db-select {
-    min-width: 0;
-    width: min(36vw, 150px);
+  .workspace-subheader .topbar-db-bar .header-db-select {
     padding-inline: 0.4rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-rail-nav {
+  .skip-link,
+  .top-bar-nav-link,
+  .sidebar-rail-nav,
+  .sidebar-rail-link,
+  .app-footer-icon-link,
+  .sidebar-rail,
+  .mobile-sidebar-toggle {
     transition: none;
   }
 
-  .top-bar-nav-link {
-    transition-duration: 0.01ms;
+  .scroll-top-button,
+  .scroll-top-button.is-visible {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .skip-link:focus-visible {
+    outline: 2px solid Highlight;
+  }
+
+  .top-bar-nav-link.active {
+    border-bottom: 2px solid Highlight;
+  }
+
+  .sidebar-rail-link.active {
+    outline: 1px solid Highlight;
   }
 }

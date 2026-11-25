@@ -6,13 +6,18 @@ round-trips them safely without pickle.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
+import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from rq import get_current_job
 
@@ -93,7 +98,7 @@ def run_profile_vcf(
         '--threads', str(threads),
         '--cache',
         *(['--input-display-name', input_display_name] if input_display_name else []),
-        *(['--bam', str(bam_path)] if bam_path is not None else []),
+        *(['--bam', str(bam_path)] if bam_path else []),
     ]
     return _run_job_with_logging(
         mode='vcf',
@@ -179,19 +184,92 @@ def _execute_respro_job(
     return result
 
 
+class _SubprocessCanceledError(BaseException):
+    """Internal signal raised when the worker receives SIGTERM while running a subprocess."""
+
+
+_SUBPROCESS_TERMINATE_GRACE_SECONDS = 2.0
+
+
+def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
+    """Terminate *proc*'s entire process group via SIGTERM → wait → SIGKILL."""
+    pgid = proc.pid
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=_SUBPROCESS_TERMINATE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(pgid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=_SUBPROCESS_TERMINATE_GRACE_SECONDS)
+        return
+    # Ensure any lingering descendants in the session/process group are also cleaned up.
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGKILL)
+
+
 def _run_respro_command(command: list[str]) -> None:
     """Execute one ``respro`` CLI subprocess bounded by the hard subprocess timeout."""
     timeout_seconds = resolve_subprocess_timeout_seconds()
+    is_main_thread = threading.current_thread() is threading.main_thread()
+    previous_sigterm: Any = None
+    canceling = False
+    proc: subprocess.Popen[str] | None = None
     try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f'respro CLI subprocess timed out after {timeout_seconds} seconds.') from exc
-    except OSError as exc:
-        raise RuntimeError(f'Failed to execute respro CLI subprocess: {exc}') from exc
+        if is_main_thread:
+            def _handle_sigterm(_signum: int, _frame: Any) -> None:
+                nonlocal canceling
+                if not canceling:
+                    canceling = True
+                    raise _SubprocessCanceledError()
 
-    if completed.returncode != 0:
-        details = (completed.stderr or '').strip() or (completed.stdout or '').strip()
-        raise ValueError(details or f'command exited with code {completed.returncode}')
+            previous_sigterm = signal.signal(signal.SIGTERM, _handle_sigterm)
+
+        try:
+            try:
+                proc = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise RuntimeError(f'Failed to execute respro CLI subprocess: {exc}') from exc
+
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            canceling = True
+            if proc is not None:
+                _terminate_process_group(proc)
+            raise RuntimeError(f'respro CLI subprocess timed out after {timeout_seconds} seconds.') from exc
+        except _SubprocessCanceledError as exc:
+            canceling = True
+            if proc is not None:
+                _terminate_process_group(proc)
+            raise RuntimeError('respro CLI subprocess canceled.') from exc
+        except BaseException:
+            canceling = True
+            if proc is not None:
+                _terminate_process_group(proc)
+            raise
+    finally:
+        try:
+            if is_main_thread and previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+        finally:
+            if proc is not None:
+                if proc.stdout is not None:
+                    with contextlib.suppress(OSError):
+                        proc.stdout.close()
+                if proc.stderr is not None:
+                    with contextlib.suppress(OSError):
+                        proc.stderr.close()
+
+    if proc.returncode != 0:
+        details = (stderr or '').strip() or (stdout or '').strip()
+        raise ValueError(details or f'command exited with code {proc.returncode}')
 
 
 def _build_web_output_html_path(*, output_dir: Path, input_name: str) -> Path:

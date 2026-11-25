@@ -14,10 +14,12 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
       setActiveProfileMode(mode);
     }
     if (openAdvanced) {
-      setTimeout(() => {
+      const openAdvancedDetails = () => {
         const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
         if (advancedOptions) advancedOptions.open = true;
-      }, 0);
+      };
+      openAdvancedDetails();
+      setTimeout(openAdvancedDetails, 0);
     }
   };
 
@@ -48,28 +50,28 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
       targetSelector: '[data-tour-target="vcf-bam"]',
       title: 'VCF mode — BAM (optional)',
       body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-annotation and combined SNP codon analysis.',
-      before: goSingle('vcf', { openAdvanced: true }),
+      before: goSingle('vcf'),
     },
     {
       id: 'vcf-sample-name',
       targetSelector: '[data-tour-target="vcf-sample-name"]',
       title: 'VCF mode — sample name',
       body: 'Give your sample a name. This label appears on the report.',
-      before: goSingle('vcf', { openAdvanced: true }),
+      before: goSingle('vcf'),
     },
     {
       id: 'vcf-frequency-cutoff',
       targetSelector: '[data-tour-target="vcf-frequency-cutoff"]',
       title: 'VCF mode — frequency cutoff',
       body: 'Set the minimum allele frequency (0 to 1). Variants below this threshold are ignored and will not appear in the report.',
-      before: goSingle('vcf'),
+      before: goSingle('vcf', { openAdvanced: true }),
     },
     {
       id: 'vcf-coverage-cutoff',
       targetSelector: '[data-tour-target="vcf-coverage-cutoff"]',
       title: 'VCF mode — coverage cutoff',
       body: 'Set the minimum read depth required to include a position. Variants below this threshold are ignored and will not appear in the report.',
-      before: goSingle('vcf'),
+      before: goSingle('vcf', { openAdvanced: true }),
     },
     {
       id: 'fasta-mode',
@@ -94,7 +96,7 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
     },
     {
       id: 'previous-reports',
-      targetSelector: '.analyze-report-actions',
+      targetSelector: '.analyze-report-actions, .report-placeholder',
       title: 'Reopen previous reports',
       body: 'Reports from earlier in this session are listed here. Open one in a new tab, or download its PDF, JSON, or TSV export without re-running the analysis.',
       before: goSingle('vcf'),
@@ -136,7 +138,7 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
     },
     {
       id: 'about',
-      targetSelector: '[data-tour-target="sidebar-about"]',
+      targetSelector: '[data-tour-target="nav-about"]',
       title: 'About',
       body: 'The About tab explains how ResistanceProfiler works, the rule nomenclature, and how to run it from the CLI.',
       before: () => navigate('/about'),

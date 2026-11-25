@@ -15,6 +15,19 @@ export const CONSEQUENCE_COLORS = {
   unknown: '#d4d4d8',
 };
 
+export const DARK_CONSEQUENCE_COLORS = {
+  missense: '#d97706',
+  synonymous: '#16a34a',
+  stop_gained: '#f4f4f5',
+  stop_lost: '#a78bfa',
+  start_lost: '#eab308',
+  frameshift: '#dc2626',
+  insertion: '#0d9488',
+  deletion: '#60a5fa',
+  splice_region: '#a1a1aa',
+  unknown: '#64748b',
+};
+
 const FEATURE_BASE_COLORS = [
   '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
   '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac',
@@ -22,7 +35,10 @@ const FEATURE_BASE_COLORS = [
   '#d37295', '#a0cbe8', '#f1ce63', '#d4a6c8', '#9d7660',
 ];
 
-export function consequenceColor(ctype) {
+export function consequenceColor(ctype, theme = 'light') {
+  if (theme === 'dark') {
+    return DARK_CONSEQUENCE_COLORS[ctype] || '#71717a';
+  }
   return CONSEQUENCE_COLORS[ctype] || '#e4e4e7';
 }
 
@@ -57,7 +73,26 @@ function categoricalColorscale(colors) {
   return colors.map((color, idx) => [idx / (colors.length - 1), color]);
 }
 
-export function prepareHeatmapData(data) {
+export function classifyHeatmapCell(cell) {
+  if (!cell) {
+    return { gapZ: 1, mainZ: null, unknownAfZ: null, isUnknownAf: false };
+  }
+  if (typeof cell.coverage_gap === 'boolean') {
+    if (cell.coverage_gap) {
+      return { gapZ: 1, mainZ: null, unknownAfZ: null, isUnknownAf: false };
+    }
+    if (cell.allele_freq == null) {
+      return { gapZ: null, mainZ: null, unknownAfZ: 1, isUnknownAf: true };
+    }
+    return { gapZ: null, mainZ: cell.allele_freq, unknownAfZ: null, isUnknownAf: false };
+  }
+  if (cell.allele_freq == null) {
+    return { gapZ: 1, mainZ: null, unknownAfZ: null, isUnknownAf: false };
+  }
+  return { gapZ: null, mainZ: cell.allele_freq, unknownAfZ: null, isUnknownAf: false };
+}
+
+export function prepareHeatmapData(data, theme = 'light') {
   if (!data || !data.matrix || data.matrix.length === 0) {
     return null;
   }
@@ -83,12 +118,13 @@ export function prepareHeatmapData(data) {
   const maxSampleLen = Math.max(...samples.map((s) => s.length), 1);
   const leftMargin = Math.max(150, Math.min(300, maxSampleLen * 8));
 
-  const gapZ = samples.map((_s, si) =>
-    mutation_labels.map((_m, mi) => (matrix[si][mi].allele_freq == null ? 1 : null)),
+  const classifiedMatrix = samples.map((_s, si) =>
+    mutation_labels.map((_m, mi) => classifyHeatmapCell(matrix[si]?.[mi])),
   );
-  const mainZ = samples.map((_s, si) =>
-    mutation_labels.map((_m, mi) => (matrix[si][mi].allele_freq == null ? null : matrix[si][mi].allele_freq)),
-  );
+  const gapZ = classifiedMatrix.map((row) => row.map((cell) => cell.gapZ));
+  const mainZ = classifiedMatrix.map((row) => row.map((cell) => cell.mainZ));
+  const unknownAfZ = classifiedMatrix.map((row) => row.map((cell) => cell.unknownAfZ));
+  const hasUnknownAf = classifiedMatrix.some((row) => row.some((cell) => cell.isUnknownAf));
 
   // Gap and main traces share identical [tickLabel, featureDisplayName] hover metadata.
   const cellCustomdata = samples.map(() =>
@@ -129,7 +165,9 @@ export function prepareHeatmapData(data) {
     consequenceTypes = uniqueConsequenceTypes(consequences);
     const consequenceIndex = Object.fromEntries(consequenceTypes.map((ctype, idx) => [ctype, idx]));
     consequenceZValues = [consequences.map((c) => consequenceIndex[c] || 0)];
-    consequenceColorscale = categoricalColorscale(consequenceTypes.map(consequenceColor));
+    consequenceColorscale = categoricalColorscale(
+      consequenceTypes.map((ctype) => consequenceColor(ctype, theme)),
+    );
     consequenceCustomdata = [consequences.map((c) => [c])];
   }
 
@@ -169,6 +207,8 @@ export function prepareHeatmapData(data) {
     gapCustomdata: cellCustomdata,
     mainZ,
     mainCustomdata: cellCustomdata,
+    unknownAfZ,
+    hasUnknownAf,
     featureColors,
     featureZValues,
     featureCustomdata,

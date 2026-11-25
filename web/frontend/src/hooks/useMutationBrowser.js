@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { apiGet, formatUserError } from '../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiGet, formatUserError, isAbortError } from '../api';
 import { buildDrugAliasLookup, downloadTsv } from '../utils';
 
 const SHARED_COLUMN_LABELS = {
@@ -92,15 +92,159 @@ function filterRows(rows, columns, query) {
   );
 }
 
-export function useMutationBrowser({ setStatusError }) {
+export function useDatabaseRules({ setStatusError, onDatabaseSwitch } = {}) {
+  const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], features: [] });
+  const [mutationsLoaded, setMutationsLoaded] = useState(false);
+  const [isMutationsLoading, setIsMutationsLoading] = useState(false);
+  const [loadedDatabaseId, setLoadedDatabaseId] = useState(null);
+  const [rules, setRules] = useState([]);
+  const [formulaRules, setFormulaRules] = useState([]);
+
+  const isMountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  const abortControllerRef = useRef(null);
+  const activeDatabaseIdRef = useRef(null);
+  const lastRequestedDatabaseIdRef = useRef(null);
+  const hadMutationErrorRef = useRef(false);
+  const setStatusErrorRef = useRef(setStatusError);
+  setStatusErrorRef.current = setStatusError;
+  const onDatabaseSwitchRef = useRef(onDatabaseSwitch);
+  onDatabaseSwitchRef.current = onDatabaseSwitch;
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+      activeDatabaseIdRef.current = null;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  const loadMutations = useCallback(async (databaseId, { signal: externalSignal } = {}) => {
+    const normalizedDbId = databaseId || '';
+    if (!normalizedDbId && lastRequestedDatabaseIdRef.current === null && !abortControllerRef.current) {
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    setMutationsLoaded(false);
+    setLoadedDatabaseId(null);
+    setRules([]);
+    setFormulaRules([]);
+    setMutationPlotMeta({ references: [], features: [] });
+
+    if (normalizedDbId !== lastRequestedDatabaseIdRef.current) {
+      onDatabaseSwitchRef.current?.();
+      lastRequestedDatabaseIdRef.current = normalizedDbId || null;
+    }
+
+    if (hadMutationErrorRef.current) {
+      hadMutationErrorRef.current = false;
+      setStatusErrorRef.current?.('');
+    }
+
+    if (!normalizedDbId) {
+      activeDatabaseIdRef.current = null;
+      setIsMutationsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    activeDatabaseIdRef.current = normalizedDbId;
+    setIsMutationsLoading(true);
+
+    let detachExternalAbort = null;
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else if (typeof externalSignal.addEventListener === 'function') {
+        const onExternalAbort = () => controller.abort();
+        externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+        detachExternalAbort = () => {
+          externalSignal.removeEventListener?.('abort', onExternalAbort);
+        };
+      }
+    }
+
+    try {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const payload = await apiGet('/api/mutations', { database_id: normalizedDbId }, { signal: controller.signal });
+      if (
+        !isMountedRef.current
+        || requestId !== requestIdRef.current
+        || controller.signal.aborted
+        || activeDatabaseIdRef.current !== normalizedDbId
+      ) {
+        return;
+      }
+      const data = payload?.data || {};
+      setRules(data.items || []);
+      setFormulaRules(data.formula_items || []);
+      setMutationPlotMeta(data.plot_meta || { references: [], features: [] });
+      setLoadedDatabaseId(normalizedDbId);
+      setMutationsLoaded(true);
+    } catch (error) {
+      if (
+        !isMountedRef.current
+        || requestId !== requestIdRef.current
+        || controller.signal.aborted
+        || isAbortError(error)
+      ) {
+        return;
+      }
+      setRules([]);
+      setFormulaRules([]);
+      setMutationPlotMeta({ references: [], features: [] });
+      setLoadedDatabaseId(null);
+      setMutationsLoaded(false);
+      hadMutationErrorRef.current = true;
+      setStatusErrorRef.current?.(`Error loading mutations: ${formatUserError(error?.message)}`);
+    } finally {
+      detachExternalAbort?.();
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      if (isMountedRef.current && requestId === requestIdRef.current) {
+        setIsMutationsLoading(false);
+      }
+    }
+  }, []);
+
+  return {
+    mutationPlotMeta,
+    mutationsLoaded,
+    isMutationsLoading,
+    loadedDatabaseId,
+    rules,
+    formulaRules,
+    loadMutations,
+  };
+}
+
+export function useMutationTableFilter({ rules, formulaRules, mutationPlotMeta, mutationsLoaded }) {
   const [mutationFilter, setMutationFilter] = useState('');
   const [mutationSortColumn, setMutationSortColumn] = useState(null);
   const [mutationSortAsc, setMutationSortAsc] = useState(true);
   const [formulaFilter, setFormulaFilter] = useState('');
-  const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], features: [] });
-  const [mutationsLoaded, setMutationsLoaded] = useState(false);
-  const [rules, setRules] = useState([]);
-  const [formulaRules, setFormulaRules] = useState([]);
+
+  const resetFilters = useCallback(() => {
+    setMutationFilter('');
+    setFormulaFilter('');
+    setMutationSortColumn(null);
+    setMutationSortAsc(true);
+  }, []);
 
   const mutationColumns = useMemo(
     () => buildRuleColumns(rules[0] ? Object.keys(rules[0]) : [], {
@@ -143,25 +287,23 @@ export function useMutationBrowser({ setStatusError }) {
     [formulaRules, formulaColumns, formulaFilter],
   );
 
-  const loadMutations = async (databaseId) => {
-    try {
-      const payload = await apiGet('/api/mutations', { database_id: databaseId });
-      setRules(payload.data.items || []);
-      setFormulaRules(payload.data.formula_items || []);
-      setMutationPlotMeta(payload.data.plot_meta || { references: [], features: [] });
-      setMutationsLoaded(true);
-    } catch (error) {
-      setStatusError(`Error loading mutations: ${error.message}`);
-    }
-  };
-
-  const exportRulesTsv = (columns, rows, filename) => {
+  const downloadMutationsAsTsv = useCallback(() => {
+    if (!mutationsLoaded) return;
     downloadTsv(
-      columns.map((column) => column.label),
-      rows.map((row) => columns.map((column) => column.accessor(row))),
-      filename,
+      mutationColumns.map((column) => column.label),
+      displayedRules.map((row) => mutationColumns.map((column) => column.accessor(row))),
+      'single-mutations.tsv',
     );
-  };
+  }, [mutationsLoaded, mutationColumns, displayedRules]);
+
+  const downloadFormulaRulesAsTsv = useCallback(() => {
+    if (!mutationsLoaded) return;
+    downloadTsv(
+      formulaColumns.map((column) => column.label),
+      displayedFormulaRules.map((row) => formulaColumns.map((column) => column.accessor(row))),
+      'formula-combinations.tsv',
+    );
+  }, [mutationsLoaded, formulaColumns, displayedFormulaRules]);
 
   return {
     mutationFilter,
@@ -172,16 +314,50 @@ export function useMutationBrowser({ setStatusError }) {
     setMutationSortAsc,
     formulaFilter,
     setFormulaFilter,
-    mutationPlotMeta,
-    mutationsLoaded,
-    rules,
-    formulaRules,
     mutationColumns,
     formulaColumns,
     displayedRules,
     displayedFormulaRules,
-    loadMutations,
-    downloadMutationsAsTsv: () => exportRulesTsv(mutationColumns, displayedRules, 'single-mutations.tsv'),
-    downloadFormulaRulesAsTsv: () => exportRulesTsv(formulaColumns, displayedFormulaRules, 'formula-combinations.tsv'),
+    resetFilters,
+    downloadMutationsAsTsv,
+    downloadFormulaRulesAsTsv,
+  };
+}
+
+export function useMutationBrowser({ setStatusError }) {
+  const resetFiltersRef = useRef(null);
+  const handleDatabaseSwitch = useCallback(() => {
+    resetFiltersRef.current?.();
+  }, []);
+
+  const dbRules = useDatabaseRules({
+    setStatusError,
+    onDatabaseSwitch: handleDatabaseSwitch,
+  });
+  const tableFilter = useMutationTableFilter(dbRules);
+  resetFiltersRef.current = tableFilter.resetFilters;
+
+  return {
+    mutationFilter: tableFilter.mutationFilter,
+    setMutationFilter: tableFilter.setMutationFilter,
+    mutationSortColumn: tableFilter.mutationSortColumn,
+    setMutationSortColumn: tableFilter.setMutationSortColumn,
+    mutationSortAsc: tableFilter.mutationSortAsc,
+    setMutationSortAsc: tableFilter.setMutationSortAsc,
+    formulaFilter: tableFilter.formulaFilter,
+    setFormulaFilter: tableFilter.setFormulaFilter,
+    mutationPlotMeta: dbRules.mutationPlotMeta,
+    mutationsLoaded: dbRules.mutationsLoaded,
+    isMutationsLoading: dbRules.isMutationsLoading,
+    loadedDatabaseId: dbRules.loadedDatabaseId,
+    rules: dbRules.rules,
+    formulaRules: dbRules.formulaRules,
+    mutationColumns: tableFilter.mutationColumns,
+    formulaColumns: tableFilter.formulaColumns,
+    displayedRules: tableFilter.displayedRules,
+    displayedFormulaRules: tableFilter.displayedFormulaRules,
+    loadMutations: dbRules.loadMutations,
+    downloadMutationsAsTsv: tableFilter.downloadMutationsAsTsv,
+    downloadFormulaRulesAsTsv: tableFilter.downloadFormulaRulesAsTsv,
   };
 }

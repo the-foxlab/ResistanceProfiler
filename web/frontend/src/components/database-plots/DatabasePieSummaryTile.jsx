@@ -34,7 +34,7 @@ function SummaryPieCard({ pie }) {
       };
 
       const layout = {
-        ...baseLayout(),
+        ...baseLayout(activeTheme),
         autosize: true,
         showlegend: false,
         margin: { l: 10, r: 10, t: 10, b: 10 },
@@ -92,7 +92,7 @@ function SummaryPieCard({ pie }) {
         <p className="status">No data available.</p>
       )}
       {plotError && (
-        <p className="status" style={{ color: '#c2410c' }}>Chart error: {plotError}</p>
+        <p className="status" style={{ color: 'var(--color-error)' }}>Chart error: {plotError}</p>
       )}
     </section>
   );

@@ -74,6 +74,34 @@ describe('AppShell database selector placement', () => {
     expect(screen.queryByRole('button', { name: 'Example' })).toBeNull();
   });
 
+  it('enables Example when all busy flags are false', () => {
+    renderShell('/analysis', {
+      databases: [{ id: 'db1', display_name: 'DB One', has_example: true }],
+      selectedDatabase: { id: 'db1', display_name: 'DB One', has_example: true },
+      isProfileBusy: false,
+      isRegenerateBusy: false,
+      isUploading: false,
+      batchSubmitting: false,
+      isBatchUploading: false,
+    });
+    expect(screen.getByRole('button', { name: 'Example' })).not.toBeDisabled();
+  });
+
+  it.each([
+    'isProfileBusy',
+    'isRegenerateBusy',
+    'isUploading',
+    'batchSubmitting',
+    'isBatchUploading',
+  ])('disables the Example action while %s is true', (busyFlag) => {
+    renderShell('/analysis', {
+      databases: [{ id: 'db1', display_name: 'DB One', has_example: true }],
+      selectedDatabase: { id: 'db1', display_name: 'DB One', has_example: true },
+      [busyFlag]: true,
+    });
+    expect(screen.getByRole('button', { name: 'Example' })).toBeDisabled();
+  });
+
   it('shows the selector on /analysis/reports', () => {
     renderShell('/analysis/reports');
     expect(document.getElementById('topbar-db-select')).toBeNull();
@@ -228,10 +256,12 @@ describe('AppShell top bar navigation', () => {
     localStorage.clear();
   });
 
-  it('renders primary nav links with aria-current on the active route', () => {
+  it('renders primary nav links with aria-current on the active route and nav-about tour target', () => {
     renderShell('/analysis');
     const link = screen.getByRole('link', { name: 'Analysis' });
     expect(link).toHaveAttribute('aria-current', 'page');
+    const aboutLink = screen.getByRole('link', { name: 'About' });
+    expect(aboutLink).toHaveAttribute('data-tour-target', 'nav-about');
   });
 
   it('keeps the primary navigation without redundant top-bar actions', () => {
@@ -246,12 +276,62 @@ describe('AppShell top bar navigation', () => {
     expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).toBeNull();
   });
 
-  it('renders a skip link that targets the main content region', () => {
+  it('renders a skip link that targets the main content region inside the shell', () => {
     renderShell('/analysis');
     const skip = screen.getByRole('link', { name: /skip to (main )?content/i });
     expect(skip.getAttribute('href')).toBe('#main-content');
-    const main = document.querySelector('main.dashboard-shell');
-    expect(main.getAttribute('id')).toBe('main-content');
+    expect(skip.closest('main')).toBeNull();
+    expect(document.querySelector('main.dashboard-shell')).toBeNull();
+
+    const shell = document.querySelector('.dashboard-shell');
+    expect(shell?.tagName).toBe('DIV');
+
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(main).toHaveAttribute('tabindex', '-1');
+    expect(main.closest('.dashboard-shell')).toBe(shell);
+    expect(main.closest('.dashboard-main')).not.toBeNull();
+  });
+});
+
+describe('AppShell landmarks', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('keeps header, primary nav, sidebar aside, footer, and scroll-top outside main on workspace routes', () => {
+    renderShell('/analysis');
+    const main = screen.getByRole('main');
+    const banner = screen.getByRole('banner');
+    const primaryNav = screen.getByRole('navigation', { name: /primary/i });
+    const workspaceNav = screen.getByRole('navigation', { name: /workspace navigation/i });
+    const sidebar = screen.getByRole('complementary', { name: /section navigation/i });
+    const footer = screen.getByRole('contentinfo');
+    const scrollTop = screen.getByRole('button', { name: /scroll to top/i });
+
+    expect(sidebar).toContainElement(workspaceNav);
+    expect(main).not.toContainElement(banner);
+    expect(main).not.toContainElement(primaryNav);
+    expect(main).not.toContainElement(workspaceNav);
+    expect(main).not.toContainElement(sidebar);
+    expect(main).not.toContainElement(footer);
+    expect(main).not.toContainElement(scrollTop);
+
+    expect(main).toContainElement(screen.getByRole('heading', { level: 1, name: 'Analyze' }));
+    expect(main).toContainElement(document.getElementById('topbar-db-select'));
+    expect(main).toContainElement(screen.getByText('page-content'));
+  });
+
+  it('wraps page content in main while keeping banner and contentinfo outside on non-sidebar routes', () => {
+    renderShell('/');
+    const main = screen.getByRole('main');
+    const banner = screen.getByRole('banner');
+    const footer = screen.getByRole('contentinfo');
+
+    expect(screen.queryByRole('complementary')).toBeNull();
+    expect(main).not.toContainElement(banner);
+    expect(main).not.toContainElement(footer);
+    expect(main).toContainElement(screen.getByText('page-content'));
   });
 });
 

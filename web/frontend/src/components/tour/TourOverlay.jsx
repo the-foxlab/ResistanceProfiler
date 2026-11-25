@@ -1,24 +1,73 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 import { useTour } from './TourContext';
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+function getFocusableElements(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.closest('[aria-hidden="true"], [inert]'),
+  );
+}
+
+function restorePreviousFocus(previousEl) {
+  if (
+    previousEl
+    && previousEl.isConnected
+    && typeof previousEl.focus === 'function'
+    && !previousEl.hasAttribute('disabled')
+    && !previousEl.closest('[aria-hidden="true"], [inert]')
+  ) {
+    previousEl.focus();
+    if (document.activeElement === previousEl) return;
+  }
+  const mainFallback = document.querySelector('main[tabindex], #main-content[tabindex]');
+  if (mainFallback && typeof mainFallback.focus === 'function') {
+    mainFallback.focus();
+  }
+}
 
 // Repositions the spotlight/tooltip on viewport changes so it stays glued to its target
 // even when the app switches tabs/modes (which changes the DOM layout).
 function useElementRect(selector, active) {
   const [rect, setRect] = useState(null);
 
-  const update = () => {
+  const update = useCallback(() => {
     if (!active || !selector) {
-      setRect(null);
+      setRect((prev) => (prev === null ? prev : null));
       return;
     }
     const el = document.querySelector(selector);
     if (!el) {
-      setRect(null);
+      setRect((prev) => (prev === null ? prev : null));
       return;
     }
-    setRect(el.getBoundingClientRect());
-  };
+    const next = el.getBoundingClientRect();
+    if (next.width <= 0 || next.height <= 0) {
+      setRect((prev) => (prev === null ? prev : null));
+      return;
+    }
+    setRect((prev) => {
+      if (
+        prev
+        && prev.top === next.top
+        && prev.left === next.left
+        && prev.width === next.width
+        && prev.height === next.height
+      ) {
+        return prev;
+      }
+      return { top: next.top, left: next.left, width: next.width, height: next.height };
+    });
+  }, [active, selector]);
 
   useEffect(() => {
     update();
@@ -29,8 +78,7 @@ function useElementRect(selector, active) {
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, selector]);
+  }, [active, update]);
 
   return { rect, update };
 }
@@ -49,13 +97,62 @@ export function TourOverlay({ steps: stepsProp }) {
   const { rect, update } = useElementRect(currentStep?.targetSelector ?? null, isActive);
   const tooltipRef = useRef(null);
   const promptRef = useRef(null);
+  const previousFocusRef = useRef(null);
+  const wasOpenRef = useRef(false);
+  const wasActiveRef = useRef(false);
+  const instanceId = useId();
   const tooltipId = 'tour-tooltip';
   const promptId = 'tour-prompt';
+  const tooltipTitleId = `${tooltipId}-title-${instanceId}`;
+  const promptTitleId = `${promptId}-title-${instanceId}`;
+  const hasActiveStep = isActive && Boolean(currentStep);
+  const isOverlayOpen = isPrompting || hasActiveStep;
 
-  // Focus the start prompt when it appears.
+  // Capture focus on overlay open and restore it on close without overwriting
+  // previousFocusRef during the isPrompting -> isActive transition.
+  useLayoutEffect(() => {
+    if (isOverlayOpen && !wasOpenRef.current) {
+      const activeEl = document.activeElement;
+      const startedInside = Boolean(
+        activeEl && (promptRef.current?.contains(activeEl) || tooltipRef.current?.contains(activeEl)),
+      );
+      previousFocusRef.current =
+        activeEl
+        && activeEl !== document.body
+        && activeEl !== document.documentElement
+        && !startedInside
+          ? activeEl
+          : null;
+      wasOpenRef.current = true;
+    } else if (!isOverlayOpen && wasOpenRef.current) {
+      const prev = previousFocusRef.current;
+      const shouldRestore =
+        wasActiveRef.current
+        || document.activeElement === document.body
+        || document.activeElement == null;
+      previousFocusRef.current = null;
+      wasOpenRef.current = false;
+      if (shouldRestore) {
+        restorePreviousFocus(prev);
+      }
+    }
+    wasActiveRef.current = hasActiveStep;
+  }, [isOverlayOpen, hasActiveStep]);
+
+  // Focus the start prompt when it appears, unless focus actively moved to a page control.
   useEffect(() => {
     if (!isPrompting) return undefined;
+    const activeAtSchedule = document.activeElement;
     const raf = requestAnimationFrame(() => {
+      const activeNow = document.activeElement;
+      if (
+        activeNow !== activeAtSchedule
+        && activeNow !== document.body
+        && activeNow !== document.documentElement
+        && !promptRef.current?.contains(activeNow)
+      ) {
+        return;
+      }
       promptRef.current?.focus();
     });
     return () => cancelAnimationFrame(raf);
@@ -65,6 +162,8 @@ export function TourOverlay({ steps: stepsProp }) {
   useEffect(() => {
     if (!isPrompting) return undefined;
     const handler = (event) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         declineTour();
@@ -74,18 +173,25 @@ export function TourOverlay({ steps: stepsProp }) {
     return () => document.removeEventListener('keydown', handler);
   }, [isPrompting, declineTour]);
 
-  // Focus the tooltip when a step becomes active, and re-query the target after the
-  // `before` hook has had a chance to drive navigation (which changes the DOM).
+  // Re-query the target after the `before` hook has had a chance to drive navigation.
   useEffect(() => {
     if (!isActive) return undefined;
     // Defer target re-query so a `before` hook that calls setActiveMode etc. has time
     // to flush its DOM changes before we measure the target.
     const raf = requestAnimationFrame(() => {
       update();
-      tooltipRef.current?.focus();
     });
     return () => cancelAnimationFrame(raf);
   }, [isActive, stepIndex, update]);
+
+  // Focus the tooltip only when the tour activates or the step changes.
+  useEffect(() => {
+    if (!isActive) return undefined;
+    const raf = requestAnimationFrame(() => {
+      tooltipRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [isActive, stepIndex]);
 
   // Fire the active step's `before` hook. Lives here (not only in the provider) so
   // prop-supplied steps whose `before` closes over the real navigation setters run.
@@ -105,10 +211,39 @@ export function TourOverlay({ steps: stepsProp }) {
     }
   }, [isActive]);
 
-  // Keyboard handling: Esc dismisses, arrows move steps.
+  // Keyboard handling: Tab/Shift+Tab focus trap inside tooltip, Esc dismisses, arrows move steps.
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!hasActiveStep) return undefined;
     const handler = (event) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key === 'Tab') {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const container = tooltipRef.current;
+        if (!container) return;
+        const focusable = getFocusableElements(container);
+        if (focusable.length === 0) {
+          event.preventDefault();
+          container.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (!container.contains(active) || active === container) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+          return;
+        }
+        if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         dismissTour();
@@ -122,7 +257,7 @@ export function TourOverlay({ steps: stepsProp }) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isActive, dismissTour, nextStep, prevStep]);
+  }, [hasActiveStep, dismissTour, nextStep, prevStep]);
 
   if (isPrompting) {
     // Non-blocking coach card: no backdrop, no modal semantics. It floats over
@@ -134,10 +269,10 @@ export function TourOverlay({ steps: stepsProp }) {
         className="tour-coach-card"
         tabIndex={-1}
         role="dialog"
-        aria-labelledby={promptId}
+        aria-labelledby={promptTitleId}
       >
         <div className="tour-tooltip-header">
-          <h3 className="tour-tooltip-title">Take a quick tour?</h3>
+          <h3 id={promptTitleId} className="tour-tooltip-title">Take a quick tour?</h3>
         </div>
         <div className="tour-tooltip-body">
           ResPro is a pathogen-agnostic antiviral resistance analysis framework. You can analyze and visualize antiviral resistance data from sanger and next-generation sequencing data. The short guided tour will walk you through the core features.
@@ -185,7 +320,7 @@ export function TourOverlay({ steps: stepsProp }) {
   };
 
   return (
-    <div className="tour-overlay" role="dialog" aria-modal="true" aria-labelledby={tooltipId}>
+    <div className="tour-overlay" role="dialog" aria-modal="true" aria-labelledby={tooltipTitleId}>
       {/* Dark backdrop with a transparent cutout around the target. Clicking outside
           the popup does NOT dismiss the active tour — the user must use Skip, Esc, or
           Finish to exit. */}
@@ -207,7 +342,7 @@ export function TourOverlay({ steps: stepsProp }) {
         role="document"
       >
         <div className="tour-tooltip-header">
-          <h3 className="tour-tooltip-title">{currentStep.title}</h3>
+          <h3 id={tooltipTitleId} className="tour-tooltip-title">{currentStep.title}</h3>
           <span className="tour-tooltip-counter">
             Step {stepIndex + 1} / {steps.length}
           </span>

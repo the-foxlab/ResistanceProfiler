@@ -7,6 +7,7 @@ vi.mock('plotly.js-dist-min', () => ({
   default: {
     react: vi.fn(),
     purge: vi.fn(),
+    Plots: { resize: vi.fn() },
   },
 }));
 
@@ -97,5 +98,98 @@ describe('DatabasePage', () => {
       || screen.getByRole('spinbutton');
     fireEvent.change(binInput, { target: { value: '20' } });
     expect(binInput).toHaveValue(20);
+  });
+
+  it('shows empty plot notice when active database has no plot-friendly data', () => {
+    render(
+      <DatabasePage
+        logic={{
+          rules: [],
+          formulaRules: [],
+          mutationPlotMeta: { references: [], features: [] },
+          selectedDatabase: sampleDatabase,
+        }}
+      />,
+    );
+    expect(screen.getByText('No plot-friendly data is available for the active database.')).toBeInTheDocument();
+  });
+
+  it('auto-selects phenotype mode for phenotype-only, clinical-only, neither, and dual-to-single DB switch', () => {
+    const phenoOnlyRules = [
+      { reference_name: 'ref1', feature: 'UL23', position: 0, mutation: 'M1V', drug: 'DrugA', phenotype: 'resistant' },
+    ];
+    const clinicalOnlyRules = [
+      { reference_name: 'ref1', feature: 'UL23', position: 0, mutation: 'M1V', drug: 'DrugA', clinical_phenotype: 'resistant' },
+    ];
+    const noPhenoRules = [
+      { reference_name: 'ref1', feature: 'UL23', position: 0, mutation: 'M1V', drug: 'DrugA', ic50: 1.5, score: '30' },
+    ];
+
+    const { rerender } = render(
+      <DatabasePage
+        logic={{
+          rules: phenoOnlyRules,
+          formulaRules: [],
+          mutationPlotMeta: samplePlotMeta,
+          selectedDatabase: sampleDatabase,
+        }}
+      />,
+    );
+    // Phenotype-only: switch buttons are not rendered (only 1 mode).
+    expect(screen.queryByRole('group', { name: 'Position annotation mode' })).not.toBeInTheDocument();
+    expect(document.querySelector('.database-summary-pie-card')).toBeInTheDocument();
+
+    // Switch to dual-mode DB -> clinical mode selected -> switch to phenotype-only DB.
+    rerender(
+      <DatabasePage
+        logic={{
+          rules: sampleRules,
+          formulaRules: [],
+          mutationPlotMeta: samplePlotMeta,
+          selectedDatabase: sampleDatabase,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Clinical phenotype' }));
+    expect(screen.getByRole('button', { name: 'Clinical phenotype' })).toHaveClass('active');
+
+    rerender(
+      <DatabasePage
+        logic={{
+          rules: phenoOnlyRules,
+          formulaRules: [],
+          mutationPlotMeta: samplePlotMeta,
+          selectedDatabase: { ...sampleDatabase, id: 'db2' },
+        }}
+      />,
+    );
+    expect(screen.queryByRole('group', { name: 'Position annotation mode' })).not.toBeInTheDocument();
+
+    // Clinical-only rules
+    rerender(
+      <DatabasePage
+        logic={{
+          rules: clinicalOnlyRules,
+          formulaRules: [],
+          mutationPlotMeta: samplePlotMeta,
+          selectedDatabase: { ...sampleDatabase, id: 'db3' },
+        }}
+      />,
+    );
+    expect(screen.queryByRole('group', { name: 'Position annotation mode' })).not.toBeInTheDocument();
+
+    // Neither phenotype nor clinical_phenotype, with ic50/score -> renders summary + ic50/score sections
+    rerender(
+      <DatabasePage
+        logic={{
+          rules: noPhenoRules,
+          formulaRules: [],
+          mutationPlotMeta: samplePlotMeta,
+          selectedDatabase: { ...sampleDatabase, id: 'db4' },
+        }}
+      />,
+    );
+    expect(document.querySelector('.database-summary-pie-card')).toBeInTheDocument();
+    expect(document.querySelector('.database-reference-section-score')).toBeInTheDocument();
   });
 });

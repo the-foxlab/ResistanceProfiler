@@ -1,12 +1,16 @@
+import { useOptionalResultsLogic } from '../../DashboardContext';
 import { selectIndexedItems } from '../../utils';
 import { ArtifactTableCells } from '../ArtifactTableCells';
 import { ComparisonHeatmap } from '../ComparisonHeatmap';
 import { InfoButton } from '../InfoButton';
 import { Spinner } from '../Spinner';
 
-export function ResultsPage({ logic }) {
+export function ResultsPage({ logic: logicProp }) {
+  const contextLogic = useOptionalResultsLogic();
+  const logic = logicProp ?? contextLogic;
   const {
     sessionResults,
+    statusError,
     buildReportUrl,
     buildArtifactUrl,
     downloadSelectedArtifacts,
@@ -48,6 +52,12 @@ export function ResultsPage({ logic }) {
         </div>
       ) : null}
 
+      {statusError ? (
+        <p className="status" role="alert" style={{ color: 'var(--color-error)' }}>
+          {statusError}
+        </p>
+      ) : null}
+
       {sessionResults.length === 0 ? (
         <p className="status">No results yet. Run an analysis to see results here.</p>
       ) : (
@@ -56,7 +66,7 @@ export function ResultsPage({ logic }) {
             <table>
               <thead>
                 <tr>
-                  <th className="checkbox-col">
+                  <th scope="col" className="checkbox-col">
                     <input
                       type="checkbox"
                       aria-label="Select all results"
@@ -68,15 +78,15 @@ export function ResultsPage({ logic }) {
                       }}
                     />
                   </th>
-                  <th>Mode</th>
-                  <th>Sample</th>
-                  <th>Reference</th>
-                  <th>Database</th>
-                  <th>Timestamp</th>
-                  <th>HTML</th>
-                  <th>PDF</th>
-                  <th>JSON</th>
-                  <th>TSV</th>
+                  <th scope="col">Mode</th>
+                  <th scope="col">Sample</th>
+                  <th scope="col">Reference</th>
+                  <th scope="col">Database</th>
+                  <th scope="col">Timestamp</th>
+                  <th scope="col">HTML</th>
+                  <th scope="col">PDF</th>
+                  <th scope="col">JSON</th>
+                  <th scope="col">TSV</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,14 +96,15 @@ export function ResultsPage({ logic }) {
                   const resultDbId = result.database_id || '';
                   const resultRefName = result.reference_name || '';
                   const isDisabled = comparisonDbId !== null
-                    && (resultDbId !== comparisonDbId || resultRefName !== comparisonRefName);
+                    && (resultDbId !== comparisonDbId || resultRefName !== (comparisonRefName || ''));
                   return (
                     <tr key={result.run_id || revIndex}>
                       <td className="checkbox-col">
                         <input
                           type="checkbox"
+                          aria-label={`Select result ${result.sample_name || result.run_id || originalIndex + 1}`}
                           checked={isSelected}
-                          disabled={isDisabled}
+                          disabled={isDisabled && !isSelected}
                           onChange={() => {
                             setSelectedResultIndices((prev) => {
                               const next = new Set(prev);
@@ -152,7 +163,7 @@ export function ResultsPage({ logic }) {
               type="button"
               className="analyze-primary"
               onClick={() => clearComparison()}
-              disabled={!comparisonData}
+              disabled={!comparisonData && !isComparisonBusy}
             >
               Clear comparison
             </button>
@@ -167,7 +178,7 @@ export function ResultsPage({ logic }) {
                     checked={nonSynonymousOnly}
                     onChange={(e) => {
                       setNonSynonymousOnly(e.target.checked);
-                      if (selectedResultIndices.size >= 2) {
+                      if (isSelectionComparable && !isComparisonBusy) {
                         fetchComparisonData(e.target.checked);
                       }
                     }}
@@ -180,7 +191,7 @@ export function ResultsPage({ logic }) {
                     checked={dbHitsOnly}
                     onChange={(e) => {
                       setDbHitsOnly(e.target.checked);
-                      if (selectedResultIndices.size >= 2) {
+                      if (isSelectionComparable && !isComparisonBusy) {
                         fetchComparisonData(undefined, e.target.checked);
                       }
                     }}

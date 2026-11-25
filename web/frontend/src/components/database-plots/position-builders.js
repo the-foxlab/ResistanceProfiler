@@ -10,6 +10,8 @@ import {
   dominantTone,
 } from './shared-helpers';
 
+const ALL_TONES = [...RANK_TONES, 'contradictory', 'unknown'];
+
 function buildReferenceLookup(plotMeta) {
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const lookup = new Map();
@@ -44,7 +46,7 @@ function collectGeneRuleGroups(rules, plotMeta, phenotypeMode) {
 
   rules.forEach((rule) => {
     const positionValue = Number(rule.position);
-    if (!Number.isFinite(positionValue)) {
+    if (!Number.isFinite(positionValue) || positionValue < 0) {
       return;
     }
 
@@ -75,20 +77,20 @@ function collectGeneRuleGroups(rules, plotMeta, phenotypeMode) {
 
     const tone = classificationTone(classification);
     const mutationToken = displayValue(rule.mutation, 'unknown mutation');
+    const mutationKey = `${aaPosition}:${mutationToken}`;
     if (!group.positions.has(aaPosition)) {
       group.positions.set(aaPosition, {
         position: aaPosition,
-        mutationSet: new Set(),
-        toneMutationSets: new Map(),
+        mutationTones: new Map(),
       });
     }
 
     const bucket = group.positions.get(aaPosition);
-    bucket.mutationSet.add(mutationToken);
-    if (!bucket.toneMutationSets.has(tone)) {
-      bucket.toneMutationSets.set(tone, new Set());
+    if (!bucket.mutationTones.has(mutationKey)) {
+      bucket.mutationTones.set(mutationKey, new Map());
     }
-    bucket.toneMutationSets.get(tone).add(mutationToken);
+    const perMutationTones = bucket.mutationTones.get(mutationKey);
+    perMutationTones.set(tone, (perMutationTones.get(tone) || 0) + 1);
 
     // Track observed database wording per tone so legends match DB terminology.
     if (!group.toneLabels.has(tone)) {
@@ -96,7 +98,7 @@ function collectGeneRuleGroups(rules, plotMeta, phenotypeMode) {
     }
     const labelCounts = group.toneLabels.get(tone);
     labelCounts.set(classification, (labelCounts.get(classification) || 0) + 1);
-    group.mutationTokens.add(`${aaPosition}:${mutationToken}`);
+    group.mutationTokens.add(mutationKey);
     group.classifiedRules += 1;
     group.aaLength = Math.max(group.aaLength, aaPosition);
   });
@@ -144,23 +146,24 @@ function buildGenePositionPlot(group, phenotypeMode, binSize) {
       return;
     }
     const bin = bins[binIndex];
-    entry.mutationSet.forEach((token) => bin.mutationSet.add(token));
-    entry.toneMutationSets.forEach((toneSet, tone) => {
-      if (!bin.toneMutationSets.has(tone)) {
-        bin.toneMutationSets.set(tone, new Set());
+    // Assign each unique `${aaPosition}:${mutationToken}` one canonical tone so stacked bars sum to bin.count.
+    entry.mutationTones.forEach((perMutationTones, mutationKey) => {
+      bin.mutationSet.add(mutationKey);
+      const canonicalTone = dominantTone(perMutationTones);
+      if (!bin.toneMutationSets.has(canonicalTone)) {
+        bin.toneMutationSets.set(canonicalTone, new Set());
       }
-      const target = bin.toneMutationSets.get(tone);
-      toneSet.forEach((token) => target.add(token));
+      bin.toneMutationSets.get(canonicalTone).add(mutationKey);
     });
   });
 
   const binnedPositions = bins.map((entry) => {
     const toneCounts = new Map();
-    const rankFields = {};
-    RANK_TONES.forEach((tone) => {
+    const toneFields = {};
+    ALL_TONES.forEach((tone) => {
       const count = entry.toneMutationSets.get(tone)?.size || 0;
       toneCounts.set(tone, count);
-      rankFields[tone] = count;
+      toneFields[tone] = count;
     });
 
     return {
@@ -170,7 +173,7 @@ function buildGenePositionPlot(group, phenotypeMode, binSize) {
       rangeEnd: entry.binEnd,
       count: entry.mutationSet.size,
       tone: dominantTone(toneCounts),
-      ...rankFields,
+      ...toneFields,
     };
   });
 
@@ -179,8 +182,16 @@ function buildGenePositionPlot(group, phenotypeMode, binSize) {
   }
 
   const activeRankTones = RANK_TONES.filter((tone) => binnedPositions.some((item) => item[tone] > 0));
-  const hasTyped = activeRankTones.length > 0;
-  const tones = hasTyped ? activeRankTones : ['count'];
+  const hasContradictory = binnedPositions.some((item) => item.contradictory > 0);
+  const hasUnknown = binnedPositions.some((item) => item.unknown > 0);
+  const hasTyped = activeRankTones.length > 0 || hasContradictory;
+  const tones = hasTyped
+    ? [
+        ...activeRankTones,
+        ...(hasContradictory ? ['contradictory'] : []),
+        ...(hasUnknown ? ['unknown'] : []),
+      ]
+    : ['count'];
 
   return {
     kind: 'positions',

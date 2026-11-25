@@ -5,7 +5,6 @@ import {
   resolvePhenotypeMode,
   getRuleAnnotationByMode,
   classificationTone,
-  hasTypedClassification,
   limitPieSlices,
   dominantTone,
   extractDoiTokens,
@@ -245,24 +244,6 @@ describe('classificationTone', () => {
 
   it('is whitespace-tolerant', () => {
     expect(classificationTone('  low-level resistance  ')).toBe('rank3');
-  });
-});
-
-describe('hasTypedClassification', () => {
-  it('returns true when a rank tone count > 0', () => {
-    const counts = new Map([['rank1', 3], ['rank3', 0], ['rank5', 0]]);
-    expect(hasTypedClassification(counts)).toBe(true);
-    const counts5 = new Map([['rank1', 0], ['rank3', 0], ['rank5', 1]]);
-    expect(hasTypedClassification(counts5)).toBe(true);
-  });
-
-  it('returns false for empty Map', () => {
-    expect(hasTypedClassification(new Map())).toBe(false);
-  });
-
-  it('returns false for Map with only unknown entries', () => {
-    const counts = new Map([['unknown', 10]]);
-    expect(hasTypedClassification(counts)).toBe(false);
   });
 });
 

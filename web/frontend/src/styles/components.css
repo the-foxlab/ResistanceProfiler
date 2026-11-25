@@ -45,6 +45,43 @@
   transition: opacity 0.18s ease, color 0.18s ease;
 }
 
+.input-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.input-info-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  --popover-shift: 0px;
+  transform: translateX(var(--popover-shift, 0px));
+  z-index: 25;
+  width: max-content;
+  max-width: min(19rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  text-align: left;
+}
+
+.input-info-popover.is-aligned-right {
+  left: auto;
+  right: 0;
+}
+
 /* Shared CSS-mask primitive for single-colour SVG icons recoloured via CSS. */
 .theme-toggle-icon,
 .sidebar-icon-mask,
@@ -171,7 +208,7 @@
 
 .batch-clear-all-btn:hover {
   background: none;
-  color: var(--color-error, #c2410c);
+  color: var(--color-error);
 }
 
 .batch-files-count-row {
@@ -340,7 +377,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: left;
+  align-items: flex-start;
   gap: 0.5rem 1rem;
 }
 
@@ -595,5 +632,41 @@
   .workspace-frame {
     width: 100%;
     -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-link-icon,
+  .report-actions .download-action-btn,
+  .theme-toggle-btn,
+  .report-preview-sequence-toggle .seq-toggle-btn {
+    transition: none;
+  }
+
+  .spinner {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .theme-toggle-icon,
+  .sidebar-icon-mask,
+  .app-footer-icon-mask,
+  .about-icon-mask {
+    forced-color-adjust: none;
+  }
+
+  .theme-toggle-btn.active {
+    border-color: Highlight;
+  }
+
+  .report-preview-sequence-toggle .seq-toggle-btn--active {
+    border: 1px solid Highlight;
+  }
+
+  .input-info-popover {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
   }
 }

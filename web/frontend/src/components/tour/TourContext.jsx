@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 
 // Bump when tour content changes meaningfully so returning users see the coach card again.
@@ -7,6 +7,7 @@ export const TOUR_STORAGE_KEY = 'respro.tour.dismissed';
 export const TOUR_PROMPT_PATH = '/analysis';
 
 const TourContext = createContext(null);
+const TourActionsContext = createContext(null);
 
 function readDismissedVersion() {
   try {
@@ -34,6 +35,7 @@ export function TourProvider({ steps, children }) {
   const [isActive, setIsActive] = useState(false);
   const [isPrompting, setIsPrompting] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const sessionDismissedRef = useRef(false);
 
   const startTour = useCallback(() => {
     setIsPrompting(false);
@@ -42,6 +44,7 @@ export function TourProvider({ steps, children }) {
   }, []);
 
   const dismissTour = useCallback(() => {
+    sessionDismissedRef.current = true;
     writeDismissedVersion(TOUR_VERSION);
     setIsPrompting(false);
     setIsActive(false);
@@ -57,8 +60,11 @@ export function TourProvider({ steps, children }) {
   }, []);
 
   useEffect(() => {
-    if (pathname !== TOUR_PROMPT_PATH || isActive) return;
-    if (readDismissedVersion() !== TOUR_VERSION) {
+    if (pathname !== TOUR_PROMPT_PATH || isActive) {
+      setIsPrompting(false);
+      return;
+    }
+    if (!sessionDismissedRef.current && readDismissedVersion() !== TOUR_VERSION) {
       setIsPrompting(true);
     }
   }, [pathname, isActive]);
@@ -80,7 +86,20 @@ export function TourProvider({ steps, children }) {
     [isActive, isPrompting, stepIndex, steps, startTour, nextStep, prevStep, dismissTour],
   );
 
-  return <TourContext.Provider value={value}>{children}</TourContext.Provider>;
+  const actionsValue = useMemo(
+    () => ({ startTour }),
+    [startTour],
+  );
+
+  return (
+    <TourActionsContext.Provider value={actionsValue}>
+      <TourContext.Provider value={value}>{children}</TourContext.Provider>
+    </TourActionsContext.Provider>
+  );
+}
+
+export function useOptionalTourActions() {
+  return useContext(TourActionsContext);
 }
 
 export function useTour() {

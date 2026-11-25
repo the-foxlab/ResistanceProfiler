@@ -4,50 +4,57 @@ import { BrowserRouter } from 'react-router';
 
 import { AppRoutes } from './AppRoutes';
 import { AppShell } from './components/AppShell';
-import { TourProvider, useTour } from './components/tour/TourContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { TourProvider } from './components/tour/TourContext';
 import { buildTourSteps } from './components/tour/steps';
-import { useDashboardLogic } from './useDashboardLogic';
+import { DashboardProvider, useCoreActions } from './DashboardContext';
 import './styles/index.css';
 
-// Everything below lives INSIDE <BrowserRouter> because useDashboardLogic() uses router hooks.
+// Everything below lives INSIDE <BrowserRouter> because DashboardProvider uses router hooks.
 function App() {
   return (
-    <BrowserRouter>
-      <AppInsideRouter />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppInsideRouter />
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 
 function AppInsideRouter() {
-  const logic = useDashboardLogic();
-  const tourSteps = useMemo(
-    () => buildTourSteps({
-      navigate: logic.navigate,
-      setActiveProfileMode: logic.setActiveProfileMode,
-      setAnalyzeSubMode: logic.setAnalyzeSubMode,
-    }),
-    [logic.navigate, logic.setActiveProfileMode, logic.setAnalyzeSubMode],
-  );
   return (
-    <TourProvider steps={tourSteps}>
-      <AppWithTour logic={logic} />
-    </TourProvider>
+    <DashboardProvider>
+      <AppTourShell />
+    </DashboardProvider>
   );
 }
 
-function AppWithTour({ logic }) {
-  const { startTour } = useTour();
+function AppTourShell() {
+  const { navigate, setActiveProfileMode, setAnalyzeSubMode } = useCoreActions();
+  const tourSteps = useMemo(
+    () => buildTourSteps({
+      navigate,
+      setActiveProfileMode,
+      setAnalyzeSubMode,
+    }),
+    [navigate, setActiveProfileMode, setAnalyzeSubMode],
+  );
   return (
-    <AppShell logic={logic}>
-      <AppRoutes logic={{ ...logic, onStartTour: startTour }} />
-    </AppShell>
+    <TourProvider steps={tourSteps}>
+      <AppShell>
+        <AppRoutes />
+      </AppShell>
+    </TourProvider>
   );
 }
 
 export { App };
 
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const rootEl = document.getElementById('root');
+if (rootEl) {
+  createRoot(rootEl).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+}

@@ -231,7 +231,7 @@
 
 .compare-error {
   margin: 0.6rem 0 0;
-  color: #b91c1c;
+  color: var(--color-error);
   font-size: var(--font-size-sm);
 }
 
@@ -491,5 +491,22 @@
   .compare-table-controls input[type='search'],
   .compare-table-controls button {
     width: 100%;
+  }
+}
+
+/* Dark mode: fills/strokes come from the theme-aware venn.js palette; this
+   rule keeps the count labels legible on dark. */
+:root[data-theme='dark'] .comparison-venn .venn-area text.label {
+  fill: var(--muted-strong);
+}
+
+:root[data-theme='dark'] .comparison-venn .venn-area.is-active path {
+  stroke-width: 3px !important;
+}
+
+@media (forced-colors: active) {
+  .compare-region-dot.is-present::before {
+    forced-color-adjust: none;
+    background: Highlight;
   }
 }

@@ -89,21 +89,79 @@ export function cleanTsvCell(value) {
   return String(value ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
 }
 
+export function sanitizeTsvFormulaCell(value) {
+  const raw = String(value ?? '');
+  const cleaned = cleanTsvCell(raw).replace(/\r/g, ' ');
+  if (/^[\t\r]/.test(raw) || /^\s*[=+\-@]/.test(cleaned)) {
+    return `'${cleaned}`;
+  }
+  return cleaned;
+}
+
+const SAFE_EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+
+export function sanitizeHttpUrl(value) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed || /[\s\u0000-\u001F\u007F]/.test(trimmed) || !/^https?:\/\//i.test(trimmed)) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+      || !parsed.hostname
+      || parsed.username
+      || parsed.password
+    ) {
+      return null;
+    }
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+export function sanitizeEmailAddress(value) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed || /[\s\u0000-\u001F\u007F?&#=:;,<>\\/"']/.test(trimmed)) {
+    return null;
+  }
+  if (!SAFE_EMAIL_RE.test(trimmed)) {
+    return null;
+  }
+  const [local] = trimmed.split('@');
+  if (!local || local.startsWith('.') || local.endsWith('.') || local.includes('..')) {
+    return null;
+  }
+  return trimmed;
+}
+
 export function triggerBlobDownload(blob, filename) {
   const href = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = href;
   anchor.download = filename;
   document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(href);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    // Defer object URL revocation so WebKit/Safari finishes reading the blob after click().
+    const timer = setTimeout(() => {
+      if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(href);
+      }
+    }, 1000);
+    timer?.unref?.();
+  }
 }
 
 export function downloadTsv(headers, rows, filename) {
   const lines = [
-    headers.map(cleanTsvCell).join('\t'),
-    ...rows.map((row) => row.map(cleanTsvCell).join('\t')),
+    headers.map(sanitizeTsvFormulaCell).join('\t'),
+    ...rows.map((row) => row.map(sanitizeTsvFormulaCell).join('\t')),
   ];
   const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
   triggerBlobDownload(blob, filename);

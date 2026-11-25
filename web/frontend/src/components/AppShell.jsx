@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
 
 import logoSrc from '../assets/logo.svg';
@@ -8,6 +8,7 @@ import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
 import compareIconSrc from '../assets/icon-venn.svg';
 import exampleIconSrc from '../assets/example.svg';
+import { useOptionalShellLogic } from '../DashboardContext';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemeContext, useTheme } from '../hooks/useTheme';
@@ -27,7 +28,7 @@ const TOP_NAV = [
   { path: '/', label: 'Home', end: true },
   { path: '/analysis', label: 'Analysis' },
   { path: '/databases', label: 'Databases' },
-  { path: '/about', label: 'About' },
+  { path: '/about', label: 'About', tourTarget: 'nav-about' },
 ];
 
 const COLLAPSE_STORAGE_KEY = 'respro.sidebar.collapsed';
@@ -40,7 +41,9 @@ function readCollapsed() {
   }
 }
 
-export function AppShell({ logic, children }) {
+export const AppShell = memo(function AppShell({ logic: logicProp, children }) {
+  const shellLogic = useOptionalShellLogic();
+  const logic = logicProp ?? shellLogic;
   const { pathname } = useLocation();
   const meta = resolveRouteMeta(pathname);
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -98,7 +101,7 @@ export function AppShell({ logic, children }) {
         className={`sidebar-rail${collapsed ? ' collapsed' : ''}${mobileSidebarOpen ? ' mobile-open' : ''}${topBarVisible ? '' : ' header-hidden'}`}
         aria-label="Section navigation"
       >
-        <nav className="sidebar-rail-nav">
+        <nav className="sidebar-rail-nav" aria-label="Workspace navigation">
           <button
             type="button"
             className="sidebar-collapse-btn"
@@ -150,7 +153,7 @@ export function AppShell({ logic, children }) {
 
   return (
     <ThemeContext.Provider value={themeResolved}>
-    <main className="dashboard-shell" id="main-content">
+    <div className="dashboard-shell">
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
@@ -166,6 +169,7 @@ export function AppShell({ logic, children }) {
               key={item.path}
               to={item.path}
               end={item.end}
+              data-tour-target={item.tourTarget}
               className={({ isActive }) => `top-bar-nav-link ${isActive ? 'active' : ''}`}
             >
               {({ isActive }) => (
@@ -190,42 +194,55 @@ export function AppShell({ logic, children }) {
           />
         )}
         <div className="dashboard-main">
-          {meta.heading && (
-            <div className="workspace-subheader">
-              <h1 className="workspace-heading">{meta.heading}</h1>
-              {meta.showsDatabaseSelector && (
-                <DatabaseSelectorBar
-                  databases={logic.databases}
-                  selectedDatabase={logic.selectedDatabase}
-                  selectedDatabaseId={logic.selectedDatabaseId}
-                  onDatabaseChange={logic.setSelectedDatabaseId}
-                  selectId="topbar-db-select"
-                  className="topbar-db-bar"
-                  trailingControl={pathname === '/analysis' && logic.selectedDatabase?.has_example ? (
-                    <button
-                      type="button"
-                      className="analyze-submode-btn example-btn"
-                      style={{ flex: '0 0 auto' }}
-                      onClick={() => {
-                        logic.setActiveProfileMode('fasta');
-                        logic.setAnalyzeSubMode('single');
-                        logic.runExampleProfile();
-                      }}
-                      disabled={logic.isProfileBusy}
-                      title="Load and profile the example consensus FASTA shipped with this database"
-                    >
-                      <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${exampleIconSrc})` }} aria-hidden="true" />
-                      Example
-                    </button>
-                  ) : null}
-                />
-              )}
-            </div>
-          )}
-          <section className="panel-stack">
-            {meta.description && <p className="workspace-description">{meta.description}</p>}
-            {children}
-          </section>
+          <main
+            id="main-content"
+            className="dashboard-main-content"
+            tabIndex={-1}
+            style={{ display: 'flex', flexDirection: 'column', flex: '1 0 auto', width: '100%', minWidth: 0 }}
+          >
+            {meta.heading && (
+              <div className="workspace-subheader">
+                <h1 className="workspace-heading">{meta.heading}</h1>
+                {meta.showsDatabaseSelector && (
+                  <DatabaseSelectorBar
+                    databases={logic.databases}
+                    selectedDatabase={logic.selectedDatabase}
+                    selectedDatabaseId={logic.selectedDatabaseId}
+                    onDatabaseChange={logic.setSelectedDatabaseId}
+                    selectId="topbar-db-select"
+                    className="topbar-db-bar"
+                    trailingControl={pathname === '/analysis' && logic.selectedDatabase?.has_example ? (
+                      <button
+                        type="button"
+                        className="analyze-submode-btn example-btn"
+                        style={{ flex: '0 0 auto' }}
+                        onClick={() => {
+                          logic.setActiveProfileMode('fasta');
+                          logic.setAnalyzeSubMode('single');
+                          logic.runExampleProfile();
+                        }}
+                        disabled={
+                          logic.isProfileBusy
+                          || logic.isRegenerateBusy
+                          || logic.isUploading
+                          || logic.batchSubmitting
+                          || logic.isBatchUploading
+                        }
+                        title="Load and profile the example consensus FASTA shipped with this database"
+                      >
+                        <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${exampleIconSrc})` }} aria-hidden="true" />
+                        Example
+                      </button>
+                    ) : null}
+                  />
+                )}
+              </div>
+            )}
+            <section className="panel-stack">
+              {meta.description && <p className="workspace-description">{meta.description}</p>}
+              {children}
+            </section>
+          </main>
           <AppFooter
             legalLink={logic.legalLink}
             contactEmail={logic.contactEmail}
@@ -244,7 +261,7 @@ export function AppShell({ logic, children }) {
         ↑
       </button>
       <TourOverlay />
-    </main>
+    </div>
     </ThemeContext.Provider>
   );
-}
+});

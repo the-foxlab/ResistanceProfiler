@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from slowapi import Limiter
 
 from web.backend.errors import user_facing_error_message
 from web.backend.models import UploadResponse
-from web.backend.routes.common import get_session
-from web.backend.services.session import record_upload
+from web.backend.routes.common import get_deployment_mode, get_session
+from web.backend.services.session import SessionBackendError, record_upload
 from web.backend.services.upload import UploadType, save_upload_stream
+
+logger = logging.getLogger(__name__)
 
 
 def build_upload_router(
@@ -25,18 +29,35 @@ def build_upload_router(
 
     async def _handle_upload(request: Request, file: UploadFile, file_type: UploadType) -> UploadResponse:
         session = get_session(request)
+        deployment_mode = get_deployment_mode(request)
+        saved_path: Path | None = None
         try:
             saved_path, size_bytes = await save_upload_stream(file, file_type, uploads_dir)
-            upload_id = record_upload(
+            upload_id = await run_in_threadpool(
+                record_upload,
                 session_hash=session.session_hash,
                 canonical_path=saved_path,
                 file_type=file_type,
+                deployment_mode=deployment_mode,
             )
             return UploadResponse(upload_id=upload_id, file_type=file_type, size_bytes=size_bytes)
         except ValueError as exc:
+            if saved_path is not None:
+                saved_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail=user_facing_error_message(str(exc))) from exc
+        except SessionBackendError as exc:
+            if saved_path is not None:
+                saved_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=503, detail='Session store unavailable.') from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=user_facing_error_message(str(exc))) from exc
+            if saved_path is not None:
+                saved_path.unlink(missing_ok=True)
+            logger.exception('Unexpected server error during %s upload', file_type)
+            raise HTTPException(status_code=500, detail='The upload failed on the server.') from exc
+        except BaseException:
+            if saved_path is not None:
+                saved_path.unlink(missing_ok=True)
+            raise
         finally:
             await file.close()
 

@@ -1,14 +1,4 @@
-/** Route table and per-route shell metadata (URL is the single source of truth). */
-export const ROUTES = [
-  { path: '/', page: 'home' },
-  { path: '/analysis', page: 'analyze' },
-  { path: '/analysis/reports', page: 'results' },
-  { path: '/databases', page: 'database' },
-  { path: '/databases/mutations', page: 'mutations' },
-  { path: '/databases/compare', page: 'compare' },
-  { path: '/about', page: 'about' },
-];
-
+/** Per-route shell metadata (URL is the single source of truth). */
 export const ROUTE_META = {
   '/': { title: 'ResPro | Home', showsSidebar: false, showsDatabaseSelector: false },
   '/analysis': { title: 'ResPro | Analysis', heading: 'Analyze', description: 'Profile VCF files, consensus FASTA sequences, or regenerate a previous report from JSON. BAM files are optional and can be used for coverage analysis.', showsSidebar: true, showsDatabaseSelector: true },

@@ -4,11 +4,14 @@ import { baseLayout } from './database-plots/shared';
 import { usePlotlyChart } from './database-plots/usePlotlyChart';
 import { Spinner } from './Spinner';
 import {
+  classifyHeatmapCell,
   prepareHeatmapData,
   consequenceColor,
   featureColorPalette,
   uniqueConsequenceTypes,
 } from './comparison-heatmap-data';
+
+const UNKNOWN_AF_COLOR = '#6366f1';
 
 const ALLELE_FREQ_COLORSCALE = [
   [0, '#f0fdfa'],
@@ -53,7 +56,7 @@ function annotationAxis(start, end, color) {
 }
 
 function renderHeatmap(container, data, theme) {
-  const prepared = prepareHeatmapData(data);
+  const prepared = prepareHeatmapData(data, theme);
   if (!prepared) {
     Plotly.purge(container);
     return;
@@ -90,6 +93,17 @@ function renderHeatmap(container, data, theme) {
     }),
   ];
 
+  if (prepared.hasUnknownAf) {
+    traces.push(heatmapTrace(prepared.xLabels, gridLineColor, {
+      z: prepared.unknownAfZ,
+      y: prepared.samples,
+      yaxis: 'y',
+      colorscale: [[0, UNKNOWN_AF_COLOR], [1, UNKNOWN_AF_COLOR]],
+      customdata: prepared.mainCustomdata,
+      hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Detected (unknown AF)<extra></extra>',
+    }));
+  }
+
   if (prepared.hasFeatures) {
     traces.push(heatmapTrace(prepared.xLabels, gridLineColor, {
       z: prepared.featureZValues,
@@ -107,7 +121,7 @@ function renderHeatmap(container, data, theme) {
       z: prepared.dbHitZ,
       y: ['DB hit'],
       yaxis: 'y3',
-      colorscale: [[0, '#f4f4f5'], [1, '#dc2626']],
+      colorscale: isDark ? [[0, '#27272a'], [1, '#dc2626']] : [[0, '#f4f4f5'], [1, '#dc2626']],
       customdata: prepared.dbHitCustomdata,
       hovertemplate: '%{customdata[0]}<extra></extra>',
     }));
@@ -125,7 +139,7 @@ function renderHeatmap(container, data, theme) {
     }));
   }
 
-  const base = baseLayout();
+  const base = baseLayout(theme);
   const axisLabelColor = isDark ? '#f4f4f5' : '#18181b';
   const layout = {
     ...base,
@@ -165,9 +179,9 @@ function renderHeatmap(container, data, theme) {
  */
 export function ComparisonHeatmap({ data, isBusy }) {
   // Full re-render on resize preserves multi-yaxis domain alignment.
-  const { containerRef, plotError } = usePlotlyChart({
-    enabled: Boolean(data),
-    deps: [data],
+  const { containerRef, plotError, theme } = usePlotlyChart({
+    enabled: Boolean(data) && !isBusy,
+    deps: [data, isBusy],
     resizeMode: 'rerender',
     render: (el, activeTheme) => renderHeatmap(el, data, activeTheme),
   });
@@ -192,8 +206,13 @@ export function ComparisonHeatmap({ data, isBusy }) {
     return null;
   }
 
+  const isDark = theme === 'dark';
   const featureColors = data.features?.length ? featureColorPalette(data.features.length) : [];
   const displayNames = data.feature_display_names || {};
+  const hasUnknownAf = Array.isArray(data.matrix)
+    && data.matrix.some(
+      (row) => Array.isArray(row) && row.some((cell) => classifyHeatmapCell(cell).isUnknownAf),
+    );
 
   return (
     <>
@@ -212,8 +231,13 @@ export function ComparisonHeatmap({ data, isBusy }) {
         )}
         <span className="comparison-legend-separator" />
         <span className="comparison-cell-legend-item">
-          <span className="comparison-cell-swatch" style={{ backgroundColor: '#a1a1aa' }} /> Coverage gap
+          <span className="comparison-cell-swatch" style={{ backgroundColor: isDark ? '#71717a' : '#a1a1aa' }} /> Coverage gap
         </span>
+        {hasUnknownAf && (
+          <span className="comparison-cell-legend-item">
+            <span className="comparison-cell-swatch" style={{ backgroundColor: UNKNOWN_AF_COLOR }} /> Detected (unknown AF)
+          </span>
+        )}
         <span className="comparison-cell-legend-item">
           <span className="comparison-cell-swatch" style={{ backgroundColor: '#dc2626' }} /> Database hit
         </span>
@@ -225,7 +249,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
               <span key={ctype} className="comparison-consequence-legend-item">
                 <span
                   className="comparison-consequence-swatch"
-                  style={{ backgroundColor: consequenceColor(ctype) }}
+                  style={{ backgroundColor: consequenceColor(ctype, theme) }}
                 />
                 {ctype}
               </span>

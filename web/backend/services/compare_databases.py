@@ -8,13 +8,16 @@ are excluded.
 from __future__ import annotations
 
 import contextlib
+import logging
 import sqlite3
 from collections import Counter
 from pathlib import Path
 
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_queries import list_references_for_display
-from web.backend.startup_config import list_project_db_paths
+from web.backend.project_dbs import open_project_db_readonly, validate_project_db_filename
+
+logger = logging.getLogger(__name__)
 
 _MIN_DATABASES = 2
 _MAX_DATABASES = 3
@@ -24,14 +27,15 @@ _RULES_BY_REFERENCE_SQL = (
     'SELECT g.name AS feature, rr.position, rr.reference, rr.mutation, '
     'd.name AS drug, rr.phenotype, rr.ic50, rr.fold_ic50, rr.score, '
     "COALESCE(NULLIF(rr.publication, ''), "
-    "(SELECT GROUP_CONCAT(citation, '; ') FROM ("
+    "(SELECT GROUP_CONCAT(citation, '; ' ORDER BY citation) FROM ("
     "SELECT DISTINCT COALESCE(NULLIF(p.doi, ''), "
     "CASE WHEN p.pubmed_id IS NOT NULL AND p.pubmed_id != '' "
     "THEN 'PMID:' || p.pubmed_id END, NULLIF(p.raw_input, '')) AS citation "
     'FROM rule_publication rp '
     'JOIN publication p ON p.id = rp.publication_id '
-    'WHERE rp.rule_id = rr.id) '
-    "WHERE citation IS NOT NULL AND citation != '' ORDER BY citation), '') AS publication "
+    'WHERE rp.rule_id = rr.id '
+    'ORDER BY citation) '
+    "WHERE citation IS NOT NULL AND citation != ''), '') AS publication "
     'FROM resistance_rule rr '
     'JOIN feature g ON g.id = rr.feature_id '
     'JOIN drug d ON d.id = rr.drug_id '
@@ -45,8 +49,9 @@ def list_database_reference_accessions(
     database_ids: list[str],
 ) -> dict[str, dict[str, dict[str, str]]]:
     """Return ``{database_id: {accession: {name, organism}}}`` for each selected database."""
+    _validate_database_ids(database_ids, require_compare_bounds=False)
     db_paths = _resolve_db_paths(project_databases_dir, database_ids)
-    return {db_id: _load_reference_accessions(db_paths[db_id]) for db_id in database_ids}
+    return {db_id: _load_reference_accessions(db_paths[db_id], db_id) for db_id in database_ids}
 
 
 def list_shared_references(
@@ -54,7 +59,7 @@ def list_shared_references(
     database_ids: list[str],
 ) -> list[dict]:
     """Return sorted references (by accession) present in every selected database."""
-    _validate_database_count(database_ids)
+    _validate_database_ids(database_ids, require_compare_bounds=True)
     accessions_by_db = list_database_reference_accessions(project_databases_dir, database_ids)
     shared = set.intersection(*(set(acc) for acc in accessions_by_db.values()))
 
@@ -79,7 +84,9 @@ def compare_databases(
     accession: str,
 ) -> dict:
     """Compare atomic-rule mutation overlap across 2-3 databases on one shared reference."""
-    _validate_database_count(database_ids)
+    _validate_database_ids(database_ids, require_compare_bounds=True)
+    if not isinstance(accession, str) or not accession.strip():
+        raise ValueError('Reference accession must not be empty.')
     db_paths = _resolve_db_paths(project_databases_dir, database_ids)
 
     rules_by_db: dict[str, dict[tuple, list[dict]]] = {}
@@ -100,7 +107,7 @@ def compare_databases(
     )
     venn = [
         {'region': sorted(region), 'count': count}
-        for region, count in sorted(region_counts.items(), key=lambda item: (len(item[0]), item[0]))
+        for region, count in sorted(region_counts.items(), key=lambda item: (len(item[0]), sorted(item[0])))
     ]
     intersection_count = region_counts.get(frozenset(keys_by_db), 0)
 
@@ -118,6 +125,19 @@ def compare_databases(
     }
 
 
+def _validate_database_ids(database_ids: list[str], *, require_compare_bounds: bool) -> None:
+    if not database_ids:
+        if require_compare_bounds:
+            _validate_database_count(database_ids)
+        raise ValueError('At least one database_id is required.')
+    if any(not isinstance(db_id, str) or not db_id.strip() for db_id in database_ids):
+        raise ValueError('Database ID must not be empty.')
+    if len(set(database_ids)) != len(database_ids):
+        raise ValueError('Duplicate database IDs are not allowed.')
+    if require_compare_bounds:
+        _validate_database_count(database_ids)
+
+
 def _validate_database_count(database_ids: list[str]) -> None:
     if not (_MIN_DATABASES <= len(database_ids) <= _MAX_DATABASES):
         raise ValueError(
@@ -127,33 +147,51 @@ def _validate_database_count(database_ids: list[str]) -> None:
 
 
 def _resolve_db_paths(project_databases_dir: Path, database_ids: list[str]) -> dict[str, Path]:
-    """Validate and resolve all requested database IDs with a single directory scan."""
-    if not database_ids:
-        return {}
-    catalog = list_project_db_paths(project_databases_dir)
-    if not catalog:
+    """Validate and resolve requested database IDs directly without opening unrelated siblings."""
+    for db_id in database_ids:
+        validate_project_db_filename(db_id)
+    if not project_databases_dir.is_dir():
         raise FileNotFoundError(
             'No project database available. Add a .db file or enable maintained bootstrap.'
         )
-    by_name = {path.name: path for path in catalog}
+    by_name = {path.name: path for path in project_databases_dir.glob('*.db') if path.is_file()}
     resolved: dict[str, Path] = {}
     for db_id in database_ids:
-        path = by_name.get(db_id) if db_id else catalog[0]
+        path = by_name.get(db_id)
         if path is None:
             raise ValueError(f'Unknown database_id {db_id!r}.')
         resolved[db_id] = path
     return resolved
 
 
-def _load_reference_accessions(db_path: Path) -> dict[str, dict[str, str]]:
+def _open_compare_db_readonly(db_path: Path, database_id: str) -> sqlite3.Connection:
+    try:
+        return open_project_db_readonly(db_path)
+    except (FileNotFoundError, OSError, sqlite3.Error, ValueError) as exc:
+        logger.warning('Invalid project database %s during comparison: %s', database_id, exc)
+        raise ValueError(f'Project database {database_id!r} is invalid or corrupt.') from exc
+
+
+def _load_reference_accessions(db_path: Path, database_id: str) -> dict[str, dict[str, str]]:
     """Return ``{accession: {name, organism}}`` for all references with a non-empty accession."""
-    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
-        conn.row_factory = sqlite3.Row
-        return {
-            ref['accession']: {'name': ref['name'], 'organism': ref['organism'] or ''}
-            for ref in list_references_for_display(conn)
-            if ref.get('accession')
-        }
+    with contextlib.closing(_open_compare_db_readonly(db_path, database_id)) as conn:
+        try:
+            accessions: dict[str, dict[str, str]] = {}
+            for ref in list_references_for_display(conn):
+                raw_accession = ref.get('accession')
+                if raw_accession is None:
+                    continue
+                accession_str = str(raw_accession)
+                if not accession_str.strip():
+                    continue
+                accessions[accession_str] = {
+                    'name': ref['name'],
+                    'organism': ref['organism'] or '',
+                }
+            return accessions
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            logger.warning('Failed to read references from %s: %s', database_id, exc)
+            raise ValueError(f'Project database {database_id!r} is invalid or corrupt.') from exc
 
 
 def _load_rules_for_accession(
@@ -162,15 +200,18 @@ def _load_rules_for_accession(
     database_id: str,
 ) -> tuple[str, dict[tuple, list[dict]], set[str]]:
     """Load atomic rules for *accession* grouped by rule key plus populated metadata fields."""
-    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
-        conn.row_factory = sqlite3.Row
-        ref_row = conn.execute(
-            'SELECT id, name FROM reference WHERE accession = ? LIMIT 1',
-            (accession,),
-        ).fetchone()
-        if ref_row is None:
-            raise ValueError(f'Reference accession {accession!r} not found in database {database_id!r}.')
-        rows = conn.execute(_RULES_BY_REFERENCE_SQL, (ref_row['id'],)).fetchall()
+    with contextlib.closing(_open_compare_db_readonly(db_path, database_id)) as conn:
+        try:
+            ref_row = conn.execute(
+                'SELECT id, name FROM reference WHERE accession = ? LIMIT 1',
+                (accession,),
+            ).fetchone()
+            if ref_row is None:
+                raise ValueError(f'Reference accession {accession!r} not found in database {database_id!r}.')
+            rows = conn.execute(_RULES_BY_REFERENCE_SQL, (ref_row['id'],)).fetchall()
+        except sqlite3.Error as exc:
+            logger.warning('Failed to query rules from %s: %s', database_id, exc)
+            raise ValueError(f'Project database {database_id!r} is invalid or corrupt.') from exc
 
     rules: dict[tuple, list[dict]] = {}
     populated: set[str] = set()
@@ -178,14 +219,20 @@ def _load_rules_for_accession(
         drug = row['drug'] or ''
         if is_internal_formula_component_drug_name(drug):
             continue
-        key = (row['feature'], row['position'], row['reference'], row['mutation'], drug)
+        key = (
+            row['feature'] or '',
+            int(row['position']) if row['position'] is not None else 0,
+            row['reference'] or '',
+            row['mutation'] or '',
+            drug,
+        )
         entry = {'drug': drug, **{field: row[field] or '' for field in _METADATA_FIELDS}}
         for field in _METADATA_FIELDS:
             if entry[field]:
                 populated.add(field)
         rules.setdefault(key, []).append(entry)
 
-    return ref_row['name'], rules, populated
+    return ref_row['name'] or '', rules, populated
 
 
 def _build_rows(

@@ -18,15 +18,31 @@ from web.backend.artifact_kinds import (
     is_html_report_path,
     unsupported_artifact_message,
 )
+from web.backend.config import WEB_BACKEND_CONFIG
+from web.backend.errors import user_facing_error_message
 from web.backend.models import (
     ArtifactBundlePayload,
     ComparePayload,
     CompareResponse,
     artifact_bundle_payload_model,
 )
-from web.backend.routes.common import get_session, resolve_owned_file
+from web.backend.routes.common import get_deployment_mode, get_session, resolve_owned_file
 from web.backend.services.compare import build_comparison_matrix
 from web.backend.startup_config import is_path_within_allowed_roots
+
+_OPAQUE_ID_MAX_LEN = WEB_BACKEND_CONFIG.defaults.opaque_id_max_length
+_REPORT_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src 'self' data: blob: https://pubchem.ncbi.nlm.nih.gov; "
+    "font-src 'self' data:; "
+    "connect-src 'none'; "
+    "form-action 'none'; "
+    "base-uri 'none'; "
+    "frame-ancestors 'self'; "
+    "object-src 'none'"
+)
 
 
 def build_artifacts_router(
@@ -37,21 +53,29 @@ def build_artifacts_router(
     artifact_bundle_max_artifacts: int,
     limiter: Limiter,
     api_rate_limit: str,
+    project_databases_dir: Path | None = None,
 ) -> APIRouter:
     """Build report, artifact download, ZIP bundle, branding, and sample-compare routes."""
     router = APIRouter()
+    artifact_roots = tuple(
+        root for root in allowed_roots if is_path_within_allowed_roots(root, (results_dir,))
+    )
 
     @router.get('/api/report')
     @limiter.limit(api_rate_limit)
-    def open_report(request: Request, artifact_id: str = Query(...)) -> FileResponse:
+    def open_report(
+        request: Request,
+        artifact_id: str = Query(..., max_length=_OPAQUE_ID_MAX_LEN),
+    ) -> FileResponse:
         session = get_session(request)
         report_path = resolve_owned_file(
             prefix='artifact',
             record_id=artifact_id,
             session_hash=session.session_hash,
-            allowed_roots=allowed_roots,
+            allowed_roots=artifact_roots,
             not_found_detail='Report not found.',
             require_file=False,
+            deployment_mode=get_deployment_mode(request),
         )
         if not is_html_report_path(report_path):
             raise HTTPException(
@@ -60,19 +84,30 @@ def build_artifacts_router(
             )
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
-        return FileResponse(str(report_path), media_type='text/html')
+        return FileResponse(
+            str(report_path),
+            media_type='text/html',
+            headers={
+                'Content-Security-Policy': _REPORT_CSP,
+                'X-Frame-Options': 'SAMEORIGIN',
+            },
+        )
 
     @router.get('/api/artifact')
     @limiter.limit(api_rate_limit)
-    def download_artifact(request: Request, artifact_id: str = Query(...)) -> FileResponse:
+    def download_artifact(
+        request: Request,
+        artifact_id: str = Query(..., max_length=_OPAQUE_ID_MAX_LEN),
+    ) -> FileResponse:
         session = get_session(request)
         artifact_path = resolve_owned_file(
             prefix='artifact',
             record_id=artifact_id,
             session_hash=session.session_hash,
-            allowed_roots=allowed_roots,
+            allowed_roots=artifact_roots,
             not_found_detail='Artifact not found.',
             require_file=False,
+            deployment_mode=get_deployment_mode(request),
         )
         artifact_kind = artifact_kind_for_path(artifact_path)
         if artifact_kind is None:
@@ -101,7 +136,13 @@ def build_artifacts_router(
                     f'At most {artifact_bundle_max_artifacts} can be downloaded at once.'
                 ),
             )
-        resolved_paths = _resolve_artifact_ids(payload.artifact_ids, session.session_hash, allowed_roots)
+        unique_ids = list(dict.fromkeys(payload.artifact_ids))
+        resolved_paths = _resolve_artifact_ids(
+            unique_ids,
+            session.session_hash,
+            artifact_roots,
+            deployment_mode=get_deployment_mode(request),
+        )
         return Response(
             content=_build_artifact_bundle(resolved_paths, part=part),
             media_type='application/zip',
@@ -126,7 +167,12 @@ def build_artifacts_router(
         session = get_session(request)
         if not payload.artifact_ids:
             raise HTTPException(status_code=400, detail='At least one artifact id is required.')
-        resolved_paths = _resolve_artifact_ids(payload.artifact_ids, session.session_hash, allowed_roots)
+        resolved_paths = _resolve_artifact_ids(
+            payload.artifact_ids,
+            session.session_hash,
+            artifact_roots,
+            deployment_mode=get_deployment_mode(request),
+        )
         try:
             return build_comparison_matrix(
                 result_json_paths=resolved_paths,
@@ -135,10 +181,14 @@ def build_artifacts_router(
                 is_allowed_artifact_path=is_allowed_artifact_path,
                 non_synonymous_only=payload.non_synonymous_only,
                 db_hits_only=payload.db_hits_only,
+                project_databases_dir=project_databases_dir,
             )
         except ValueError as exc:
             msg = str(exc)
-            raise HTTPException(status_code=404 if 'not found' in msg.lower() else 400, detail=msg) from exc
+            raise HTTPException(
+                status_code=404 if 'not found' in msg.lower() else 400,
+                detail=user_facing_error_message(msg),
+            ) from exc
 
     return router
 
@@ -153,6 +203,8 @@ def _resolve_artifact_ids(
     artifact_ids: list[str],
     session_hash: str,
     allowed_roots: tuple[Path, ...],
+    *,
+    deployment_mode: str | None = None,
 ) -> list[Path]:
     return [
         resolve_owned_file(
@@ -162,6 +214,7 @@ def _resolve_artifact_ids(
             allowed_roots=allowed_roots,
             not_found_detail='Artifact not found.',
             require_file=False,
+            deployment_mode=deployment_mode,
         )
         for artifact_id in artifact_ids
     ]
@@ -191,7 +244,7 @@ def _deduplicate_archive_name(file_name: str, used_names: set[str]) -> str:
         return file_name
     path = Path(file_name)
     stem = path.stem
-    suffix = ''.join(path.suffixes)
+    suffix = path.suffix
     counter = 1
     while (candidate := f'{stem}_{counter}{suffix}') in used_names:
         counter += 1

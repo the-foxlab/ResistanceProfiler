@@ -40,24 +40,93 @@ const baseProps = {
     setAnalyzeSubMode: () => {},
     rules: [],
     formulaRules: [],
-    mutationPlotMeta: [],
+    mutationPlotMeta: { references: [], features: [] },
     PROFILE_MODES: [],
     isProfileBusy: false,
     isRegenerateBusy: false,
-    uploadProgress: { percent: 0, name: '' },
+    canCancelJob: false,
+    isCancelingJob: false,
+    cancelActiveJob: () => {},
+    runSelectedProfile: () => {},
+    runRegenerateFromJson: () => {},
+    uploadFastaFile: () => {},
+    uploadVcfFile: () => {},
+    uploadReferenceFile: () => {},
+    uploadBamFile: () => {},
+    uploadJsonFile: () => {},
+    cancelUpload: () => {},
+    uploadProgress: { percent: 0, fileName: '' },
     isUploading: false,
-    vcfInput: { sample: '', minAf: 0.01, minDepth: 10 },
-    fastaInput: { sample: '' },
+    vcfInput: {
+      vcf_id: '',
+      input_display_name: '',
+      reference_id: '',
+      bam_id: null,
+      sample: '',
+      min_af: 0.01,
+      min_depth: 10,
+    },
+    setVcfInput: () => {},
+    fastaInput: {
+      fasta_id: '',
+      input_display_name: '',
+      sample: '',
+    },
+    setFastaInput: () => {},
+    jsonInputId: '',
+    batchMode: 'vcf',
+    setBatchMode: () => {},
+    batchVcfFiles: [],
+    batchFastaFiles: [],
+    batchJsonFiles: [],
+    batchReferenceFasta: null,
+    batchSamples: [],
+    batchSubmitting: false,
+    isBatchPolling: false,
+    isBatchDownloadBusy: false,
+    isBatchUploading: false,
+    batchError: null,
+    batchRateLimitCooldown: 0,
+    setBatchRateLimitCooldown: () => {},
+    batchSubmitted: false,
+    batchMaxSamples: 25,
+    batchVcfCutoffs: { min_af: 0.01, min_depth: 10 },
+    setBatchVcfCutoffs: () => {},
+    addBatchVcfFiles: () => {},
+    addBatchFastaFiles: () => {},
+    addBatchJsonFiles: () => {},
+    addBatchBamFiles: () => {},
+    attachBatchBam: () => {},
+    removeBatchFile: () => {},
+    uploadBatchReferenceFasta: () => {},
+    submitBatch: () => {},
+    stopBatchPolling: () => {},
+    cancelBatchUpload: () => {},
+    downloadAllBatchArtifacts: () => {},
+    resetBatch: () => {},
+    mutationFilter: '',
+    setMutationFilter: () => {},
+    mutationSortColumn: null,
+    setMutationSortColumn: () => {},
+    mutationSortAsc: true,
+    setMutationSortAsc: () => {},
+    formulaFilter: '',
+    setFormulaFilter: () => {},
     mutationColumns: [],
     formulaColumns: [],
     displayedRules: [],
     displayedFormulaRules: [],
     mutationsLoaded: false,
-    inlineReportPath: null,
-    selectedProfileReportPath: null,
+    downloadMutationsAsTsv: () => {},
+    downloadFormulaRulesAsTsv: () => {},
+    inlineReportPath: '',
+    selectedProfileReportPath: '',
+    setSelectedProfileReportPath: () => {},
     selectedResultIndices: new Set(),
+    setSelectedResultIndices: () => {},
     comparisonDbId: null,
     comparisonRefName: null,
+    selectAllComparable: () => {},
     comparisonData: null,
     isComparisonBusy: false,
     nonSynonymousOnly: false,
@@ -85,6 +154,9 @@ describe('AppRoutes', () => {
         setBatchRateLimitCooldown: vi.fn(),
       },
     });
+    await waitFor(() => {
+      expect(document.querySelector('.workspace-frame')).not.toBeNull();
+    });
     const frame = document.querySelector('.workspace-frame');
     const postMessage = vi.spyOn(frame.contentWindow, 'postMessage').mockImplementation(() => {});
 
@@ -94,66 +166,78 @@ describe('AppRoutes', () => {
     await waitFor(() => {
       expect(postMessage).toHaveBeenCalledWith(
         { type: 'respro:report-theme', theme: 'dark' },
-        window.location.origin,
+        '*',
       );
     });
   });
 
-  it('renders the landing page at /', () => {
+  it('renders the landing page at /', async () => {
     renderAt('/', baseProps);
-    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
   });
 
-  it('renders the analyze page at /analysis', () => {
+  it('renders the analyze page at /analysis', async () => {
     renderAt('/analysis', baseProps);
-    expect(document.querySelector('.profile-input-card')).not.toBeNull();
+    await waitFor(() => {
+      expect(document.querySelector('.profile-input-card')).not.toBeNull();
+    });
   });
 
-  it('renders the reports page at /analysis/reports', () => {
+  it('renders the reports page at /analysis/reports', async () => {
     renderAt('/analysis/reports', baseProps);
+    expect(await screen.findByText(/No results yet/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Session results' })).toBeInTheDocument();
   });
 
-  it('renders page descriptions outside the primary tile and keeps the results empty state inside', () => {
+  it('renders page descriptions outside the primary tile and keeps the results empty state inside', async () => {
     const { unmount } = renderAt('/analysis', baseProps);
+    await waitFor(() => {
+      expect(document.querySelector('.profile-input-card')).not.toBeNull();
+    });
     const analyzeDescription = screen.getByText(/Profile VCF files, consensus FASTA sequences/);
     expect(analyzeDescription.closest('.tab-primary-tile')).toBeNull();
 
     unmount();
     renderAt('/analysis/reports', baseProps);
+    const emptyState = await screen.findByText(/No results yet/);
     const resultsDescription = screen.getByText(/All analysis outputs from this session/);
-    const emptyState = screen.getByText(/No results yet/);
     expect(resultsDescription.closest('.tab-primary-tile')).toBeNull();
     expect(emptyState.closest('.tab-primary-tile')).not.toBeNull();
 
     unmount();
     renderAt('/databases', baseProps);
+    expect(await screen.findByText(/No active database loaded\./)).toBeInTheDocument();
     const databaseDescription = screen.getByText(/Overview and visual summaries of the active resistance database/);
     expect(databaseDescription.closest('.tab-primary-tile')).toBeNull();
   });
 
-  it('renders the database dashboard at /databases', () => {
+  it('renders the database dashboard at /databases', async () => {
     renderAt('/databases', baseProps);
+    expect(await screen.findByText(/No active database loaded\./)).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Database Dashboard' })).toBeInTheDocument();
   });
 
-  it('renders browse mutations at /databases/mutations', () => {
+  it('renders browse mutations at /databases/mutations', async () => {
     renderAt('/databases/mutations', baseProps);
+    await waitFor(() => {
+      expect(document.querySelector('.tab-primary-tile')).not.toBeNull();
+    });
     expect(screen.getByRole('heading', { level: 1, name: 'Browse mutations' })).toBeInTheDocument();
   });
 
-  it('renders compare at /databases/compare', () => {
+  it('renders compare at /databases/compare', async () => {
     renderAt('/databases/compare', baseProps);
+    expect(await screen.findByRole('heading', { level: 2, name: 'Rule overlap' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Compare databases' })).toBeInTheDocument();
   });
 
-  it('renders about at /about', () => {
+  it('renders about at /about', async () => {
     renderAt('/about', baseProps);
-    expect(screen.getByText(/about resistanceprofiler/i)).toBeInTheDocument();
+    expect(await screen.findByText(/about resistanceprofiler/i)).toBeInTheDocument();
   });
 
-  it('renders a 404 page for unknown routes', () => {
+  it('renders a 404 page for unknown routes', async () => {
     renderAt('/does-not-exist', baseProps);
-    expect(screen.getByText(/page not found/i)).toBeInTheDocument();
+    expect(await screen.findByText(/page not found/i)).toBeInTheDocument();
   });
 });

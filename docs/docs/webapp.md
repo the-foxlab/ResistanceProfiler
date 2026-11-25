@@ -74,6 +74,39 @@ The backend creates and uses these folders inside the mounted data root:
 
 If `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`, missing maintained databases are downloaded into `data/project_databases/` at startup. The flag also triggers a checksum-based update check: each existing maintained database is compared against the companion manifest's `tsv_checksum`, and a changed database is rebuilt into a temp file and atomically swapped in. A weekly background thread re-runs the same check. Set `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` to control the interval (default `604800` seconds = 7 days; `0` disables the weekly thread). Update failures are logged and never block startup.
 
+### Local frontend dev server (Vite `/api` proxy)
+
+For UI development against a local backend, run the Vite dev server (`Node.js 24+`):
+
+```bash
+cd web/frontend
+npm ci
+npm run dev
+```
+
+`web/frontend/vite.config.js` listens on `http://127.0.0.1:5173` and proxies `/api` and `/legal` same-origin to `http://127.0.0.1:8000` (override with `RESPRO_API_PROXY_TARGET` or `VITE_API_PROXY_TARGET`), while `web/frontend/src/config.js` defaults `apiBase` to `''`.
+
+!!! warning "Separate-origin browser sessions are unsupported"
+    Do not point `VITE_RESPRO_API_BASE` at a different origin for browser sessions. Session cookies (`respro_session`) are same-origin and backend CORS disables credentials (`allow_credentials=False`); always use same-origin hosting or the Vite `/api` dev proxy.
+
+### Running locally without Docker
+
+Install the `respro` package/CLI entrypoint (`pyproject.toml`) and the web backend dependencies, start Redis (default `REDIS_URL=redis://127.0.0.1:6379/0`), ensure at least one `.db` file is in `data/project_databases/` (or set `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`), and start both the API server and the RQ worker:
+
+```bash
+pip install -e .
+pip install -r web/backend/requirements.txt
+
+# Start Redis (e.g. redis-server)
+redis-server
+
+# Terminal 1 — FastAPI API server
+python -m web.backend.main
+
+# Terminal 2 — RQ worker (always use `python -m web.backend.worker`, NOT bare `rq worker`)
+python -m web.backend.worker
+```
+
 ## Configuration reference
 
 All webapp settings are optional environment variables. Set them in a `.env` file next to your `docker-compose.web.yml`, or inline under `services.respro-web.environment` (and `services.respro-worker.environment` where noted). Defaults are tuned for local development — review every variable before public hosting.
@@ -85,8 +118,8 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_HOST` | `127.0.0.1` | Network interface the API binds to. Use `0.0.0.0` to listen on all interfaces (required when behind a reverse proxy in Docker). |
 | `RESPRO_WEB_PORT` | `8000` | TCP port the API listens on. |
 
-!!! warning "Public bind requires a token"
-    Binding to anything other than `127.0.0.1`, `localhost`, or `0.0.0.0` without setting `RESPRO_WEB_API_TOKEN` fails fast at startup. `0.0.0.0` is allowed without a token only because it is the standard Docker bind address — combine it with a reverse proxy and a token for public hosting.
+!!! warning "Public hosting requires a reverse proxy and `online` mode"
+    `respro-web` has no built-in application-level token authentication. Leave `127.0.0.1:8000:8000` bound to loopback on the host (`RESPRO_WEB_HOST=0.0.0.0` inside the container), place a TLS-terminating reverse proxy (nginx/Caddy/Traefik) in front, configure access control (e.g. HTTP Basic Auth or SSO) at the proxy if needed, and set `RESPRO_WEB_DEPLOYMENT_MODE=online` with explicit `RESPRO_WEB_TRUSTED_PROXIES` and `RESPRO_WEB_CORS_ORIGINS`.
 
 ### Data and filesystem
 
@@ -94,17 +127,18 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 |---|---|---|
 | `RESPRO_WEB_DATA_DIR` | `/data` if it exists, otherwise `./data` | Root directory for `project_databases/`, `uploads/`, and `results/`. Created if missing. Must be writable. |
 | `RESPRO_WEB_ALLOWED_ROOTS` | the three subdirectories of `RESPRO_WEB_DATA_DIR` | Comma-separated list of absolute paths the API is allowed to read from and write to. Override only if you mount upload or result directories outside the data root. |
-| `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds for files in `uploads/` and `results/`. A background sweep thread deletes files older than this value. |
-| `RESPRO_WEB_SESSION_TTL` | `604800` (7 days) | Time-to-live in seconds for anonymous session records in Redis. Sessions are additive in local mode (no auth required) and become the ownership boundary for uploads/jobs/artifacts in non-local modes. |
+| `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds (integer `>= 1`) for files in `uploads/` and `results/` **and** for RQ job/artifact records in Redis (`ttl`, `result_ttl`, `failure_ttl`). A background sweep thread deletes expired files (falling back to `86400` with a warning if invalid). |
+| `RESPRO_WEB_SESSION_TTL` | `604800` (7 days) | Time-to-live in seconds (integer `>= 1`) for anonymous session records in Redis. Sessions provide the ownership boundary for uploads, jobs, and artifacts, and their Redis TTL slides on valid requests (`local` mode falls back to in-memory storage if Redis is unreachable; `online` mode requires Redis). |
 
 ### Authentication and security
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
-| `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
-| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
-| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Trust model: `local` (default; zero-config, API docs enabled, loopback) or `online` (behind a reverse proxy; requires `RESPRO_WEB_TRUSTED_PROXIES`; API docs disabled). In `online` mode the session cookie is marked `Secure`, so it only works over HTTPS (or `http://localhost`). |
+| `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins. In `online` mode, wildcard `*` is rejected at startup and leaving this unset logs a warning. Separate-origin browser sessions are **unsupported** (`allow_credentials=False`); serve the SPA same-origin or use the Vite `/api` dev proxy. For public hosting, set your exact frontend origin, e.g. `https://respro.example.com`. |
+| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or canonical CIDRs (no host bits, e.g. `172.16.0.0/12`, not `172.18.0.1/16`) whose `X-Forwarded-*` headers are trusted. **Required** in `online` mode (`*` and `/0` CIDRs are rejected). When `respro-web` runs in Docker behind a host reverse proxy, specify the Docker Compose bridge gateway IP or canonical bridge subnet — **not** `127.0.0.1` (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Trust model: `local` (default; zero-config, API docs enabled, loopback) or `online` (behind a reverse proxy; requires `RESPRO_WEB_TRUSTED_PROXIES`, requires Redis or returns HTTP `503`, enforces `Origin`/`Sec-Fetch-Site` checks on mutating requests, disables API docs, and marks session cookies `Secure` for HTTPS). |
+
+Authentication (such as HTTP Basic Auth or SSO) is enforced at the reverse proxy layer rather than via an application API token.
 
 ### Footer variables (optional)
 
@@ -117,9 +151,9 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
-| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for general (non-upload) API endpoints. Applied per client identity. |
-| `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
+| `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client IP (derived from `X-Forwarded-For` when `RESPRO_WEB_TRUSTED_PROXIES` trusts the proxy). |
+| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for general (non-upload) API endpoints. Applied per client IP. |
+| `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request and per-minute sample quota across single, batch, and regenerate submissions (returns HTTP `429` with `Retry-After`). Must be `> 0`. |
 
 ### Redis and job queue
 
@@ -131,7 +165,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_JOB_RETRY_INTERVALS` | `30` | Comma-separated delay in seconds between retries. Applied cyclically when `RESPRO_WEB_JOB_RETRY_MAX` is greater than the number of intervals. All values must be `> 0`. |
 
 !!! note "Worker reads queue settings too"
-    `REDIS_URL`, `RESPRO_WEB_JOB_TIMEOUT`, `RESPRO_WEB_JOB_RETRY_MAX`, and `RESPRO_WEB_JOB_RETRY_INTERVALS` must be set on the `respro-worker` service as well as `respro-web` so the worker and the API agree on timeouts and retries.
+    `REDIS_URL`, `RESPRO_WEB_RESULT_TTL`, `RESPRO_WEB_JOB_TIMEOUT`, `RESPRO_WEB_JOB_RETRY_MAX`, and `RESPRO_WEB_JOB_RETRY_INTERVALS` must be set identically on `respro-worker` and `respro-web` so the worker and the API agree on timeouts, TTLs, and retries. Always start the worker via `python -m web.backend.worker` (never bare `rq worker`, which defaults to pickle instead of `JSONSerializer`); it drains both the single-profile and batch queues (`profile_queue_name` and `batch_queue_name`, both defaulting to `profiling` in `web/backend/defaults.toml`).
 
 ### Maintained databases
 
@@ -149,10 +183,11 @@ For local development you can usually leave everything at defaults. For a public
 RESPRO_WEB_HOST=0.0.0.0
 RESPRO_WEB_PORT=8000
 
-# Auth and security — required for public hosting
-RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+# Origin, proxy trust, and deployment mode — required for public hosting
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
-RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+# Behind a host reverse proxy into Docker, use the Compose bridge gateway IP
+# or a canonical bridge subnet (not bare 127.0.0.1); verify with `docker network inspect`.
+RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12
 RESPRO_WEB_DEPLOYMENT_MODE=online
 
 # Redis (set on both respro-web and respro-worker)
@@ -173,11 +208,11 @@ RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
 
 For internet-facing deployment, keep `respro-web` reachable only through a reverse proxy and TLS.
 
-1. Keep the app behind a reverse proxy (Caddy/nginx/Traefik).
+1. Keep the app behind a reverse proxy (Caddy/nginx/Traefik) and bind `respro-web` only to `127.0.0.1:8000:8000` on the host.
 2. Terminate TLS at the proxy (HTTPS required).
-3. Set a strong `RESPRO_WEB_API_TOKEN`.
-4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your frontend domain(s).
-5. Configure `RESPRO_WEB_TRUSTED_PROXIES` only for known proxy IPs/CIDRs.
+3. Set `RESPRO_WEB_DEPLOYMENT_MODE=online` and enforce any user authentication (e.g. nginx `auth_basic` or SSO) at the reverse proxy.
+4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your public origin (wildcard `*` is rejected in `online` mode; separate-origin browser sessions are unsupported).
+5. Configure `RESPRO_WEB_TRUSTED_PROXIES` with your proxy's Docker bridge gateway IP or canonical bridge subnet (not bare `127.0.0.1`; `*` and `/0` are rejected in `online` mode).
 6. Optionally enable a legal notice (Impressum) — see below.
 
 ### Legal notice / Impressum (optional)
@@ -227,8 +262,9 @@ Then create `impressum.html` on the host next to your `docker-compose.web.yml`:
 
 Behaviour notes:
 
-- The `/legal` route is **public** (no API token required). This is intentional: a legal
-  notice must be reachable without barriers for DSGVO compliance.
+- The `/legal` route is **public** (exempt from session creation). If your reverse proxy
+  enforces HTTP Basic Auth or SSO, explicitly allow unauthenticated access to `/legal`
+  when barrier-free legal-notice access is required for DSGVO compliance.
 - A local file is read once at startup. Editing it requires a container restart.
 - If `RESPRO_WEB_IMPRINT` points at a missing or unreadable file, startup fails fast with
   a clear error. Leaving the variable unset silently disables the feature.
@@ -349,14 +385,19 @@ sudo systemctl reload nginx
 
 If you use another firewall, allow inbound TCP traffic to the nginx port you selected.
 
-6. **Configure backend trust and auth settings.**
+6. **Configure backend trust and origin settings.**
 
-Set in `.env`:
+Set in `.env` (if you want access control on the LAN proxy, configure `auth_basic` in nginx; `respro-web` does not use an application API token):
 
 ```bash
-RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=http://respro.internal
-RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+# Host nginx proxies to Docker's 127.0.0.1:8000 port over the Compose bridge
+# gateway IP (not 127.0.0.1). Inspect the exact gateway with:
+#   docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' \
+#     "$(docker compose -f docker-compose.web.yml ps -q respro-web)"
+# or `docker network inspect <compose_network>`, or use canonical CIDRs with no
+# host bits (e.g. 127.0.0.1,172.16.0.0/12).
+RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12
 ```
 
 !!! note "Keep `DEPLOYMENT_MODE=local` for plain HTTP"

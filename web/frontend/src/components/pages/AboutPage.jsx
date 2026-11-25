@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { useOptionalAboutLogic } from '../../DashboardContext';
 import aboutScopeIconSrc from '../../assets/icon-scope.svg';
 import okListIconSrc from '../../assets/ok_list.svg';
 import networkIconSrc from '../../assets/network.svg';
@@ -9,6 +10,7 @@ import databaseIconSrc from '../../assets/icon-database.svg';
 import logicIconSrc from '../../assets/logic.svg';
 import { FRONTEND_CONFIG, MAINTAINER_EMAIL } from '../../config';
 import { PROJECT_LICENSE_URL } from '../../constants';
+import { sanitizeEmailAddress } from '../../utils';
 import {
   ABOUT_CLI_COMMANDS,
   ABOUT_DATABASES_URL,
@@ -54,21 +56,49 @@ function AboutSectionCard({ as: Tag = 'section', id, className = '', iconSrc, ti
   );
 }
 
-export function AboutPage({ logic }) {
+export function AboutPage({ logic: logicProp }) {
+  const contextLogic = useOptionalAboutLogic();
+  const logic = logicProp ?? contextLogic;
   const { contactEmail } = logic;
-  const contactAddress = contactEmail || MAINTAINER_EMAIL;
+  const safeContactEmail = sanitizeEmailAddress(contactEmail);
+  const contactAddress = safeContactEmail || MAINTAINER_EMAIL;
   const [copiedCommandKey, setCopiedCommandKey] = useState('');
   const [activeSectionId, setActiveSectionId] = useState('about-scope');
+  const copyTimeoutRef = useRef(null);
+  const copyTokenRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      copyTokenRef.current += 1;
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const copyAboutCommand = async (content, key) => {
     if (!navigator?.clipboard?.writeText) return;
+    const token = ++copyTokenRef.current;
+    if (copyTimeoutRef.current !== null) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
     try {
       await navigator.clipboard.writeText(content);
+      if (!isMountedRef.current || token !== copyTokenRef.current) return;
       setCopiedCommandKey(key);
-      setTimeout(() => {
-        setCopiedCommandKey((current) => (current === key ? '' : current));
+      copyTimeoutRef.current = setTimeout(() => {
+        copyTimeoutRef.current = null;
+        if (isMountedRef.current) {
+          setCopiedCommandKey((current) => (current === key ? '' : current));
+        }
       }, 1600);
     } catch {
+      if (!isMountedRef.current || token !== copyTokenRef.current) return;
       setCopiedCommandKey('');
     }
   };
@@ -332,7 +362,6 @@ export function AboutPage({ logic }) {
       {activeSectionId === 'about-cli' && (
         <AboutSectionCard
           id="about-cli"
-          className="about-cli-card"
           iconSrc={cliIconSrc}
           title="CLI and Extended Functionality"
           docsLinks={[
@@ -417,7 +446,7 @@ export function AboutPage({ logic }) {
                 <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
                 with the database and software versions and a minimal example where possible. For direct contact, email{' '}
                 <a href={`mailto:${contactAddress}`}>
-                  {contactEmail ? contactAddress : 'Jonas Fuchs'}
+                  {safeContactEmail ? contactAddress : 'Jonas Fuchs'}
                 </a>.
               </p>
             </div>
@@ -466,6 +495,7 @@ export function AboutPage({ logic }) {
                   src={sponsor.src}
                   alt={sponsor.alt}
                   className="about-sponsor-logo"
+                  referrerPolicy="no-referrer"
                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
               </a>

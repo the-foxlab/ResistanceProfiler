@@ -1,5 +1,7 @@
 import { Link } from 'react-router';
 
+import { useOptionalHomeLogic } from '../../DashboardContext';
+import { useOptionalTourActions } from '../tour/TourContext';
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
 import shieldIconSrc from '../../assets/shield.svg';
@@ -56,8 +58,12 @@ function organismListItems(db) {
   return items;
 }
 
-export function HomePage({ logic }) {
-  const { databases = [], onStartTour, setSelectedDatabaseId } = logic;
+export function HomePage({ logic: logicProp }) {
+  const contextLogic = useOptionalHomeLogic();
+  const tourActions = useOptionalTourActions();
+  const logic = logicProp ?? contextLogic ?? {};
+  const { databases = [], onStartTour: logicOnStartTour, setSelectedDatabaseId } = logic;
+  const onStartTour = logicProp !== undefined ? logicOnStartTour : tourActions?.startTour;
 
   const totalRules = databases.reduce((sum, db) => sum + (db.mutation_count || 0), 0);
   const totalOrganisms = sumOrganisms(databases);
@@ -147,7 +153,7 @@ export function HomePage({ logic }) {
       </section>
 
       <section className="home-notices" aria-label="Important notices">
-        <article className="about-notice-card about-notice-card-research" tabIndex={0}>
+        <article className="about-notice-card" tabIndex={0}>
           <span className="about-notice-icon" aria-hidden="true">
             <span className="about-icon-mask" style={{ '--icon-src': `url(${shieldIconSrc})` }} />
           </span>
@@ -158,7 +164,7 @@ export function HomePage({ logic }) {
             </p>
           </div>
         </article>
-        <article className="about-notice-card about-notice-card-database" tabIndex={0}>
+        <article className="about-notice-card" tabIndex={0}>
           <span className="about-notice-icon" aria-hidden="true">
             <span className="about-icon-mask" style={{ '--icon-src': `url(${noSignIconSrc})` }} />
           </span>

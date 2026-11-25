@@ -1,9 +1,9 @@
-import mutationsIconSrc from '../../assets/search.svg';
-import resetFilterIconSrc from '../../assets/reset_filter.svg';
+import { useOptionalMutationsLogic } from '../../DashboardContext';
 
 function RuleTableSection({
   title,
   searchId,
+  searchLabel,
   filterValue,
   onFilterChange,
   onReset,
@@ -15,6 +15,8 @@ function RuleTableSection({
   emptyFilterMessage,
   mutationsLoaded,
   onSortColumn,
+  sortColumn,
+  sortAsc,
 }) {
   return (
     <section className="mutation-merged-section">
@@ -26,11 +28,12 @@ function RuleTableSection({
       </div>
       <div className="mutation-toolbar">
         <label className="mutation-search" htmlFor={searchId}>
-          <img src={mutationsIconSrc} alt="" aria-hidden="true" />
+          <span className="mutation-search-icon" aria-hidden="true" />
           <input
             id={searchId}
             className="mutation-search-input"
             type="search"
+            aria-label={searchLabel}
             placeholder="search rules"
             value={filterValue}
             onChange={(event) => onFilterChange(event.target.value)}
@@ -43,9 +46,14 @@ function RuleTableSection({
           title="Reset filter"
           onClick={onReset}
         >
-          <img src={resetFilterIconSrc} alt="" aria-hidden="true" />
+          <span className="mutation-reset-icon" aria-hidden="true" />
         </button>
-        <button type="button" className="mutation-download-button" onClick={onDownload}>
+        <button
+          type="button"
+          className="mutation-download-button"
+          onClick={onDownload}
+          disabled={!mutationsLoaded}
+        >
           Download as TSV
         </button>
       </div>
@@ -53,18 +61,38 @@ function RuleTableSection({
         <table>
           <thead>
             <tr>
-              {columns.map((column, index) => (
-                <th
-                  key={column.key}
-                  className={[
-                    onSortColumn ? 'sortable-col' : '',
-                    column.key === 'comment' ? 'mutation-comment-column' : '',
-                  ].filter(Boolean).join(' ')}
-                  onClick={onSortColumn ? () => onSortColumn(index) : undefined}
-                >
-                  {column.label}
-                </th>
-              ))}
+              {columns.map((column, index) => {
+                const isSortable = Boolean(onSortColumn);
+                const isActiveSort = isSortable && sortColumn === index;
+                return (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    aria-sort={isSortable ? (isActiveSort ? (sortAsc ? 'ascending' : 'descending') : 'none') : undefined}
+                    className={[
+                      isSortable ? 'sortable-col' : '',
+                      column.key === 'comment' ? 'mutation-comment-column' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {isSortable ? (
+                      <button
+                        type="button"
+                        className="mutation-sort-button"
+                        onClick={() => onSortColumn(index)}
+                      >
+                        {column.label}
+                        {isActiveSort ? (
+                          <span className="mutation-sort-indicator" aria-hidden="true">
+                            {sortAsc ? '▲' : '▼'}
+                          </span>
+                        ) : null}
+                      </button>
+                    ) : (
+                      column.label
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -93,7 +121,9 @@ function RuleTableSection({
   );
 }
 
-export function MutationsPage({ logic }) {
+export function MutationsPage({ logic: logicProp }) {
+  const contextLogic = useOptionalMutationsLogic();
+  const logic = logicProp ?? contextLogic;
   const {
     rules,
     formulaRules,
@@ -103,15 +133,14 @@ export function MutationsPage({ logic }) {
     displayedFormulaRules,
     mutationFilter,
     setMutationFilter,
-    setMutationFilterColumn,
     mutationSortColumn,
     setMutationSortColumn,
     mutationSortAsc,
     setMutationSortAsc,
     formulaFilter,
     setFormulaFilter,
-    setFormulaFilterColumn,
     mutationsLoaded,
+    statusError,
     downloadMutationsAsTsv,
     downloadFormulaRulesAsTsv,
   } = logic;
@@ -133,16 +162,20 @@ export function MutationsPage({ logic }) {
 
   return (
     <article className={cardClassName}>
+      {statusError ? (
+        <p className="status" role="alert" style={{ color: 'var(--color-error)' }}>
+          {statusError}
+        </p>
+      ) : null}
+
       {rules.length > 0 ? (
         <RuleTableSection
           title="Single mutations"
           searchId="mutation-rules-search"
+          searchLabel="Search single mutations"
           filterValue={mutationFilter}
           onFilterChange={setMutationFilter}
-          onReset={() => {
-            setMutationFilter('');
-            setMutationFilterColumn('-1');
-          }}
+          onReset={() => setMutationFilter('')}
           onDownload={downloadMutationsAsTsv}
           columns={mutationColumns}
           rows={displayedRules}
@@ -151,6 +184,8 @@ export function MutationsPage({ logic }) {
           emptyFilterMessage="No mutations match the current filter."
           mutationsLoaded={mutationsLoaded}
           onSortColumn={handleSortSingle}
+          sortColumn={mutationSortColumn}
+          sortAsc={mutationSortAsc}
         />
       ) : null}
 
@@ -158,12 +193,10 @@ export function MutationsPage({ logic }) {
         <RuleTableSection
           title="Combinatorial mutations"
           searchId="formula-rules-search"
+          searchLabel="Search combinatorial mutations"
           filterValue={formulaFilter}
           onFilterChange={setFormulaFilter}
-          onReset={() => {
-            setFormulaFilter('');
-            setFormulaFilterColumn('-1');
-          }}
+          onReset={() => setFormulaFilter('')}
           onDownload={downloadFormulaRulesAsTsv}
           columns={formulaColumns}
           rows={displayedFormulaRules}

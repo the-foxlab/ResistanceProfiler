@@ -340,8 +340,8 @@ class TestBuildComparisonMatrixCoverageGap:
 
         # s1: detected, allele_freq=0.9
         assert result.matrix[0][0] == CompareCell(allele_freq=0.9, db_hit=False)
-        # s2: in coverage gap, allele_freq=None
-        assert result.matrix[1][0] == CompareCell(allele_freq=None, db_hit=False)
+        # s2: in coverage gap, allele_freq=None, coverage_gap=True
+        assert result.matrix[1][0] == CompareCell(allele_freq=None, db_hit=False, coverage_gap=True)
 
         # No db_hits in this scenario
         assert result.db_hit_map == [False]
@@ -592,8 +592,9 @@ class TestCompareEndpoint:
         records each path as an artifact under that session hash. Returns the
         opaque artifact IDs to pass as ``artifact_ids`` to ``/api/compare``.
         """
-        # Establish the session cookie via the health endpoint.
-        client.get('/api/health')
+        # Establish the session cookie via a stateful session endpoint.
+        warmup = client.post('/api/session/cleanup', json={'upload_ids': [], 'artifact_ids': []})
+        assert warmup.status_code == 200
         cookie_value = client.cookies.get(SESSION_COOKIE_NAME)
         assert cookie_value, 'session cookie was not issued'
         session_hash = hash_session_token(cookie_value)
@@ -1087,12 +1088,14 @@ class TestBuildComparisonMatrixFeatureDisplayNames:
         path_validators,
         tmp_path: Path,
     ) -> None:
-        """Resolve display names for mat_peptide features from project DB."""
+        """Resolve display names for mat_peptide features from a confined project DB."""
         is_within, is_allowed = path_validators
 
         from respro.db.schema import create_schema
 
-        db_path = tmp_path / 'test_display.db'
+        project_databases_dir = tmp_path / 'project_databases'
+        project_databases_dir.mkdir(parents=True, exist_ok=True)
+        db_path = project_databases_dir / 'test_display.db'
         conn = create_schema(db_path)
         conn.execute("INSERT INTO project (name, schema_version, uuid) VALUES ('p', 6, 'u1')")
         conn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'NC_001802.1', 1000)")
@@ -1125,7 +1128,13 @@ class TestBuildComparisonMatrixFeatureDisplayNames:
             ],
         )
 
-        result = build_comparison_matrix([p1], results_dir, is_within, is_allowed)
+        result = build_comparison_matrix(
+            [p1],
+            results_dir,
+            is_within,
+            is_allowed,
+            project_databases_dir=project_databases_dir,
+        )
         assert result.feature_display_names == {
             'gag': 'gag',
             'pol_mat_peptide_1': 'Protease',
@@ -1441,8 +1450,8 @@ class TestBuildComparisonMatrixSampleDisambiguation:
         )
 
         result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
-        # Both have name='alpha', so disambiguation kicks in
-        assert result.samples == ['alpha (alpha)', 'alpha (alpha)']
+        # Both have name='alpha' and derived='alpha', so Pass 2 disambiguation appends #1 / #2
+        assert result.samples == ['alpha (alpha) #1', 'alpha (alpha) #2']
 
     def test_mixed_collision_and_unique(
         self,
@@ -1525,3 +1534,448 @@ class TestBuildComparisonMatrixSampleDisambiguation:
 
         result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
         assert 'filename' in result.sample_disambiguation_note.lower()
+
+
+class TestCompareSecurityAndAccuracyRegression:
+    """Regression & adversarial tests for S1/WA-006, WA-016, WA-033, and S5-B5."""
+
+    @staticmethod
+    def _create_multi_ref_project_db(db_path: Path, ref_features: dict[str, list[tuple[str, str, str]]]) -> Path:
+        from respro.db.schema import create_schema
+
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = create_schema(db_path)
+        conn.execute("INSERT INTO project (name, schema_version, uuid) VALUES ('p', 6, 'u1')")
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, 'DrugA')")
+        feature_id = 0
+        for ref_idx, (ref_name, features) in enumerate(ref_features.items(), start=1):
+            conn.execute('INSERT INTO reference (project_id, name, length) VALUES (1, ?, 1000)', (ref_name,))
+            for fname, protein, ftype in features:
+                feature_id += 1
+                conn.execute(
+                    'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+                    'nt_sequence, feature_type) VALUES (?, ?, ?, 0, 100, ?, ?, ?)',
+                    (ref_idx, fname, protein, '+', 'ATG', ftype),
+                )
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, reference, "
+            "mutation, phenotype) VALUES (1, 1, 1, 'K', 'E', 'resistant')"
+        )
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_coverage_gap_intervals_merge_and_boundaries_exact(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        is_within, is_allowed = path_validators
+        from web.backend.services import compare as compare_service
+
+        # Mutations at 1-based positions: 4 (outside), 5 (start of [4..6]), 8 (adjacent [7..9]),
+        # 12 (end of [10..11] merged w/ [8..11]), 13 (outside), and 1_000_000 (far position)
+        p1 = _make_result_json(
+            results_dir / 's1.20260601.results.json',
+            sample_name='s1',
+            variant_result=[
+                _variant(feature_name='gene_a', codon_pos=pos - 1, ref_aa='K', alt_aa='N', allele_freq=0.8)
+                for pos in (4, 5, 8, 12, 13)
+            ],
+        )
+        p2 = _make_result_json(
+            results_dir / 's2.20260602.results.json',
+            sample_name='s2',
+            variant_result=[],
+            coverage_gap=[
+                # Adjacent & overlapping intervals on gene_a (0-based): [4..6], [7..9], [8..11] -> 1-based [5..12]
+                _coverage_gap_entry(feature_name='gene_a', codon_start=7, codon_end=9),
+                _coverage_gap_entry(feature_name='gene_a', codon_start=4, codon_end=6),
+                _coverage_gap_entry(feature_name='gene_a', codon_start=8, codon_end=11),
+                # Giant bounded gap on unused feature (succeeds in O(log n) without set expansion)
+                _coverage_gap_entry(feature_name='unused_feature', codon_start=0, codon_end=compare_service.MAX_COVERAGE_GAP_END),
+            ],
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        # Positions sorted: 4, 5, 8, 12, 13
+        row = result.matrix[1]
+        assert row[0] == CompareCell(allele_freq=0.0, db_hit=False, coverage_gap=False)
+        assert row[1] == CompareCell(allele_freq=None, db_hit=False, coverage_gap=True)
+        assert row[2] == CompareCell(allele_freq=None, db_hit=False, coverage_gap=True)
+        assert row[3] == CompareCell(allele_freq=None, db_hit=False, coverage_gap=True)
+        assert row[4] == CompareCell(allele_freq=0.0, db_hit=False, coverage_gap=False)
+
+    def test_coverage_gap_rejects_malformed_and_oversized_inputs(
+        self,
+        results_dir: Path,
+        path_validators,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        is_within, is_allowed = path_validators
+        from web.backend.services import compare as compare_service
+
+        bad_gaps = [
+            {'feature_name': 'gene_a', 'codon_start': -1, 'codon_end': 5},
+            {'feature_name': 'gene_a', 'codon_start': 10, 'codon_end': 5},
+            {'feature_name': 'gene_a', 'codon_start': True, 'codon_end': 5},
+            {'feature_name': 'gene_a', 'codon_start': 0, 'codon_end': False},
+            {'feature_name': 'gene_a', 'codon_start': '0', 'codon_end': 5},
+            {'feature_name': 'gene_a', 'codon_start': 0, 'codon_end': compare_service.MAX_COVERAGE_GAP_END + 1},
+        ]
+        for idx, bad_gap in enumerate(bad_gaps):
+            p = _make_result_json(
+                results_dir / f'bad_{idx}.20260601.results.json',
+                sample_name=f's{idx}',
+                coverage_gap=[bad_gap],
+            )
+            with pytest.raises(ValueError):
+                build_comparison_matrix([p], results_dir, is_within, is_allowed)
+
+        # Span cap across multiple disjoint intervals
+        monkeypatch.setattr(compare_service, 'MAX_COVERAGE_GAP_SPAN_PER_FEATURE', 10)
+        p_span = _make_result_json(
+            results_dir / 'span.20260601.results.json',
+            sample_name='span',
+            coverage_gap=[
+                _coverage_gap_entry(feature_name='gene_a', codon_start=0, codon_end=5),
+                _coverage_gap_entry(feature_name='gene_a', codon_start=10, codon_end=15),
+            ],
+        )
+        with pytest.raises(ValueError, match='span exceeds'):
+            build_comparison_matrix([p_span], results_dir, is_within, is_allowed)
+        monkeypatch.undo()
+
+        # Interval count cap
+        monkeypatch.setattr(compare_service, 'MAX_COVERAGE_GAP_INTERVALS_PER_SAMPLE', 2)
+        p_count = _make_result_json(
+            results_dir / 'count.20260601.results.json',
+            sample_name='count',
+            coverage_gap=[
+                _coverage_gap_entry(feature_name='gene_a', codon_start=i * 2, codon_end=i * 2)
+                for i in range(3)
+            ],
+        )
+        with pytest.raises(ValueError, match='interval count'):
+            build_comparison_matrix([p_count], results_dir, is_within, is_allowed)
+
+    def test_caps_on_aggregate_json_bytes_unique_mutations_and_matrix_cells(
+        self,
+        results_dir: Path,
+        path_validators,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        is_within, is_allowed = path_validators
+        from web.backend.services import compare as compare_service
+
+        p1 = _make_result_json(
+            results_dir / 's1.20260601.results.json',
+            sample_name='s1',
+            variant_result=[
+                _variant(codon_pos=i, ref_aa='K', alt_aa='N', allele_freq=0.5)
+                for i in range(4)
+            ],
+        )
+        p2 = _make_result_json(
+            results_dir / 's2.20260602.results.json',
+            sample_name='s2',
+            variant_result=[],
+        )
+
+        # Aggregate JSON bytes cap
+        monkeypatch.setattr(compare_service, 'MAX_AGGREGATE_JSON_BYTES', 50)
+        with pytest.raises(ValueError, match='Total comparison input size'):
+            build_comparison_matrix([p1], results_dir, is_within, is_allowed)
+        monkeypatch.undo()
+
+        # Unique mutations cap
+        monkeypatch.setattr(compare_service, 'MAX_UNIQUE_MUTATIONS', 3)
+        with pytest.raises(ValueError, match='Unique mutation count'):
+            build_comparison_matrix([p1], results_dir, is_within, is_allowed)
+        monkeypatch.undo()
+
+        # Matrix cells cap (2 samples * 4 mutations = 8 > 6)
+        monkeypatch.setattr(compare_service, 'MAX_MATRIX_CELLS', 6)
+        with pytest.raises(ValueError, match='Comparison matrix size'):
+            build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+
+    def test_null_sections_handled_gracefully_and_invalid_section_types_rejected(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        is_within, is_allowed = path_validators
+
+        p_nulls = results_dir / 'nulls.20260601.results.json'
+        p_nulls.write_text(
+            json.dumps({
+                'run': {'project_name': 'db', 'reference_name': 'NC_001802.1', 'sample_name': 's1'},
+                'variant_result': None,
+                'coverage_gap': None,
+                'formula_rule_hit': None,
+            }),
+            encoding='utf-8',
+        )
+        res = build_comparison_matrix([p_nulls], results_dir, is_within, is_allowed)
+        assert res.mutations == []
+        assert res.matrix == [[]]
+
+        # matched_variants: null inside hit_json is also safe
+        p_null_mv = _make_result_json(
+            results_dir / 'null_mv.20260602.results.json',
+            sample_name='s2',
+            formula_rule_hit=[{'hit_json': json.dumps({'drug': 'd', 'matched_variants': None})}],
+        )
+        res2 = build_comparison_matrix([p_null_mv], results_dir, is_within, is_allowed)
+        assert res2.mutations == []
+
+        # Non-list variant_result raises ValueError (not TypeError)
+        p_bad = results_dir / 'bad_vr.20260603.results.json'
+        p_bad.write_text(
+            json.dumps({
+                'run': {'project_name': 'db', 'reference_name': 'NC_001802.1', 'sample_name': 'bad'},
+                'variant_result': {'not': 'a list'},
+            }),
+            encoding='utf-8',
+        )
+        with pytest.raises(ValueError, match='array of objects'):
+            build_comparison_matrix([p_bad], results_dir, is_within, is_allowed)
+
+    def test_unknown_af_sentinel_and_duplicate_aa_aggregation_wa016(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 's1.20260601.results.json',
+            sample_name='s1',
+            variant_result=[
+                # Duplicate AA: 0.4 + 0.3 = 0.7, rule_match 0 + 1 -> db_hit=True
+                {**_variant(feature_name='gene_a', codon_pos=0, ref_aa='K', alt_aa='E', allele_freq=0.4, rule_match=0), 'consequence': ''},
+                {**_variant(feature_name='gene_a', codon_pos=0, ref_aa='K', alt_aa='E', allele_freq=0.3, rule_match=1), 'consequence': 'missense'},
+                # Duplicate AA capped at 1.0
+                _variant(feature_name='gene_a', codon_pos=1, ref_aa='R', alt_aa='K', allele_freq=0.7, rule_match=0),
+                _variant(feature_name='gene_a', codon_pos=1, ref_aa='R', alt_aa='K', allele_freq=0.6, rule_match=0),
+                # Detected variant with unknown AF (allele_freq: None)
+                {**_variant(feature_name='gene_a', codon_pos=2, ref_aa='A', alt_aa='V', rule_match=0), 'allele_freq': None},
+                # Duplicate AA where first is None and second is numeric -> upgrades to numeric
+                {**_variant(feature_name='gene_a', codon_pos=3, ref_aa='G', alt_aa='S', rule_match=0), 'allele_freq': None},
+                _variant(feature_name='gene_a', codon_pos=3, ref_aa='G', alt_aa='S', allele_freq=0.25, rule_match=0),
+            ],
+        )
+
+        result = build_comparison_matrix([p1], results_dir, is_within, is_allowed)
+        by_pos = {m.position: (result.matrix[0][i], result.consequences[i]) for i, m in enumerate(result.mutations)}
+
+        cell_1, conseq_1 = by_pos[1]
+        assert cell_1.allele_freq == pytest.approx(0.7)
+        assert cell_1.db_hit is True
+        assert cell_1.coverage_gap is False
+        assert conseq_1 == 'missense'
+
+        cell_2, _ = by_pos[2]
+        assert cell_2 == CompareCell(allele_freq=1.0, db_hit=False, coverage_gap=False)
+
+        cell_3, _ = by_pos[3]
+        assert cell_3 == CompareCell(allele_freq=None, db_hit=False, coverage_gap=False)
+
+        cell_4, _ = by_pos[4]
+        assert cell_4 == CompareCell(allele_freq=0.25, db_hit=False, coverage_gap=False)
+
+    def test_empty_project_or_reference_rejected_and_multiref_validated(
+        self,
+        results_dir: Path,
+        path_validators,
+        tmp_path: Path,
+    ) -> None:
+        is_within, is_allowed = path_validators
+
+        for field_kwargs in (
+            {'project_name': ''},
+            {'reference_name': ''},
+        ):
+            p = _make_result_json(
+                results_dir / 'empty_field.20260601.results.json',
+                sample_name='s',
+                **field_kwargs,
+            )
+            with pytest.raises(ValueError, match='missing required'):
+                build_comparison_matrix([p], results_dir, is_within, is_allowed)
+
+        project_databases_dir = tmp_path / 'project_databases'
+        db_path = self._create_multi_ref_project_db(
+            project_databases_dir / 'multi.db',
+            {
+                'Ref1': [('f1', 'Prot 1', 'mat_peptide')],
+                'Ref2': [('f2', 'Prot 2', 'mat_peptide')],
+            },
+        )
+
+        # Sample 1 uses top-level payload['references'] (real respro export layout)
+        p1 = results_dir / 'mr1.20260601.results.json'
+        p1.write_text(
+            json.dumps({
+                'run': {
+                    'project_name': 'p',
+                    'sample_name': 's1',
+                    'reference_name': 'Ref1',
+                    'project_db_path': str(db_path),
+                },
+                'references': [{'reference_name': 'Ref1'}, {'reference_name': 'Ref2'}],
+                'variant_result': [_variant(feature_name='f1', codon_pos=0)],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+            }),
+            encoding='utf-8',
+        )
+        # Sample 2 uses run['references'] in reversed order (still same frozenset)
+        p2 = results_dir / 'mr2.20260602.results.json'
+        p2.write_text(
+            json.dumps({
+                'run': {
+                    'project_name': 'p',
+                    'sample_name': 's2',
+                    'reference_name': 'Ref1',
+                    'project_db_path': str(db_path),
+                    'references': [{'reference_name': 'Ref2'}, {'reference_name': 'Ref1'}],
+                },
+                'variant_result': [_variant(feature_name='f2', codon_pos=1)],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+            }),
+            encoding='utf-8',
+        )
+
+        res = build_comparison_matrix(
+            [p1, p2],
+            results_dir,
+            is_within,
+            is_allowed,
+            project_databases_dir=project_databases_dir,
+        )
+        assert res.references == ['Ref1', 'Ref1']
+        assert res.feature_display_names == {'f1': 'Prot 1', 'f2': 'Prot 2'}
+
+        # Sample 3 has mismatched secondary reference Ref3 -> rejected
+        p3 = results_dir / 'mr3.20260603.results.json'
+        p3.write_text(
+            json.dumps({
+                'run': {'project_name': 'p', 'sample_name': 's3', 'reference_name': 'Ref1'},
+                'references': [{'reference_name': 'Ref1'}, {'reference_name': 'Ref3'}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+            }),
+            encoding='utf-8',
+        )
+        with pytest.raises(ValueError, match='different references'):
+            build_comparison_matrix([p1, p3], results_dir, is_within, is_allowed)
+
+    def test_project_db_path_confinement_null_symlink_and_uri_special_chars_wa033(
+        self,
+        results_dir: Path,
+        path_validators,
+        tmp_path: Path,
+    ) -> None:
+        is_within, is_allowed = path_validators
+        project_databases_dir = tmp_path / 'project_databases'
+        project_databases_dir.mkdir(parents=True, exist_ok=True)
+
+        # Outside DB must never be opened
+        outside_db = self._create_multi_ref_project_db(
+            tmp_path / 'outside.db',
+            {'NC_001802.1': [('gag', 'LEAKED', 'mat_peptide')]},
+        )
+        # Symlink inside project_databases_dir pointing outside must also be rejected
+        symlink_db = project_databases_dir / 'escape.db'
+        symlink_db.symlink_to(outside_db)
+
+        # Confined DB containing '#' and '?' must open cleanly via as_uri() without creating junk 'db' file
+        special_db = self._create_multi_ref_project_db(
+            project_databases_dir / 'db#1?.db',
+            {'NC_001802.1': [('gag', 'SpecialGag', 'mat_peptide')]},
+        )
+
+        for bad_db_value in (None, 123, 'bad\x00.db', str(project_databases_dir), str(outside_db), str(symlink_db)):
+            p = results_dir / 'db_check.20260601.results.json'
+            p.write_text(
+                json.dumps({
+                    'run': {
+                        'project_name': 'p',
+                        'sample_name': 's',
+                        'reference_name': 'NC_001802.1',
+                        'project_db_path': bad_db_value,
+                    },
+                    'variant_result': [],
+                    'coverage_gap': [],
+                    'formula_rule_hit': [],
+                }),
+                encoding='utf-8',
+            )
+            res = build_comparison_matrix(
+                [p],
+                results_dir,
+                is_within,
+                is_allowed,
+                project_databases_dir=project_databases_dir,
+            )
+            assert res.feature_display_names == {}
+
+        p_special = _make_result_json(
+            results_dir / 'special.20260601.results.json',
+            sample_name='special',
+            project_db_path=str(special_db),
+        )
+        res_special = build_comparison_matrix(
+            [p_special],
+            results_dir,
+            is_within,
+            is_allowed,
+            project_databases_dir=project_databases_dir,
+        )
+        assert res_special.feature_display_names == {'gag': 'SpecialGag'}
+        assert not (project_databases_dir / 'db').exists()
+
+    def test_sample_disambiguation_avoids_existing_hash_suffix_collisions_s5_b5(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(results_dir / 'same.20260601000000000001.results.json', sample_name='Same')
+        p2 = _make_result_json(results_dir / 'same.20260602000000000002.results.json', sample_name='Same')
+        p3 = _make_result_json(results_dir / 'other.20260603000000000003.results.json', sample_name='Same (same) #1')
+
+        res = build_comparison_matrix([p1, p2, p3], results_dir, is_within, is_allowed)
+        assert res.samples == ['Same (same) #2', 'Same (same) #3', 'Same (same) #1']
+        assert len(set(res.samples)) == 3
+        assert 'filename' in res.sample_disambiguation_note.lower()
+
+    def test_compare_endpoint_rejects_bad_gaps_and_empty_metadata_400(
+        self,
+        client_for_compare: TestClient,
+        startup_config_with_results: StartupConfig,
+    ) -> None:
+        reset_memory_stores()
+        results_dir = startup_config_with_results.results_dir
+        bad_gap_path = _make_result_json(
+            results_dir / 'badgap.20260601000000000001.results.json',
+            sample_name='badgap',
+            coverage_gap=[_coverage_gap_entry(codon_start=10, codon_end=5)],
+        )
+        missing_ref_path = _make_result_json(
+            results_dir / 'noref.20260602000000000002.results.json',
+            sample_name='noref',
+            reference_name='',
+        )
+        art_ids = TestCompareEndpoint._register_artifacts(client_for_compare, [bad_gap_path, missing_ref_path])
+
+        r_gap = client_for_compare.post('/api/compare', json={'artifact_ids': [art_ids[0]]})
+        assert r_gap.status_code == 400
+
+        r_ref = client_for_compare.post('/api/compare', json={'artifact_ids': [art_ids[1]]})
+        assert r_ref.status_code == 400
+        reset_memory_stores()

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 
 import Plotly from 'plotly.js-dist-min';
 import { ThemeContext } from '../../hooks/useTheme';
@@ -10,6 +10,7 @@ vi.mock('plotly.js-dist-min', () => ({
   default: {
     react: vi.fn(),
     purge: vi.fn(),
+    Plots: { resize: vi.fn() },
   },
 }));
 
@@ -67,5 +68,68 @@ describe('database plot theme styling', () => {
     expect(darkCall[1][0].marker.line.color).toBe('#1c1c1f');
     expect(darkCall[2].annotations.map((annotation) => annotation.font.color))
       .toEqual(['#f4f4f5', '#d4d4d8']);
+  });
+
+  it('purges Plotly when slices become empty and on unmount', () => {
+    const { rerender, unmount } = render(
+      <ThemeContext.Provider value="light">
+        <DatabasePieSummaryRow tile={tile} />
+      </ThemeContext.Provider>,
+    );
+    const firstEl = Plotly.react.mock.calls[0][0];
+    expect(Plotly.purge).not.toHaveBeenCalled();
+
+    const emptyTile = {
+      pies: [{
+        ...tile.pies[0],
+        total: 0,
+        slices: [],
+      }],
+    };
+    rerender(
+      <ThemeContext.Provider value="light">
+        <DatabasePieSummaryRow tile={emptyTile} />
+      </ThemeContext.Provider>,
+    );
+    expect(Plotly.purge).toHaveBeenCalledTimes(1);
+    expect(Plotly.purge).toHaveBeenCalledWith(firstEl);
+
+    rerender(
+      <ThemeContext.Provider value="light">
+        <DatabasePieSummaryRow tile={tile} />
+      </ThemeContext.Provider>,
+    );
+    const secondEl = Plotly.react.mock.calls.at(-1)[0];
+    expect(Plotly.purge).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(Plotly.purge).toHaveBeenCalledTimes(2);
+    expect(Plotly.purge).toHaveBeenLastCalledWith(secondEl);
+  });
+
+  it('passes activeTheme to baseLayout even without DOM data-theme and renders error with var(--color-error)', () => {
+    document.documentElement.setAttribute('data-theme', 'light');
+    render(
+      <ThemeContext.Provider value="dark">
+        <DatabasePieSummaryRow tile={tile} />
+      </ThemeContext.Provider>,
+    );
+
+    const layout = Plotly.react.mock.calls.at(-1)[2];
+    expect(layout.font.color).toBe('#d4d4d8');
+    expect(layout.hoverlabel.bgcolor).toBe('#27272a');
+
+    cleanup();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    Plotly.react.mockImplementationOnce(() => {
+      throw new Error('pie boom');
+    });
+    render(
+      <ThemeContext.Provider value="dark">
+        <DatabasePieSummaryRow tile={tile} />
+      </ThemeContext.Provider>,
+    );
+    expect(screen.getByText(/Chart error: pie boom/)).toHaveStyle({ color: 'var(--color-error)' });
+    errSpy.mockRestore();
   });
 });

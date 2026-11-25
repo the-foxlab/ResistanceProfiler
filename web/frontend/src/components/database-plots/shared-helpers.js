@@ -2,7 +2,7 @@
  * Shared helpers used across multiple chart-domain modules.
  */
 
-import { PIE_COLORS, RANK_TONES } from './shared';
+import { PIE_COLORS } from './shared';
 import { isPopulated, labelToRank } from '../../utils';
 
 export function displayValue(value, fallback = 'n/a') {
@@ -70,10 +70,6 @@ export function classificationTone(label) {
     return 'contradictory';
   }
   return `rank${rank}`;
-}
-
-export function hasTypedClassification(toneCounts) {
-  return RANK_TONES.some((tone) => (toneCounts.get(tone) || 0) > 0);
 }
 
 export function limitPieSlices(entries) {

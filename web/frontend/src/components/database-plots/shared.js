@@ -14,6 +14,17 @@ export const CLASSIFICATION_COLORS = {
   unknown: '#c3ccd6',
 };
 
+export const DARK_CLASSIFICATION_COLORS = {
+  count: '#2dd4bf',
+  rank1: '#4ade80',
+  rank2: '#facc15',
+  rank3: '#fbbf24',
+  rank4: '#fb923c',
+  rank5: '#f87171',
+  contradictory: '#94a3b8',
+  unknown: '#cbd5e1',
+};
+
 // Categorical colors are ordered consistently across pies and drug plots.
 export const PIE_COLORS = ['#0f766e', '#2563eb', '#c2410c', '#7c3aed', '#b45309', '#0284c7', '#be185d'];
 const DARK_PIE_COLORS = ['#5eead4', '#93c5fd', '#fdba74', '#c4b5fd', '#fcd34d', '#67e8f9', '#f9a8d4'];
@@ -59,12 +70,24 @@ export function currentTheme() {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
 }
 
-function pick(colors) {
-  return colors[currentTheme()];
+export function resolveTheme(theme = currentTheme()) {
+  return theme === 'dark' ? 'dark' : 'light';
 }
 
-export function pieColorsForTheme(theme) {
-  return theme === 'dark' ? DARK_PIE_COLORS : PIE_COLORS;
+function pick(colors, theme = currentTheme()) {
+  return colors[resolveTheme(theme)];
+}
+
+export function pieColorsForTheme(theme = currentTheme()) {
+  return resolveTheme(theme) === 'dark' ? DARK_PIE_COLORS : PIE_COLORS;
+}
+
+export function classificationColorsForTheme(theme = currentTheme()) {
+  return resolveTheme(theme) === 'dark' ? DARK_CLASSIFICATION_COLORS : CLASSIFICATION_COLORS;
+}
+
+export function scoreBarColorForTheme(theme = currentTheme()) {
+  return resolveTheme(theme) === 'dark' ? '#2dd4bf' : '#0f766e';
 }
 
 /**
@@ -72,35 +95,36 @@ export function pieColorsForTheme(theme) {
  * per-chart specifics on top, so typography, grid and background styling stay
  * consistent across the dashboard without duplicating values.
  */
-export function baseLayout() {
+export function baseLayout(theme = currentTheme()) {
+  const resolvedTheme = resolveTheme(theme);
   return {
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
     font: {
       family: PLOTLY_FONT_FAMILY,
       size: 12,
-      color: pick(INK_SOFT),
+      color: pick(INK_SOFT, resolvedTheme),
     },
     // Default axis treatment: hairline dotted grid on both axes; components
     // override showgrid/gridcolor per axis where a cleaner look is wanted.
     xaxis: {
-      gridcolor: pick(GRID),
+      gridcolor: pick(GRID, resolvedTheme),
       gridwidth: 1,
       griddash: 'dot',
       zeroline: false,
-      tickfont: { color: pick(INK_SOFT) },
+      tickfont: { color: pick(INK_SOFT, resolvedTheme) },
     },
     yaxis: {
-      gridcolor: pick(GRID),
+      gridcolor: pick(GRID, resolvedTheme),
       gridwidth: 1,
       griddash: 'dot',
       zeroline: false,
-      tickfont: { color: pick(INK_SOFT) },
+      tickfont: { color: pick(INK_SOFT, resolvedTheme) },
     },
     hoverlabel: {
-      font: { family: PLOTLY_FONT_FAMILY, size: 12, color: pick(INK) },
-      bgcolor: currentTheme() === 'dark' ? '#27272a' : '#ffffff',
-      bordercolor: currentTheme() === 'dark' ? '#3f3f46' : '#d4d4d8',
+      font: { family: PLOTLY_FONT_FAMILY, size: 12, color: pick(INK, resolvedTheme) },
+      bgcolor: resolvedTheme === 'dark' ? '#27272a' : '#ffffff',
+      bordercolor: resolvedTheme === 'dark' ? '#3f3f46' : '#d4d4d8',
     },
   };
 }
@@ -110,6 +134,6 @@ export function baseLayout() {
  * `{ size: 12, color: '#4c6072' }` objects in each chart component. Uses
  * AXIS_TITLE rather than INK_MUTED so titles stay readable in dark mode.
  */
-export function axisTitleFont() {
-  return { size: 12, color: pick(AXIS_TITLE) };
+export function axisTitleFont(theme = currentTheme()) {
+  return { size: 12, color: pick(AXIS_TITLE, theme) };
 }

@@ -25,14 +25,16 @@ export function CompareSelectorsCard({
       <div className="compare-db-dropdowns">
         {[0, 1, 2].map((index) => {
           const options = optionsForSlot(index);
-          const isDisabled = index > 0 && options.length === 0;
+          const previousEmpty = index > 0 && slots[index - 1] === '';
+          const noComparable = index > 0 && !previousEmpty && options.length === 0;
+          const isDisabled = previousEmpty || noComparable;
           return (
             <div key={index} className="compare-db-slot">
               <label htmlFor={`compare-db-${index}`}>Database {index + 1}</label>
               <select
                 id={`compare-db-${index}`}
                 value={slots[index]}
-                disabled={index > 0 && slots[index - 1] === ''}
+                disabled={isDisabled}
                 onChange={(event) => handleSlotChange(index, event.target.value)}
               >
                 <option value="">—</option>
@@ -42,7 +44,7 @@ export function CompareSelectorsCard({
                   </option>
                 ))}
               </select>
-              {isDisabled && slots[index] === '' && (
+              {noComparable && slots[index] === '' && (
                 <span className="compare-slot-hint">No comparable databases</span>
               )}
             </div>

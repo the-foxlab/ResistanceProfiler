@@ -146,4 +146,38 @@ describe('buildTourSteps', () => {
       expect(nav.navigate).toHaveBeenCalledWith('/about');
     });
   });
+
+  describe('live DOM target selectors and advanced options opening', () => {
+    it('opens .profile-advanced-options on vcf-frequency-cutoff and vcf-coverage-cutoff, not on vcf-bam or vcf-sample-name', () => {
+      document.body.innerHTML = `
+        <div class="profile-upload-row-vcf">
+          <details class="profile-advanced-options"></details>
+        </div>
+      `;
+      const details = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+      const steps = buildTourSteps(makeNav());
+
+      for (const id of ['vcf-bam', 'vcf-sample-name']) {
+        details.open = false;
+        steps.find((s) => s.id === id).before();
+        expect(details.open, id).toBe(false);
+      }
+
+      for (const id of ['vcf-frequency-cutoff', 'vcf-coverage-cutoff']) {
+        details.open = false;
+        steps.find((s) => s.id === id).before();
+        expect(details.open, id).toBe(true);
+      }
+
+      document.body.innerHTML = '';
+    });
+
+    it('uses fallback selector for previous-reports and nav-about for about', () => {
+      const steps = buildTourSteps(makeNav());
+      expect(steps.find((s) => s.id === 'previous-reports').targetSelector)
+        .toBe('.analyze-report-actions, .report-placeholder');
+      expect(steps.find((s) => s.id === 'about').targetSelector)
+        .toBe('[data-tour-target="nav-about"]');
+    });
+  });
 });

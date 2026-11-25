@@ -366,7 +366,7 @@ button:disabled.analyze-primary {
 
 .upload-cancel-btn:hover {
   background: var(--line);
-  color: var(--fg, inherit);
+  color: var(--ink);
 }
 
 .upload-progress-track {
@@ -527,16 +527,16 @@ button:disabled.analyze-primary {
 
 /* ── Responsive breakpoints ─────────────────────────────────────────────── */
 @media (max-width: 980px) {
+  .profile-upload-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .profile-upload-row-vcf {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
       'vcf-file vcf-reference'
       'vcf-bam vcf-sample'
       'vcf-settings vcf-settings';
-  }
-
-  .profile-upload-row {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .upload-progress {
@@ -604,6 +604,15 @@ button:disabled.analyze-primary {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .profile-upload-row-vcf {
+    grid-template-areas:
+      'vcf-file'
+      'vcf-reference'
+      'vcf-bam'
+      'vcf-sample'
+      'vcf-settings';
+  }
+
   .profile-upload-row > *,
   .profile-upload-row label,
   .profile-upload-row input {
@@ -619,16 +628,8 @@ button:disabled.analyze-primary {
 @media (max-width: 620px) {
   .analyze-submode-btn,
   .analyze-submode-switch-option {
+    white-space: normal;
     text-align: center;
-  }
-
-  .profile-upload-row-vcf {
-    grid-template-areas:
-      'vcf-file'
-      'vcf-reference'
-      'vcf-bam'
-      'vcf-sample'
-      'vcf-settings';
   }
 
   .profile-advanced-options-fields {
@@ -637,5 +638,36 @@ button:disabled.analyze-primary {
 
   .analyze-submode-btn:not(.example-btn) {
     min-height: var(--mobile-tap-target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analyze-submode-switch-knob,
+  .profile-settings-row .database-phenotype-switch::before,
+  .analyze-submode-switch-option,
+  .analyze-submode-switch-option .analyze-submode-icon,
+  .analyze-submode-btn,
+  .upload-progress-fill,
+  .profile-upload-row input[type="file"],
+  .profile-upload-row-batch-files input[type="file"],
+  .profile-upload-row input[type="file"]::file-selector-button,
+  .profile-upload-row-batch-files input[type="file"]::file-selector-button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .analyze-submode-switch-knob,
+  .profile-settings-row .database-phenotype-switch::before {
+    border: 2px solid Highlight;
+  }
+
+  .upload-progress-track {
+    border: 1px solid CanvasText;
+  }
+
+  .upload-progress-fill {
+    forced-color-adjust: none;
+    background: Highlight;
   }
 }

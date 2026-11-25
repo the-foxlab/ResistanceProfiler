@@ -172,4 +172,24 @@ describe('HomePage trust notices', () => {
     expect(screen.getByText(/research use only/i)).toBeInTheDocument();
     expect(screen.getByText(/no database curation/i)).toBeInTheDocument();
   });
+
+  it('hides Take a tour when onStartTour is omitted and falls back on missing database metadata', () => {
+    renderHome({
+      onStartTour: undefined,
+      databases: [
+        { id: 'db-empty', display_name: '', supported_organisms: [], mutation_count: undefined },
+        { id: 'db-no-org', mutation_count: null, metadata: {} },
+      ],
+    });
+
+    expect(screen.queryByRole('button', { name: /take a tour/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'db-empty' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'db-no-org' })).toBeInTheDocument();
+    expect(screen.getAllByText('Species not listed')).toHaveLength(2);
+    expect(document.querySelectorAll('.home-db-meta')).toHaveLength(2);
+    for (const meta of document.querySelectorAll('.home-db-meta')) {
+      expect(meta).toHaveTextContent('0 rules');
+    }
+    expect(screen.queryByText(/Updated/)).not.toBeInTheDocument();
+  });
 });

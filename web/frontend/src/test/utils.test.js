@@ -3,10 +3,23 @@ import {
   buildApiUrl,
   chunkIds,
   downloadArtifactBundle,
+  formatPathStem,
   formatUserError,
   setArtifactBundleLimit,
 } from '../api';
-import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, labelToRank, orderedThresholdLabels } from '../utils';
+import {
+  isPopulated,
+  buildDrugAliasLookup,
+  groupDrugThresholds,
+  labelToRank,
+  orderedThresholdLabels,
+  cleanTsvCell,
+  sanitizeTsvFormulaCell,
+  downloadTsv,
+  triggerBlobDownload,
+  sanitizeHttpUrl,
+  sanitizeEmailAddress,
+} from '../utils';
 
 describe('API Utility Functions', () => {
   describe('buildApiUrl', () => {
@@ -72,6 +85,17 @@ describe('API Utility Functions', () => {
     it('should convert no CDS matches error to user-friendly message', () => {
       const result = formatUserError('ValueError: No CDS matches found in tmp123.fa');
       expect(result).toBe('No matches to references in the database found.');
+    });
+  });
+
+  describe('formatPathStem', () => {
+    it('strips .vcf.gz case-insensitively while preserving multi-dot stems like .results.json', () => {
+      expect(formatPathStem('sample1.vcf.gz')).toBe('sample1');
+      expect(formatPathStem('SAMPLE1.VCF.GZ')).toBe('SAMPLE1');
+      expect(formatPathStem('/uploads/cohort/sample1.vcf.gz')).toBe('sample1');
+      expect(formatPathStem('sample1.vcf')).toBe('sample1');
+      expect(formatPathStem('sample1.bam')).toBe('sample1');
+      expect(formatPathStem('sample1.results.json')).toBe('sample1.results');
     });
   });
 });
@@ -329,5 +353,125 @@ describe('orderedThresholdLabels', () => {
   it('returns empty array for null or non-object', () => {
     expect(orderedThresholdLabels(null)).toEqual([]);
     expect(orderedThresholdLabels([])).toEqual([]);
+  });
+});
+
+describe('TSV cleaning and formula neutralization', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps cleanTsvCell pure for HTML rendering without prefixing formula characters', () => {
+    expect(cleanTsvCell('=SUM(A1)')).toBe('=SUM(A1)');
+    expect(cleanTsvCell('-1')).toBe('-1');
+    expect(cleanTsvCell('a\tb\r\nc\nd')).toBe('a b c d');
+  });
+
+  it('neutralizes leading formula triggers in sanitizeTsvFormulaCell', () => {
+    expect(sanitizeTsvFormulaCell('=CMD()')).toBe("'=CMD()");
+    expect(sanitizeTsvFormulaCell('+1+1')).toBe("'+1+1");
+    expect(sanitizeTsvFormulaCell('-1+1')).toBe("'-1+1");
+    expect(sanitizeTsvFormulaCell('-1')).toBe("'-1");
+    expect(sanitizeTsvFormulaCell('@SUM(A1)')).toBe("'@SUM(A1)");
+    expect(sanitizeTsvFormulaCell('\t=1+1')).toBe("' =1+1");
+    expect(sanitizeTsvFormulaCell('\r=1+1')).toBe("' =1+1");
+    expect(sanitizeTsvFormulaCell('  =1+1')).toBe("'  =1+1");
+    expect(sanitizeTsvFormulaCell('\n=1+1')).toBe("' =1+1");
+
+    expect(sanitizeTsvFormulaCell('UL23')).toBe('UL23');
+    expect(sanitizeTsvFormulaCell('1.5')).toBe('1.5');
+    expect(sanitizeTsvFormulaCell('a=b+c-d@e')).toBe('a=b+c-d@e');
+    expect(sanitizeTsvFormulaCell(null)).toBe('');
+    expect(sanitizeTsvFormulaCell(undefined)).toBe('');
+  });
+
+  it('sanitizes headers and rows when exporting TSV via downloadTsv', async () => {
+    const downloadedBlobs = [];
+    const origCreateObjectURL = global.URL.createObjectURL;
+    const origRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn((blob) => {
+      downloadedBlobs.push(blob);
+      return 'blob:tsv';
+    });
+    global.URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    try {
+      downloadTsv(
+        ['Feature', '=HEADER'],
+        [['=1+1', '+cmd', '-5', '@SUM', '\t=evil', 'normal']],
+        'export.tsv',
+      );
+      expect(downloadedBlobs).toHaveLength(1);
+      const text = await downloadedBlobs[0].text();
+      expect(text).toBe("Feature\t'=HEADER\n'=1+1\t'+cmd\t'-5\t'@SUM\t' =evil\tnormal\n");
+    } finally {
+      global.URL.createObjectURL = origCreateObjectURL;
+      global.URL.revokeObjectURL = origRevokeObjectURL;
+    }
+  });
+});
+
+describe('sanitizeHttpUrl and sanitizeEmailAddress', () => {
+  it('accepts valid http/https URLs and rejects dangerous or relative inputs', () => {
+    expect(sanitizeHttpUrl('https://example.org/path?a=1')).toBe('https://example.org/path?a=1');
+    expect(sanitizeHttpUrl('  http://example.org  ')).toBe('http://example.org');
+    expect(sanitizeHttpUrl('javascript:alert(1)')).toBeNull();
+    expect(sanitizeHttpUrl('data:text/html,<script>')).toBeNull();
+    expect(sanitizeHttpUrl('vbscript:msgbox(1)')).toBeNull();
+    expect(sanitizeHttpUrl('file:///etc/passwd')).toBeNull();
+    expect(sanitizeHttpUrl('//evil.example')).toBeNull();
+    expect(sanitizeHttpUrl('http:example.com')).toBeNull();
+    expect(sanitizeHttpUrl('https://user:pass@evil.com')).toBeNull();
+    expect(sanitizeHttpUrl('https://www.who.int@evil.com/path')).toBeNull();
+    expect(sanitizeHttpUrl('https://user@example.org')).toBeNull();
+    expect(sanitizeHttpUrl('https://:pass@example.org')).toBeNull();
+    expect(sanitizeHttpUrl('/relative')).toBeNull();
+    expect(sanitizeHttpUrl(null)).toBeNull();
+  });
+
+  it('accepts bare emails and rejects mailto/query/header injection', () => {
+    expect(sanitizeEmailAddress('user.name+tag@sub.example.org')).toBe('user.name+tag@sub.example.org');
+    expect(sanitizeEmailAddress('user@example.org?bcc=evil@x.org')).toBeNull();
+    expect(sanitizeEmailAddress('user@example.org#frag')).toBeNull();
+    expect(sanitizeEmailAddress('user@example.org\nbcc:x')).toBeNull();
+    expect(sanitizeEmailAddress('mailto:user@example.org')).toBeNull();
+    expect(sanitizeEmailAddress('Alice <user@example.org>')).toBeNull();
+    expect(sanitizeEmailAddress('.user@example.org')).toBeNull();
+    expect(sanitizeEmailAddress('user..name@example.org')).toBeNull();
+    expect(sanitizeEmailAddress(null)).toBeNull();
+  });
+});
+
+describe('triggerBlobDownload deferred revocation (WA-050)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('defers URL.revokeObjectURL by 1000ms instead of revoking synchronously on click', () => {
+    vi.useFakeTimers();
+    const origCreate = global.URL.createObjectURL;
+    const origRevoke = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => 'blob:deferred-1');
+    const revokeMock = vi.fn();
+    global.URL.revokeObjectURL = revokeMock;
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    try {
+      triggerBlobDownload(new Blob(['abc'], { type: 'text/plain' }), 'sample.txt');
+
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(revokeMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(999);
+      expect(revokeMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(revokeMock).toHaveBeenCalledWith('blob:deferred-1');
+    } finally {
+      global.URL.createObjectURL = origCreate;
+      global.URL.revokeObjectURL = origRevoke;
+    }
   });
 });

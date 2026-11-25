@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useEffect } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { resetCompareState } from './compareSessionState';
 
 // Mock the API layer so no network calls are made.
@@ -8,6 +8,7 @@ vi.mock('../../api', () => ({
   fetchSharedReferences: vi.fn(),
   fetchReferenceAccessions: vi.fn(),
   compareDatabases: vi.fn(),
+  isAbortError: (error) => Boolean(error && error.name === 'AbortError'),
 }));
 
 // Mock the Venn so the tab tests stay isolated from venn.js/d3. The counter
@@ -15,12 +16,23 @@ vi.mock('../../api', () => ({
 // render effect dependencies [data, onRegionClick] — a new inline callback
 // identity on re-render would re-run it (the original expand-jump bug).
 let vennEffectCount = 0;
+let vennActiveRegionEffectCount = 0;
 vi.mock('../ComparisonVenn', () => ({
-  ComparisonVenn: ({ data, onRegionClick }) => {
+  ComparisonVenn: ({ data, activeRegion, onRegionClick }) => {
     useEffect(() => {
       vennEffectCount += 1;
     }, [data, onRegionClick]);
-    return <div data-testid="venn-stub">{data.databases.map((db) => db.name).join(', ')}</div>;
+    useEffect(() => {
+      vennActiveRegionEffectCount += 1;
+    }, [data, activeRegion]);
+    return (
+      <div
+        data-testid="venn-stub"
+        data-active-region={activeRegion === null ? 'null' : activeRegion.join(',')}
+      >
+        {data.databases.map((db) => db.name).join(', ')}
+      </div>
+    );
   },
 }));
 
@@ -107,6 +119,15 @@ async function waitForReady() {
   );
 }
 
+async function flushAccessionsFetch() {
+  const lastResult = fetchReferenceAccessions.mock.results.at(-1);
+  if (lastResult?.type === 'return' && lastResult.value) {
+    await act(async () => {
+      await lastResult.value;
+    });
+  }
+}
+
 describe('ComparePage selectors', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -116,21 +137,27 @@ describe('ComparePage selectors', () => {
     compareDatabases.mockResolvedValue(COMPARE_RESPONSE);
   });
 
-  it('renders three database dropdowns', () => {
+  it('renders three database dropdowns', async () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(screen.getByLabelText('Database 1')).toBeInTheDocument();
     expect(screen.getByLabelText('Database 2')).toBeInTheDocument();
     expect(screen.getByLabelText('Database 3')).toBeInTheDocument();
+    await flushAccessionsFetch();
   });
 
-  it('loads reference accessions for all databases on mount', () => {
+  it('loads reference accessions for all databases on mount', async () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
-    expect(fetchReferenceAccessions).toHaveBeenCalledWith(['db1', 'db2', 'db3', 'db4']);
+    expect(fetchReferenceAccessions).toHaveBeenCalledWith(
+      ['db1', 'db2', 'db3', 'db4'],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    await flushAccessionsFetch();
   });
 
-  it('offers all databases in the first dropdown', () => {
+  it('offers all databases in the first dropdown', async () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(dropdownOptions('Database 1')).toEqual(['', 'db1', 'db2', 'db3', 'db4']);
+    await flushAccessionsFetch();
   });
 
   it('restricts the second dropdown to databases sharing a reference', async () => {
@@ -170,15 +197,21 @@ describe('ComparePage selectors', () => {
   it('fetches shared references when 2 databases are selected', async () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
-    await waitFor(() => expect(fetchSharedReferences).toHaveBeenCalledWith(['db1', 'db2']));
+    await waitFor(() =>
+      expect(fetchSharedReferences).toHaveBeenCalledWith(
+        ['db1', 'db2'],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
     // Exactly one shared reference auto-selects.
     await waitForReady();
   });
 
-  it('does not fetch shared references for a single selection', () => {
+  it('does not fetch shared references for a single selection', async () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1']);
     expect(fetchSharedReferences).not.toHaveBeenCalled();
+    await flushAccessionsFetch();
   });
 
   it('shows the reference as ID (Species) in the dropdown', async () => {
@@ -197,6 +230,7 @@ describe('ComparePage compare flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
+    fetchReferenceAccessions.mockResolvedValue({ items: ACCESSIONS, count: 4 });
     fetchSharedReferences.mockResolvedValue({ items: SHARED_REFS, count: 1 });
     compareDatabases.mockResolvedValue(COMPARE_RESPONSE);
   });
@@ -206,7 +240,13 @@ describe('ComparePage compare flow', () => {
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
-    await waitFor(() => expect(compareDatabases).toHaveBeenCalledWith(['db1', 'db2'], 'ACC1'));
+    await waitFor(() =>
+      expect(compareDatabases).toHaveBeenCalledWith(
+        ['db1', 'db2'],
+        'ACC1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
     // The mutation table renders the union rows.
     expect(await screen.findByText('UL23')).toBeInTheDocument();
     expect(screen.getByText('UL24')).toBeInTheDocument();
@@ -228,6 +268,7 @@ describe('ComparePage table', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
+    fetchReferenceAccessions.mockResolvedValue({ items: ACCESSIONS, count: 4 });
     fetchSharedReferences.mockResolvedValue({ items: SHARED_REFS, count: 1 });
     compareDatabases.mockResolvedValue(COMPARE_RESPONSE);
   });
@@ -309,10 +350,13 @@ describe('ComparePage table', () => {
   it('exports TSV with one line per (mutation, database) pair', async () => {
     const blobs = [];
     const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     URL.createObjectURL = (blob) => {
       blobs.push(blob);
       return 'blob:mock';
     };
+    URL.revokeObjectURL = vi.fn();
     try {
       await renderCompared();
       fireEvent.click(screen.getByRole('button', { name: /export tsv/i }));
@@ -327,7 +371,9 @@ describe('ComparePage table', () => {
       expect(lines.some((line) => line.startsWith('UL24\tG\t1\tC\tAlpha\t'))).toBe(true);
       expect(lines).toContain('UL24\tG\t1\tC\tBeta\t\t\t\t\t');
     } finally {
+      anchorClickSpy.mockRestore();
       URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
     }
   });
 });
@@ -349,7 +395,13 @@ describe('ComparePage auto-select bug regression', () => {
     const compareBtn = screen.getByRole('button', { name: /compare/i });
     expect(compareBtn).toBeEnabled();
     fireEvent.click(compareBtn);
-    await waitFor(() => expect(compareDatabases).toHaveBeenCalledWith(['db1', 'db2'], 'ACC1'));
+    await waitFor(() =>
+      expect(compareDatabases).toHaveBeenCalledWith(
+        ['db1', 'db2'],
+        'ACC1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
   });
 
   it('auto-selected accession survives without further interaction', async () => {
@@ -377,7 +429,13 @@ describe('ComparePage auto-select bug regression', () => {
     const compareBtn = screen.getByRole('button', { name: /compare/i });
     expect(compareBtn).toBeEnabled();
     fireEvent.click(compareBtn);
-    await waitFor(() => expect(compareDatabases).toHaveBeenCalledWith(['db1', 'db2'], 'ACC1'));
+    await waitFor(() =>
+      expect(compareDatabases).toHaveBeenCalledWith(
+        ['db1', 'db2'],
+        'ACC1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
   });
 });
 
@@ -443,10 +501,13 @@ describe('ComparePage table search', () => {
   it('exports TSV respecting the search filter', async () => {
     const blobs = [];
     const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     URL.createObjectURL = (blob) => {
       blobs.push(blob);
       return 'blob:mock';
     };
+    URL.revokeObjectURL = vi.fn();
     try {
       await renderCompared();
       fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'UL24' } });
@@ -458,7 +519,9 @@ describe('ComparePage table search', () => {
       expect(lines[1].startsWith('UL24\tG\t1\tC\tAlpha\t')).toBe(true);
       expect(lines[2]).toBe('UL24\tG\t1\tC\tBeta\t\t\t\t\t');
     } finally {
+      anchorClickSpy.mockRestore();
       URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
     }
   });
 
@@ -494,6 +557,7 @@ describe('ComparePage table search', () => {
     expect(screen.getByPlaceholderText(/search/i)).toHaveValue('UL24');
     expect(screen.getByText('UL24')).toBeInTheDocument();
     expect(screen.queryByText('UL23')).not.toBeInTheDocument();
+    await flushAccessionsFetch();
   });
 });
 
@@ -521,6 +585,7 @@ describe('ComparePage session persistence', () => {
     expect(screen.getByRole('combobox', { name: /shared reference/i })).toHaveValue('ACC1');
     expect(screen.getByTestId('venn-stub')).toBeInTheDocument();
     expect(screen.getByText('UL23')).toBeInTheDocument();
+    await flushAccessionsFetch();
   });
 
   it('does not refetch shared references on remount when state was persisted', async () => {
@@ -533,5 +598,92 @@ describe('ComparePage session persistence', () => {
     render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(screen.getByLabelText('Database 1')).toHaveValue('db1');
     expect(fetchSharedReferences).not.toHaveBeenCalled();
+    await flushAccessionsFetch();
+  });
+});
+
+describe('ComparePage M4c lifecycle & selector regressions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetCompareState();
+    fetchReferenceAccessions.mockResolvedValue({ items: ACCESSIONS, count: 4 });
+    fetchSharedReferences.mockResolvedValue({ items: SHARED_REFS, count: 1 });
+    compareDatabases.mockResolvedValue(COMPARE_RESPONSE);
+  });
+
+  it('memoizes activeRegion across row expansion and table search while a region filter is active', async () => {
+    render(<ComparePage logic={{ databases: DATABASES }} />);
+    await waitFor(() => expect(fetchReferenceAccessions).toHaveBeenCalledTimes(1));
+    selectDatabases(['db1', 'db2']);
+    await waitForReady();
+    fireEvent.click(screen.getByRole('button', { name: /compare/i }));
+    await screen.findAllByText('UL23');
+
+    fireEvent.change(screen.getByRole('combobox', { name: /region/i }), { target: { value: 'db1,db2' } });
+    expect(screen.getByTestId('venn-stub')).toHaveAttribute('data-active-region', 'db1,db2');
+
+    vennActiveRegionEffectCount = 0;
+    const ul23Row = screen.getByText('UL23').closest('tr');
+    fireEvent.click(ul23Row.querySelector('.compare-expand-btn'));
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'UL23' } });
+    expect(vennActiveRegionEffectCount).toBe(0);
+  });
+
+  it('disables Compare while sharedRefsLoading and discards stale compare response on slot change', async () => {
+    let resolveRefs;
+    fetchSharedReferences.mockImplementationOnce(() => new Promise((res) => { resolveRefs = res; }));
+    let resolveCompare;
+    compareDatabases.mockImplementationOnce(() => new Promise((res) => { resolveCompare = res; }));
+
+    render(<ComparePage logic={{ databases: DATABASES }} />);
+    await waitFor(() => expect(fetchReferenceAccessions).toHaveBeenCalledTimes(1));
+    selectDatabases(['db1', 'db2']);
+
+    const compareBtn = screen.getByRole('button', { name: /compare/i });
+    expect(compareBtn).toBeDisabled();
+
+    resolveRefs({ items: SHARED_REFS, count: 1 });
+    await waitForReady();
+    expect(compareBtn).toBeEnabled();
+
+    fireEvent.click(compareBtn);
+    await waitFor(() => expect(compareDatabases).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: /comparing/i })).toBeDisabled();
+
+    // Change slot while compareDatabases is pending -> stale response must be discarded.
+    fireEvent.change(screen.getByLabelText('Database 2'), { target: { value: '' } });
+    resolveCompare(COMPARE_RESPONSE);
+    await waitFor(() => expect(screen.queryByTestId('venn-stub')).not.toBeInTheDocument());
+  });
+
+  it('disables Database 2 with hint for db4 and disables Database 3 without hint', async () => {
+    render(<ComparePage logic={{ databases: DATABASES }} />);
+    await waitFor(() => expect(fetchReferenceAccessions).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Database 1'), { target: { value: 'db4' } });
+    await waitFor(() => expect(screen.getByLabelText('Database 2')).toBeDisabled());
+    expect(screen.getByLabelText('Database 3')).toBeDisabled();
+    expect(screen.getAllByText('No comparable databases')).toHaveLength(1);
+  });
+
+  it('refetches shared references on remount if user navigated away before initial fetch resolved', async () => {
+    let resolvePendingRefs;
+    fetchSharedReferences.mockImplementationOnce(
+      () => new Promise((res) => { resolvePendingRefs = res; }),
+    );
+
+    const { unmount } = render(<ComparePage logic={{ databases: DATABASES }} />);
+    await waitFor(() => expect(fetchReferenceAccessions).toHaveBeenCalledTimes(1));
+    selectDatabases(['db1', 'db2']);
+    await waitFor(() => expect(fetchSharedReferences).toHaveBeenCalledTimes(1));
+
+    unmount();
+    resolvePendingRefs({ items: SHARED_REFS, count: 1 });
+
+    fetchSharedReferences.mockResolvedValueOnce({ items: SHARED_REFS, count: 1 });
+    render(<ComparePage logic={{ databases: DATABASES }} />);
+    await waitFor(() => expect(fetchReferenceAccessions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchSharedReferences).toHaveBeenCalledTimes(2));
+    await waitForReady();
   });
 });

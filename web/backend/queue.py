@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
@@ -9,7 +10,21 @@ import redis
 from rq import Queue, Retry
 from rq.serializers import JSONSerializer
 
-from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV, parse_csv_tokens, parse_int_env
+from web.backend.config import (
+    WEB_BACKEND_CONFIG,
+    WEB_ENV,
+    env_str,
+    parse_csv_tokens,
+    parse_int_env,
+    redact_redis_text,
+    redact_redis_url,
+    sanitize_redis_client_error,
+)
+from web.backend.services.session import get_redis_client, invalidate_redis_pool
+from web.backend.services.session import reset_redis_pool as reset_redis_pool
+
+logger = logging.getLogger(__name__)
+_redact_redis_text = redact_redis_text
 
 
 @dataclass(frozen=True)
@@ -52,14 +67,31 @@ def get_batch_queue() -> Queue:
 
 def _build_queue(queue_name: str) -> Queue:
     """Build an RQ queue using ``JSONSerializer`` so Redis payloads cannot trigger pickle RCE."""
-    redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
+    redis_url = env_str(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
     runtime = resolve_queue_runtime_settings()
-    return Queue(
-        queue_name,
-        connection=redis.Redis.from_url(redis_url),
-        default_timeout=runtime.timeout_seconds,
-        serializer=JSONSerializer,
-    )
+    client: redis.Redis | None = None
+    try:
+        client = get_redis_client(redis_url)
+        return Queue(
+            queue_name,
+            connection=client,
+            default_timeout=runtime.timeout_seconds,
+            serializer=JSONSerializer,
+        )
+    except (redis.RedisError, OSError, ValueError) as exc:
+        sanitized_msg = sanitize_redis_client_error(str(exc), redis_url)
+        logger.warning(
+            'Queue Redis initialization failed for %s (%s): %s',
+            queue_name,
+            redact_redis_url(redis_url),
+            sanitized_msg,
+        )
+        invalidate_redis_pool(
+            getattr(client, 'connection_pool', None) if client is not None else None,
+        )
+        if isinstance(exc, ValueError) and sanitized_msg != str(exc):
+            raise ValueError(sanitized_msg) from None
+        raise
 
 
 def resolve_queue_runtime_settings() -> QueueRuntimeSettings:

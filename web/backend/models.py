@@ -22,9 +22,9 @@ DisplayName = Annotated[str, Field(max_length=_D.display_name_max_length)]
 Threads = Annotated[int, Field(ge=1, le=_D.profile_max_threads)]
 AlleleFreq = Annotated[float, Field(ge=0.0, le=1.0)]
 MinDepth = Annotated[int, Field(ge=0, le=_D.min_depth_max)]
-IdList = Annotated[list[str], Field(max_length=_D.path_list_max_length)]
+IdList = Annotated[list[OpaqueId], Field(max_length=_D.path_list_max_length)]
 SampleNameList = Annotated[list[SampleName], Field(max_length=_D.path_list_max_length)]
-DisplayNameList = Annotated[list[str], Field(max_length=_D.path_list_max_length)]
+DisplayNameList = Annotated[list[DisplayName], Field(max_length=_D.path_list_max_length)]
 
 
 class ProfileFastaPayload(BaseModel):
@@ -95,7 +95,7 @@ class BatchProfileVcfPayload(_BatchPayloadBase):
     min_depth: MinDepth = _D.profile_min_depth
     threads: Threads = _D.profile_threads
     # Optional per-sample BAM IDs aligned with vcf_ids; None skips coverage gaps for that sample.
-    bam_ids: Annotated[list[str | None], Field(max_length=_D.path_list_max_length)] | None = None
+    bam_ids: Annotated[list[OpaqueId | None], Field(max_length=_D.path_list_max_length)] | None = None
 
 
 class BatchProfileFastaPayload(_BatchPayloadBase):
@@ -134,7 +134,7 @@ def artifact_bundle_payload_model(artifact_limit: int) -> type[ArtifactBundlePay
     return create_model(
         'ConfiguredArtifactBundlePayload',
         __base__=ArtifactBundlePayload,
-        artifact_ids=(list[str], Field(default_factory=list, max_length=ceiling)),
+        artifact_ids=(list[OpaqueId], Field(default_factory=list, max_length=ceiling)),
     )
 
 
@@ -144,8 +144,8 @@ def session_cleanup_payload_model(artifact_limit: int) -> type[SessionCleanupPay
     return create_model(
         'ConfiguredSessionCleanupPayload',
         __base__=SessionCleanupPayload,
-        upload_ids=(list[str], Field(default_factory=list, max_length=max(ceiling, artifact_limit))),
-        artifact_ids=(list[str], Field(default_factory=list, max_length=max(ceiling, artifact_limit + 1))),
+        upload_ids=(list[OpaqueId], Field(default_factory=list, max_length=max(ceiling, artifact_limit))),
+        artifact_ids=(list[OpaqueId], Field(default_factory=list, max_length=max(ceiling, artifact_limit + 1))),
     )
 
 
@@ -170,6 +170,7 @@ class CompareMutationKey(BaseModel):
 class CompareCell(BaseModel):
     allele_freq: float | None = None
     db_hit: bool = False
+    coverage_gap: bool = False
 
 
 class CompareResponse(BaseModel):

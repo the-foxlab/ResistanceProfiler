@@ -7,8 +7,9 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
-from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
+from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV, parse_int_env
 from web.backend.project_dbs import build_project_db_uuid_index
 from web.backend.services.maintained_bootstrap import check_and_update_maintained_databases
 
@@ -48,23 +49,47 @@ def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int)
         logger.info('TTL sweep deleted %d expired files from results and uploads directories', total_deleted)
 
 
-def start_ttl_sweep_thread(results_dir: Path, uploads_dir: Path) -> None:
+def _resolve_sweep_ttl_seconds() -> int:
+    """Resolve ``RESPRO_WEB_RESULT_TTL`` (>= 1), logging a warning fallback on invalid values."""
+    default_ttl = WEB_BACKEND_CONFIG.defaults.result_ttl_seconds
+    try:
+        return parse_int_env(WEB_ENV.result_ttl, default_ttl, min_value=1)
+    except ValueError as exc:
+        logger.warning('Invalid %s (%s); falling back to default %s seconds', WEB_ENV.result_ttl, exc, default_ttl)
+        return default_ttl
+
+
+def start_ttl_sweep_thread(
+    results_dir: Path,
+    uploads_dir: Path,
+    stop_event: threading.Event | None = None,
+) -> threading.Thread:
     """Start a daemon thread that periodically deletes expired uploads and results."""
-    threading.Thread(
+    stop = stop_event if stop_event is not None else threading.Event()
+    thread = threading.Thread(
         target=_ttl_sweep_loop,
-        args=(results_dir, uploads_dir, WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds),
+        args=(results_dir, uploads_dir, WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds, stop),
         daemon=True,
-    ).start()
+    )
+    thread.start()
+    return thread
 
 
-def _ttl_sweep_loop(results_dir: Path, uploads_dir: Path, sweep_frequency_seconds: int) -> None:
-    while True:
+def _ttl_sweep_loop(
+    results_dir: Path,
+    uploads_dir: Path,
+    sweep_frequency_seconds: float,
+    stop_event: threading.Event | None = None,
+) -> None:
+    stop = stop_event if stop_event is not None else threading.Event()
+    while not stop.is_set():
         try:
-            ttl_seconds = int(os.getenv(WEB_ENV.result_ttl, str(WEB_BACKEND_CONFIG.defaults.result_ttl_seconds)))
+            ttl_seconds = _resolve_sweep_ttl_seconds()
             _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
         except Exception as exc:
             logger.debug('Error in TTL sweep: %s', exc)
-        time.sleep(sweep_frequency_seconds)
+        if stop.wait(sweep_frequency_seconds):
+            break
 
 
 def resolve_maintained_db_update_interval() -> int:
@@ -86,8 +111,8 @@ def resolve_maintained_db_update_interval() -> int:
 
 def start_maintained_db_update_thread(
     project_databases_dir: Path,
-    interval_seconds: int,
-    app_state,
+    interval_seconds: float,
+    app_state: Any,
     stop_event: threading.Event | None = None,
 ) -> threading.Thread | None:
     """Start a daemon thread refreshing maintained DBs and UUID index (``0`` disables)."""
@@ -106,17 +131,15 @@ def start_maintained_db_update_thread(
 
 def _maintained_db_update_loop(
     project_databases_dir: Path,
-    interval_seconds: int,
-    app_state,
+    interval_seconds: float,
+    app_state: Any,
     stop_event: threading.Event | None = None,
 ) -> None:
     stop = stop_event if stop_event is not None else threading.Event()
-    while not stop.is_set():
+    while not stop.wait(interval_seconds):
         try:
             check_and_update_maintained_databases(project_databases_dir)
             new_index = build_project_db_uuid_index(project_databases_dir)
-            app_state.project_db_uuid_index.clear()
-            app_state.project_db_uuid_index.update(new_index)
+            app_state.project_db_uuid_index = new_index
         except Exception:  # noqa: BLE001 — failed update pass must not kill daemon
             logger.exception('Maintained database weekly update pass failed')
-        stop.wait(interval_seconds)

@@ -407,3 +407,173 @@ class TestListDatabaseReferenceAccessions:
         # Act / Assert
         with pytest.raises((FileNotFoundError, ValueError)):
             list_database_reference_accessions(db_dir, ['missing.db'])
+
+
+class TestCompareDatabasesHardening:
+    def test_linked_publications_are_deterministically_sorted(self, db_dir: Path) -> None:
+        _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[_rule()])
+        _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[_rule()])
+        conn = sqlite3.connect(db_dir / 'a.db')
+        try:
+            conn.executemany(
+                'INSERT INTO publication (doi, pubmed_id, raw_input) VALUES (?, ?, ?)',
+                [
+                    ('', '123', 'PMID:123'),
+                    ('10.1000/z', '', '10.1000/z'),
+                    ('10.1000/a', '', '10.1000/a'),
+                    ('', '', ''),
+                ],
+            )
+            conn.execute(
+                'INSERT INTO rule_publication (rule_id, publication_id) '
+                'SELECT 1, id FROM publication ORDER BY id'
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = compare_databases(db_dir, ['a.db', 'b.db'], 'ACC1')
+        assert result['rows'][0]['per_db']['a.db']['publication'] == '10.1000/a; 10.1000/z; PMID:123'
+
+    def test_three_db_venn_order_is_deterministic_across_database_permutations(self, db_dir: Path) -> None:
+        # Populate all 7 non-empty Venn subsets across a.db, b.db, c.db
+        _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[
+            _rule(position=1, mutation='E'),
+            _rule(position=2, mutation='V'),
+            _rule(position=4, mutation='T'),
+            _rule(position=7, mutation='Q'),
+        ])
+        _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[
+            _rule(position=2, mutation='V'),
+            _rule(position=3, mutation='A'),
+            _rule(position=5, mutation='L'),
+            _rule(position=7, mutation='Q'),
+        ])
+        _build_db(db_dir / 'c.db', name='C', accession='ACC1', rules=[
+            _rule(position=4, mutation='T'),
+            _rule(position=5, mutation='L'),
+            _rule(position=6, mutation='I'),
+            _rule(position=7, mutation='Q'),
+        ])
+
+        res_abc = compare_databases(db_dir, ['a.db', 'b.db', 'c.db'], 'ACC1')
+        res_cab = compare_databases(db_dir, ['c.db', 'a.db', 'b.db'], 'ACC1')
+
+        expected_venn = [
+            {'region': ['a.db'], 'count': 1},
+            {'region': ['b.db'], 'count': 1},
+            {'region': ['c.db'], 'count': 1},
+            {'region': ['a.db', 'b.db'], 'count': 1},
+            {'region': ['a.db', 'c.db'], 'count': 1},
+            {'region': ['b.db', 'c.db'], 'count': 1},
+            {'region': ['a.db', 'b.db', 'c.db'], 'count': 1},
+        ]
+        assert res_abc['venn'] == expected_venn
+        assert res_cab['venn'] == expected_venn
+        assert res_abc['counts']['intersection'] == 1
+        assert res_abc['counts']['total_unique'] == 7
+
+    def test_excludes_formula_component_rules(self, db_dir: Path) -> None:
+        from respro.db.models import INTERNAL_FORMULA_COMPONENT_DRUG_NAME
+
+        _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[
+            _rule(position=1, drug='DrugA'),
+            _rule(position=2, drug=INTERNAL_FORMULA_COMPONENT_DRUG_NAME),
+        ])
+        _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[
+            _rule(position=1, drug='DrugA'),
+            _rule(position=3, drug=' __Formula_Component__ '),
+        ])
+
+        result = compare_databases(db_dir, ['a.db', 'b.db'], 'ACC1')
+        assert result['counts'] == {
+            'total_unique': 1,
+            'intersection': 1,
+            'per_db': {'a.db': 1, 'b.db': 1},
+        }
+
+    def test_rejects_duplicate_empty_blank_database_ids_and_blank_accession(self, db_dir: Path) -> None:
+        _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[_rule()])
+        _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[_rule()])
+
+        for bad_ids in (
+            [],
+            [''],
+            ['   '],
+            ['a.db', ''],
+            ['a.db', '  '],
+            ['a.db', 'a.db'],
+            ['a.db', 'b.db', 'a.db'],
+        ):
+            with pytest.raises(ValueError):
+                list_database_reference_accessions(db_dir, bad_ids)
+            with pytest.raises(ValueError):
+                list_shared_references(db_dir, bad_ids)
+            with pytest.raises(ValueError):
+                compare_databases(db_dir, bad_ids, 'ACC1')
+
+        for bad_acc in ('', '   '):
+            with pytest.raises(ValueError, match='accession'):
+                compare_databases(db_dir, ['a.db', 'b.db'], bad_acc)
+
+    def test_readonly_special_filenames_and_corrupt_sibling_isolation(self, db_dir: Path) -> None:
+        _build_db(db_dir / 'db#1? space.db', name='A', accession='ACC1', rules=[_rule()])
+        _build_db(db_dir / 'db#2.db', name='B', accession='ACC1', rules=[_rule()])
+        (db_dir / 'aaa_corrupt.db').write_bytes(b'corrupt-sibling')
+
+        result = compare_databases(db_dir, ['db#1? space.db', 'db#2.db'], 'ACC1')
+        assert result['counts']['intersection'] == 1
+
+        # Explicitly requesting corrupt or traversal DB fails cleanly without leaking server paths
+        with pytest.raises(ValueError) as exc_corrupt:
+            compare_databases(db_dir, ['aaa_corrupt.db', 'db#2.db'], 'ACC1')
+        assert 'aaa_corrupt.db' in str(exc_corrupt.value)
+        assert str(db_dir) not in str(exc_corrupt.value)
+
+        with pytest.raises(ValueError, match='Unknown database_id'):
+            list_database_reference_accessions(db_dir, ['../escape.db'])
+
+    def test_null_reference_aa_at_shared_position_sorts_deterministically(self, db_dir: Path) -> None:
+        _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[
+            _rule(position=1, reference='K', mutation='E', drug='DrugA'),
+            _rule(position=1, reference=None, mutation='V', drug='DrugA'),
+        ])
+        _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[
+            _rule(position=1, reference='K', mutation='E', drug='DrugA'),
+        ])
+
+        result = compare_databases(db_dir, ['a.db', 'b.db'], 'ACC1')
+        assert result['counts'] == {
+            'total_unique': 2,
+            'intersection': 1,
+            'per_db': {'a.db': 2, 'b.db': 1},
+        }
+        assert [(r['reference'], r['mutation'], r['region']) for r in result['rows']] == [
+            ('', 'V', ['a.db']),
+            ('K', 'E', ['a.db', 'b.db']),
+        ]
+
+    def test_ignores_whitespace_only_reference_accessions(self, db_dir: Path) -> None:
+        a = _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[_rule()])
+        b = _build_db(db_dir / 'b.db', name='B', accession='ACC1', rules=[_rule()])
+        for db_path in (a, b):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    'INSERT INTO reference (project_id, name, accession, length) VALUES (?, ?, ?, ?)',
+                    (1, 'ref_spaces', '   ', 100),
+                )
+                conn.execute(
+                    'INSERT INTO reference (project_id, name, accession, length) VALUES (?, ?, ?, ?)',
+                    (1, 'ref_tabs', '\t\n', 100),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        per_db = list_database_reference_accessions(db_dir, ['a.db', 'b.db'])
+        assert set(per_db['a.db']) == {'ACC1'}
+        assert set(per_db['b.db']) == {'ACC1'}
+
+        shared = list_shared_references(db_dir, ['a.db', 'b.db'])
+        assert [item['accession'] for item in shared] == ['ACC1']

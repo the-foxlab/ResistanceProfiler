@@ -6,12 +6,15 @@ import csv
 import http.client
 import json
 import logging
+import os
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG
@@ -22,6 +25,34 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_HTTP_CODES = frozenset({429, 503})
 _ACCESSION_RE = re.compile(r'^[A-Za-z0-9_]+(\.\d+)?$')
 _VERSION_SPEC_RE = re.compile(r'^\s*>=\s*(\d+(?:\.\d+)*)\s*$')
+_MAINTAINED_DB_NAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9._-]*\Z')
+_MAX_DB_NAME_LEN = 128
+_STREAM_CHUNK_BYTES = 65536
+_MAX_MANIFEST_BYTES = 5 * 1024 * 1024
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+_MAX_GENBANK_BYTES = 50 * 1024 * 1024
+_MAX_REDIRECTS = 5
+_DEFAULT_PORTS = {'http': 80, 'https': 443}
+_FORBIDDEN_ENCODED_TOKENS = ('%2e', '%2f', '%5c', '%00')
+_DEFAULT_URLOPEN = urllib.request.urlopen
+
+
+def validate_maintained_db_name(name: str) -> str:
+    """Validate *name* as a single safe filename component for maintained databases."""
+    if not isinstance(name, str) or not (1 <= len(name) <= _MAX_DB_NAME_LEN):
+        raise ValueError(
+            f'Invalid maintained database name {name!r}: must be a 1-{_MAX_DB_NAME_LEN} character string.'
+        )
+    if (
+        name in {'.', '..'}
+        or any(ord(ch) < 32 or ord(ch) == 127 or ch.isspace() for ch in name)
+        or not _MAINTAINED_DB_NAME_RE.match(name)
+    ):
+        raise ValueError(
+            f'Invalid maintained database name {name!r}: must be a single safe filename component '
+            'without path separators, traversal sequences, whitespace, or control characters.'
+        )
+    return name
 
 
 def _validate_accession(accession: str) -> None:
@@ -97,9 +128,294 @@ def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
     }
 
 
+def _has_control_or_whitespace(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 or ch.isspace() for ch in value)
+
+
+def _validate_manifest_relative_path(raw_path: object, *, field: str, allow_empty: bool = False) -> str:
+    """Validate that a manifest path is a safe relative POSIX path with no traversal or URL parts."""
+    if not isinstance(raw_path, str):
+        raise RuntimeError(f'Malformed manifest: {field} must be a string')
+    if raw_path == '':
+        if allow_empty:
+            return ''
+        raise RuntimeError(f'Malformed manifest: {field} must be a non-empty relative path')
+    if _has_control_or_whitespace(raw_path) or '\\' in raw_path or raw_path.startswith('/'):
+        raise RuntimeError(f'Malformed manifest: {field} must be a relative POSIX path ({raw_path!r})')
+
+    lowered = raw_path.lower()
+    if any(tok in lowered for tok in _FORBIDDEN_ENCODED_TOKENS):
+        raise RuntimeError(f'Malformed manifest: {field} contains forbidden encoded path characters ({raw_path!r})')
+
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise RuntimeError(f'Malformed manifest: {field} must be a relative path, not a URL ({raw_path!r})')
+
+    decoded = urllib.parse.unquote(raw_path)
+    if _has_control_or_whitespace(decoded) or '\\' in decoded or decoded.startswith('/'):
+        raise RuntimeError(f'Malformed manifest: {field} contains unsafe decoded characters ({raw_path!r})')
+
+    for candidate in (raw_path, decoded):
+        segments = candidate.split('/')
+        if any(seg in {'', '.', '..'} for seg in segments):
+            raise RuntimeError(f'Malformed manifest: {field} contains invalid path segment ({raw_path!r})')
+    return raw_path
+
+
+def _parse_origin_and_prefix(base_url: str, *, label: str, strip_accession_suffix: bool = False) -> tuple[tuple[str, str, int], tuple[str, ...]]:
+    """Return ``((scheme, host, port), prefix_segments)`` for a configured base URL."""
+    if _has_control_or_whitespace(base_url):
+        raise RuntimeError(f'Unsafe {label}: whitespace or control characters are not allowed')
+    parsed = urllib.parse.urlsplit(base_url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {'http', 'https'}:
+        raise RuntimeError(f'Unsafe {label}: scheme must be http or https, got {parsed.scheme!r}')
+    if parsed.username is not None or parsed.password is not None:
+        raise RuntimeError(f'Unsafe {label}: embedded credentials are not allowed')
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(f'Unsafe {label}: invalid port') from exc
+    host = (parsed.hostname or '').lower()
+    if not host:
+        raise RuntimeError(f'Unsafe {label}: missing hostname')
+    effective_port = port if port is not None else _DEFAULT_PORTS[scheme]
+
+    raw_segments = [seg for seg in parsed.path.split('/') if seg]
+    if strip_accession_suffix:
+        prefix: list[str] = []
+        for seg in raw_segments:
+            if '{accession}' in seg or 'ACCESSION_PLACEHOLDER' in seg:
+                break
+            prefix.append(seg)
+        raw_segments = prefix
+    return (scheme, host, effective_port), tuple(raw_segments)
+
+
+def _validate_target_url(
+    url: str,
+    *,
+    allowed_origin: tuple[str, str, int],
+    allowed_prefix: tuple[str, ...],
+    label: str,
+) -> str:
+    """Validate that *url* matches *allowed_origin* and starts with *allowed_prefix* segments."""
+    if not isinstance(url, str) or not url or _has_control_or_whitespace(url):
+        raise RuntimeError(f'Blocked untrusted {label} URL: {url!r}')
+    parsed = urllib.parse.urlsplit(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {'http', 'https'}:
+        raise RuntimeError(f'Blocked untrusted {label} scheme {parsed.scheme!r}: {url}')
+    if parsed.username is not None or parsed.password is not None:
+        raise RuntimeError(f'Blocked {label} URL with embedded credentials: {url}')
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(f'Blocked {label} URL with invalid port: {url}') from exc
+    host = (parsed.hostname or '').lower()
+    if not host:
+        raise RuntimeError(f'Blocked {label} URL missing hostname: {url}')
+    effective_port = port if port is not None else _DEFAULT_PORTS[scheme]
+    if (scheme, host, effective_port) != allowed_origin:
+        raise RuntimeError(f'Blocked cross-origin {label} URL: {url}')
+
+    lowered_path = parsed.path.lower()
+    if any(tok in lowered_path for tok in _FORBIDDEN_ENCODED_TOKENS) or '\\' in parsed.path:
+        raise RuntimeError(f'Blocked unsafe path in {label} URL: {url}')
+    decoded_path = urllib.parse.unquote(parsed.path)
+    if _has_control_or_whitespace(decoded_path) or '\\' in decoded_path:
+        raise RuntimeError(f'Blocked unsafe decoded path in {label} URL: {url}')
+    for candidate in (parsed.path, decoded_path):
+        if any(seg in {'.', '..'} for seg in candidate.split('/')):
+            raise RuntimeError(f'Blocked traversal segment in {label} URL: {url}')
+
+    target_segments = tuple(seg for seg in parsed.path.split('/') if seg)
+    if target_segments[:len(allowed_prefix)] != allowed_prefix:
+        raise RuntimeError(f'Blocked out-of-prefix {label} URL: {url}')
+    return url
+
+
+class _OriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Redirect handler enforcing same-origin, path-prefix confinement, and hop limit."""
+
+    max_redirections = _MAX_REDIRECTS
+
+    def __init__(
+        self,
+        *,
+        allowed_origin: tuple[str, str, int],
+        allowed_prefix: tuple[str, ...],
+        max_redirects: int = _MAX_REDIRECTS,
+        label: str,
+    ) -> None:
+        self._allowed_origin = allowed_origin
+        self._allowed_prefix = allowed_prefix
+        self._max_redirects = max_redirects
+        self._redirect_count = 0
+        self._label = label
+
+    def _validate_redirect(self, req: urllib.request.Request, fp: Any, newurl: str) -> None:
+        self._redirect_count += 1
+        if self._redirect_count > self._max_redirects:
+            fp.close()
+            raise RuntimeError(
+                f'Exceeded maximum redirects ({self._max_redirects}) for {self._label}: {req.full_url}'
+            )
+        try:
+            _validate_target_url(
+                newurl,
+                allowed_origin=self._allowed_origin,
+                allowed_prefix=self._allowed_prefix,
+                label=f'{self._label} redirect',
+            )
+        except RuntimeError:
+            fp.close()
+            raise
+
+    def http_error_302(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+    ) -> Any:
+        location = headers.get('location') or headers.get('uri')
+        if location is None:
+            return None
+        resolved = urllib.parse.urljoin(req.full_url, location)
+        self._validate_redirect(req, fp, resolved)
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+def _open_url(
+    url: str,
+    *,
+    timeout: float,
+    allowed_origin: tuple[str, str, int],
+    allowed_prefix: tuple[str, ...],
+    label: str,
+) -> Any:
+    """Validate *url* and open via monkeypatched ``urlopen`` (in tests) or confined opener."""
+    _validate_target_url(
+        url,
+        allowed_origin=allowed_origin,
+        allowed_prefix=allowed_prefix,
+        label=label,
+    )
+    if urllib.request.urlopen is not _DEFAULT_URLOPEN:
+        resp = urllib.request.urlopen(url, timeout=timeout)
+    else:
+        handler = _OriginRedirectHandler(
+            allowed_origin=allowed_origin,
+            allowed_prefix=allowed_prefix,
+            max_redirects=_MAX_REDIRECTS,
+            label=label,
+        )
+        opener = urllib.request.build_opener(handler)
+        resp = opener.open(url, timeout=timeout)
+
+    final_url = resp.geturl() if hasattr(resp, 'geturl') else None
+    if isinstance(final_url, str) and final_url:
+        try:
+            _validate_target_url(
+                final_url,
+                allowed_origin=allowed_origin,
+                allowed_prefix=allowed_prefix,
+                label=f'{label} final',
+            )
+        except RuntimeError:
+            resp.close()
+            raise
+    return resp
+
+
+def _check_content_length(resp: Any, max_bytes: int, label: str) -> None:
+    headers = getattr(resp, 'headers', None)
+    if headers is None or not hasattr(headers, 'get'):
+        return
+    raw_len = headers.get('Content-Length')
+    if isinstance(raw_len, str) and raw_len.strip().isdigit():
+        if int(raw_len.strip()) > max_bytes:
+            raise RuntimeError(f'{label} exceeds maximum allowed size ({max_bytes} bytes)')
+
+
+def _read_bounded_bytes(resp: Any, max_bytes: int, label: str) -> bytes:
+    _check_content_length(resp, max_bytes, label)
+    buf = bytearray()
+    while True:
+        chunk = resp.read(_STREAM_CHUNK_BYTES)
+        if not chunk:
+            break
+        if len(buf) + len(chunk) > max_bytes:
+            raise RuntimeError(f'{label} exceeds maximum allowed size ({max_bytes} bytes)')
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def _stream_to_file(
+    resp: Any,
+    dest: Path,
+    *,
+    max_bytes: int,
+    label: str,
+    require_locus: bool = False,
+    accession: str = '',
+) -> Path:
+    _check_content_length(resp, max_bytes, label)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    found_locus = False
+    tail = b''
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=dest.parent,
+            prefix=f'.{dest.name}.',
+            suffix='.part',
+            delete=False,
+        ) as tmp_fh:
+            tmp_path = Path(tmp_fh.name)
+            while True:
+                chunk = resp.read(_STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise RuntimeError(f'{label} exceeds maximum allowed size ({max_bytes} bytes)')
+                if require_locus and not found_locus:
+                    window = tail + chunk
+                    if b'LOCUS' in window:
+                        found_locus = True
+                    else:
+                        tail = window[-4:]
+                tmp_fh.write(chunk)
+        if require_locus and not found_locus:
+            raise RuntimeError(
+                f'NCBI returned unexpected content for accession {accession!r} — '
+                'not a valid GenBank record'
+            )
+        os.replace(tmp_path, dest)
+        tmp_path = None
+        return dest
+    except BaseException:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def _fetch_manifest() -> dict:
-    manifest_url = f"{CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')}/manifest.json"
-    payload = _fetch_json(manifest_url, context='maintained database manifest')
+    raw_base = CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')
+    allowed_origin, allowed_prefix = _parse_origin_and_prefix(raw_base, label='manifest base URL')
+    manifest_url = f'{raw_base}/manifest.json'
+    payload = _fetch_json(
+        manifest_url,
+        context='maintained database manifest',
+        allowed_origin=allowed_origin,
+        allowed_prefix=allowed_prefix,
+    )
     if not isinstance(payload, dict):
         raise RuntimeError('Malformed manifest: top-level JSON value must be an object')
     databases = payload.get('databases')
@@ -118,10 +434,32 @@ def _validate_manifest_entry(entry: object, idx: int) -> None:
         val = entry.get(field)
         if not isinstance(val, str) or not val.strip():
             raise RuntimeError(f'Malformed manifest: databases[{idx}].{field} must be a non-empty string')
-    if not isinstance(entry.get('formula_rules_path'), str):
+    try:
+        validate_maintained_db_name(entry['source_name'])
+    except ValueError as exc:
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].source_name is invalid: {exc}') from exc
+
+    _validate_manifest_relative_path(entry['metadata_path'], field=f'databases[{idx}].metadata_path')
+    _validate_manifest_relative_path(entry['rules_path'], field=f'databases[{idx}].rules_path')
+
+    formula_rules_path = entry.get('formula_rules_path')
+    if not isinstance(formula_rules_path, str):
         raise RuntimeError(f'Malformed manifest: databases[{idx}].formula_rules_path must be a string')
-    if not isinstance(entry.get('example_fasta_path', ''), str):
+    _validate_manifest_relative_path(
+        formula_rules_path,
+        field=f'databases[{idx}].formula_rules_path',
+        allow_empty=True,
+    )
+
+    example_fasta_path = entry.get('example_fasta_path', '')
+    if not isinstance(example_fasta_path, str):
         raise RuntimeError(f'Malformed manifest: databases[{idx}].example_fasta_path must be a string')
+    _validate_manifest_relative_path(
+        example_fasta_path,
+        field=f'databases[{idx}].example_fasta_path',
+        allow_empty=True,
+    )
+
     if not isinstance(entry.get('metadata'), dict):
         raise RuntimeError(f'Malformed manifest: databases[{idx}].metadata must be an object')
 
@@ -159,6 +497,7 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 
 def _find_manifest_database_entry(db_name: str) -> dict:
+    validate_maintained_db_name(db_name)
     for entry in _fetch_manifest()['databases']:
         if entry['source_name'] == db_name:
             return dict(entry)
@@ -166,19 +505,37 @@ def _find_manifest_database_entry(db_name: str) -> dict:
 
 
 def _resolve_manifest_url(path: str) -> str:
-    cleaned = path.lstrip('/')
-    if not cleaned:
-        raise RuntimeError('Malformed manifest: output path must not be empty')
+    cleaned = _validate_manifest_relative_path(path, field='output path')
     raw_base = CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')
+    allowed_origin, allowed_prefix = _parse_origin_and_prefix(raw_base, label='manifest base URL')
     if cleaned.startswith('databases/') and raw_base.endswith('/databases'):
         raw_base = raw_base[:-len('/databases')]
-    return urllib.parse.urljoin(f'{raw_base}/', cleaned)
+    resolved = urllib.parse.urljoin(f'{raw_base}/', cleaned)
+    return _validate_target_url(
+        resolved,
+        allowed_origin=allowed_origin,
+        allowed_prefix=allowed_prefix,
+        label='manifest asset',
+    )
 
 
-def _fetch_json(url: str, *, context: str) -> object:
+def _fetch_json(
+    url: str,
+    *,
+    context: str,
+    allowed_origin: tuple[str, str, int],
+    allowed_prefix: tuple[str, ...],
+) -> object:
     try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            return json.loads(resp.read())
+        with _open_url(
+            url,
+            timeout=15,
+            allowed_origin=allowed_origin,
+            allowed_prefix=allowed_prefix,
+            label=context,
+        ) as resp:
+            raw = _read_bounded_bytes(resp, _MAX_MANIFEST_BYTES, context)
+            return json.loads(raw)
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f'Failed to fetch {context}: HTTP {exc.code} — {url}') from exc
     except OSError as exc:
@@ -188,9 +545,17 @@ def _fetch_json(url: str, *, context: str) -> object:
 
 
 def _download_file(url: str, dest: Path, label: str) -> Path:
+    raw_base = CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')
+    allowed_origin, allowed_prefix = _parse_origin_and_prefix(raw_base, label='manifest base URL')
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
-            dest.write_bytes(resp.read())
+        with _open_url(
+            url,
+            timeout=30,
+            allowed_origin=allowed_origin,
+            allowed_prefix=allowed_prefix,
+            label=label,
+        ) as resp:
+            _stream_to_file(resp, dest, max_bytes=_MAX_DOWNLOAD_BYTES, label=label)
         logger.debug('Downloaded %s → %s', label, dest)
         return dest
     except urllib.error.HTTPError as exc:
@@ -220,6 +585,11 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     max_retries = CLI_CONFIG.timeouts.genbank_max_retries
     backoff_base = CLI_CONFIG.timeouts.genbank_backoff_base
     request_interval = CLI_CONFIG.timeouts.genbank_request_interval
+    allowed_origin, allowed_prefix = _parse_origin_and_prefix(
+        CLI_CONFIG.urls.ncbi_nuccore_efetch,
+        label='GenBank efetch URL',
+        strip_accession_suffix=True,
+    )
 
     for index, accession in enumerate(accessions):
         if index > 0:
@@ -228,12 +598,26 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
         url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.parse.quote(accession))
         dest = dest_dir / f'{accession}.gb'
 
-        content: bytes | None = None
+        fetched = False
         last_exc: Exception | None = None
         for attempt in range(1, max_retries + 1):
             try:
-                with urllib.request.urlopen(url, timeout=timeout) as resp:
-                    content = resp.read()
+                with _open_url(
+                    url,
+                    timeout=timeout,
+                    allowed_origin=allowed_origin,
+                    allowed_prefix=allowed_prefix,
+                    label=f'GenBank {accession}',
+                ) as resp:
+                    _stream_to_file(
+                        resp,
+                        dest,
+                        max_bytes=_MAX_GENBANK_BYTES,
+                        label=f'GenBank {accession}',
+                        require_locus=True,
+                        accession=accession,
+                    )
+                fetched = True
                 break
             except urllib.error.HTTPError as exc:
                 if exc.code not in _RETRYABLE_HTTP_CODES:
@@ -258,17 +642,11 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
                 if attempt < max_retries:
                     time.sleep(backoff_base * (2 ** (attempt - 1)))
 
-        if content is None:
+        if not fetched:
             raise RuntimeError(
                 f'Network error fetching GenBank record for {accession!r} '
                 f'after {max_retries} attempts: {last_exc}'
             ) from last_exc
-        if b'LOCUS' not in content:
-            raise RuntimeError(
-                f'NCBI returned unexpected content for accession {accession!r} — '
-                'not a valid GenBank record'
-            )
-        dest.write_bytes(content)
         logger.debug('Downloaded GenBank record %s → %s', accession, dest)
         paths.append(dest)
     return paths

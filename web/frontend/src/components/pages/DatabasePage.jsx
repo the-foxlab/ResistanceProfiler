@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { useOptionalDatabasePageLogic } from '../../DashboardContext';
 import { buildDatabasePlots } from '../database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from '../database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from '../database-plots/DatabasePositionPlot';
@@ -7,7 +8,9 @@ import { DatabaseDrugDistributionPlot } from '../database-plots/DatabaseDrugDist
 import { DatabaseMetaPanel } from './database/DatabaseMetaPanel';
 import { DatabaseAlgorithmsPanel } from './database/DatabaseAlgorithmsPanel';
 
-export function DatabasePage({ logic }) {
+export function DatabasePage({ logic: logicProp }) {
+  const contextLogic = useOptionalDatabasePageLogic();
+  const logic = logicProp ?? contextLogic;
   const { rules, formulaRules, mutationPlotMeta, selectedDatabase } = logic;
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
   const [requestedBinSize, setRequestedBinSize] = useState(10);
@@ -39,7 +42,7 @@ export function DatabasePage({ logic }) {
   const hasPlots = Boolean(summaryTile || ic50Sections.length > 0 || detailSections.length > 0);
 
   return (
-    <article className="card full-width-tile database-plots-tile tab-primary-tile">
+    <article className="card full-width-tile tab-primary-tile">
       {selectedDatabase ? (
         <>
           <DatabaseMetaPanel selectedDatabase={selectedDatabase} />
@@ -52,7 +55,6 @@ export function DatabasePage({ logic }) {
                   key={section.sectionKey}
                   className={[
                     'database-reference-section',
-                    section.layout === 'single-column' ? 'database-reference-section-wide' : '',
                     section.layout === 'score-grid' ? 'database-reference-section-score' : '',
                   ].filter(Boolean).join(' ')}
                 >

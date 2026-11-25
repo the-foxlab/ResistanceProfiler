@@ -178,6 +178,48 @@ describe('buildIc50DistributionSections', () => {
     expect(sections[0].plots[0].xDomain[0]).toBeCloseTo(Math.log10(5));
     expect(sections[0].plots[0].xDomain[1]).toBeCloseTo(Math.log10(20));
   });
+
+  it('does not count unused non-positive fold_ic50 when ic50Values is plotted (S5-F2)', () => {
+    const sameRule = buildIc50DistributionSections(
+      [{ reference_name: 'ref1', drug: 'Acyclovir', ic50: '10', fold_ic50: '0' }],
+      [],
+      plotMeta,
+    );
+    expect(sameRule[0].plots[0].footer).toBe('Each point is one rule-level measurement');
+
+    // Cross-rule: fold_ic50 <= 0 appears BEFORE positive ic50 for the same drug.
+    const crossRuleOrder = buildIc50DistributionSections(
+      [
+        { reference_name: 'ref1', drug: 'Acyclovir', fold_ic50: '-2' },
+        { reference_name: 'ref1', drug: 'Acyclovir', ic50: '10' },
+        { reference_name: 'ref1', drug: 'Acyclovir', ic50: '0' },
+      ],
+      [],
+      plotMeta,
+    );
+    expect(crossRuleOrder[0].plots[0].footer).toBe('1 non-positive value(s) were ignored for log-scale plotting');
+
+    // Fallback to fold_ic50 when no positive ic50 exists still counts skipped fold_ic50.
+    const foldFallback = buildIc50DistributionSections(
+      [
+        { reference_name: 'ref1', drug: 'Foscarnet', fold_ic50: '4' },
+        { reference_name: 'ref1', drug: 'Foscarnet', fold_ic50: '0' },
+      ],
+      [],
+      plotMeta,
+    );
+    expect(foldFallback[0].plots[0].footer).toBe('1 non-positive value(s) were ignored for log-scale plotting');
+  });
+
+  it('uses dark-mode pie palette when theme is dark', () => {
+    const sections = buildIc50DistributionSections(
+      [{ reference_name: 'ref1', drug: 'Acyclovir', ic50: '10' }],
+      [],
+      plotMeta,
+      'dark',
+    );
+    expect(sections[0].plots[0].points[0].color).toBe('#5eead4');
+  });
 });
 
 describe('buildScoreDistributionSections', () => {
@@ -214,5 +256,15 @@ describe('buildScoreDistributionSections', () => {
     const sections = buildScoreDistributionSections(rules, [], meta);
     expect(sections.map((s) => s.sectionHeading)).toEqual(['Nucleoside', 'Ungrouped']);
     expect(sections[0].plots[0].bars.map((b) => [b.scoreLabel, b.count])).toEqual([['1', 0], ['2', 1]]);
+  });
+
+  it('uses dark-mode bar color when theme is dark', () => {
+    const sections = buildScoreDistributionSections(
+      [{ reference_name: 'ref1', drug: 'Acyclovir', score: '10' }],
+      [],
+      baseMeta,
+      'dark',
+    );
+    expect(sections[0].plots[0].bars[0].color).toBe('#2dd4bf');
   });
 });

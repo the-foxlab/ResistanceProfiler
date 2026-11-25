@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { ComparisonVenn } from './ComparisonVenn';
 import { buildVennAreas, VENN_PALETTES } from './vennAreas';
+import { ThemeContext } from '../hooks/useTheme';
 
 if (!SVGElement.prototype.getComputedTextLength) {
   SVGElement.prototype.getComputedTextLength = function getComputedTextLength() {
@@ -141,6 +142,105 @@ describe('ComparisonVenn', () => {
     }
     // The dark palette must differ from the light one (brighter on dark).
     expect(VENN_PALETTES.dark.map((c) => c.fill)).not.toEqual(VENN_PALETTES.light.map((c) => c.fill));
+  });
+
+  it('reacts to ThemeContext changes without rebuilding the SVG element', () => {
+    const onRegionClick = () => {};
+    const { container, rerender } = render(
+      <ThemeContext.Provider value="dark">
+        <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={null} onRegionClick={onRegionClick} />
+      </ThemeContext.Provider>,
+    );
+    const svg = container.querySelector('svg');
+    const singletonPath = container.querySelector('[data-venn-sets="db1"] path');
+    const label = container.querySelector('[data-venn-sets="db1"] text.label');
+
+    expect(label.style.fill).toBe('rgb(228, 228, 231)');
+    expect(singletonPath.style.fill).toBe(VENN_PALETTES.dark[0].fill);
+    expect(singletonPath.getAttribute('stroke')).toBe('#2dd4bf');
+    expect(singletonPath.style.stroke).toBe('');
+
+    const intersectionPath = container.querySelector('[data-venn-sets="db1_db2"] path');
+    expect(intersectionPath.getAttribute('stroke')).toBe('none');
+    expect(intersectionPath.style.stroke).toBe('');
+
+    rerender(
+      <ThemeContext.Provider value="light">
+        <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={null} onRegionClick={onRegionClick} />
+      </ThemeContext.Provider>,
+    );
+
+    expect(container.querySelector('svg')).toBe(svg);
+    expect(label.style.fill).toBe('rgb(63, 63, 70)');
+    expect(singletonPath.style.fill).toBe('rgba(13, 148, 136, 0.3)');
+    expect(singletonPath.getAttribute('stroke')).toBe('#0d9488');
+    expect(singletonPath.style.stroke).toBe('');
+  });
+
+  it('does not rebuild the SVG when onRegionClick changes and invokes the latest callback', () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const { container, rerender } = render(
+      <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={null} onRegionClick={firstHandler} />,
+    );
+    const svg = container.querySelector('svg');
+
+    rerender(
+      <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={null} onRegionClick={secondHandler} />,
+    );
+
+    expect(container.querySelector('svg')).toBe(svg);
+    fireEvent.click(container.querySelector('[data-venn-sets="db1"]'));
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith(['db1']);
+  });
+
+  it('re-applies presentation, active region, and latest callback on ResizeObserver callback', () => {
+    let resizeCallback = null;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb) {
+        resizeCallback = cb;
+      }
+
+      observe = observe;
+
+      disconnect = disconnect;
+    });
+
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const { container, rerender, unmount } = render(
+      <ThemeContext.Provider value="dark">
+        <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={['db1', 'db2']} onRegionClick={firstHandler} />
+      </ThemeContext.Provider>,
+    );
+
+    rerender(
+      <ThemeContext.Provider value="dark">
+        <ComparisonVenn data={COMPARE_RESPONSE} activeRegion={['db1', 'db2']} onRegionClick={secondHandler} />
+      </ThemeContext.Provider>,
+    );
+
+    expect(observe).toHaveBeenCalled();
+    resizeCallback();
+
+    const intersectionArea = container.querySelector('[data-venn-sets="db1_db2"]');
+    const intersectionPath = intersectionArea.querySelector('path');
+    const singletonPath = container.querySelector('[data-venn-sets="db1"] path');
+    expect(intersectionArea).toHaveClass('is-active');
+    expect(intersectionPath.style.fill).not.toBe('rgb(0, 0, 0)');
+    expect(intersectionPath.style.stroke).toBe('');
+    expect(singletonPath.getAttribute('stroke')).toBe('#2dd4bf');
+
+    fireEvent.click(intersectionArea);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith(['db1', 'db2']);
+
+    unmount();
+    expect(disconnect).toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it('converts exact-membership counts into inclusive area counts', () => {

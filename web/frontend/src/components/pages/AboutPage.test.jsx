@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { act, cleanup, render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 import { AboutPage } from './AboutPage';
@@ -47,6 +49,11 @@ describe('AboutPage structure', () => {
       'src',
       'https://www.uniklinik-freiburg.de/fileadmin/_processed_/9/1/csm_Virologie_D__2021_1aa65478be.png',
     );
+    expect(virologyLogo).toHaveAttribute('referrerpolicy', 'no-referrer');
+    const krebsLogo = screen.getByRole('img', {
+      name: 'Hans A. Krebs Program for Medical Scientists logo',
+    });
+    expect(krebsLogo).toHaveAttribute('referrerpolicy', 'no-referrer');
     expect(virologyLogo.closest('a')).toHaveAttribute(
       'href',
       'https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html',
@@ -155,5 +162,200 @@ describe('AboutPage contact email', () => {
     fireEvent.click(within(toc).getByRole('button', { name: 'Contributing, data usage, licensing' }));
     const link = screen.getByRole('link', { name: /jonas fuchs/i });
     expect(link).toHaveAttribute('href', 'mailto:jonas.fuchs@uniklinik-freiburg.de');
+  });
+
+  it('sanitizes contactEmail and falls back to maintainer address on mailto injection payloads', () => {
+    renderAbout({ contactEmail: 'evil@x.org?bcc=attacker@y.org' });
+    const toc = screen.getByRole('navigation', { name: /on this page/i });
+    fireEvent.click(within(toc).getByRole('button', { name: 'Contributing, data usage, licensing' }));
+    const link = screen.getByRole('link', { name: 'Jonas Fuchs' });
+    expect(link).toHaveAttribute('href', 'mailto:jonas.fuchs@uniklinik-freiburg.de');
+    expect(screen.queryByRole('link', { name: /evil@x\.org/i })).toBeNull();
+  });
+});
+
+describe('CSP theme-init script and index.html', () => {
+  it('loads /theme-init.js externally in index.html without any inline script body', () => {
+    const indexPath = path.resolve(import.meta.dirname, '../../../index.html');
+    const themeInitPath = path.resolve(import.meta.dirname, '../../../public/theme-init.js');
+    const html = fs.readFileSync(indexPath, 'utf8');
+    const script = fs.readFileSync(themeInitPath, 'utf8');
+
+    const scriptTags = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+    expect(scriptTags.length).toBe(2);
+    for (const [, attrs, body] of scriptTags) {
+      expect(attrs).toMatch(/\bsrc="/);
+      expect(body.trim()).toBe('');
+    }
+    expect(html).toContain('<script src="/theme-init.js"></script>');
+
+    const origMatchMedia = window.matchMedia;
+    const origGetItem = Storage.prototype.getItem;
+    try {
+      localStorage.setItem('respro-theme', 'dark');
+      window.eval(script);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+
+      localStorage.setItem('respro-theme', 'light');
+      window.eval(script);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
+      localStorage.removeItem('respro-theme');
+      window.matchMedia = vi.fn(() => ({ matches: true }));
+      window.eval(script);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+
+      Storage.prototype.getItem = () => {
+        throw new Error('storage blocked');
+      };
+      window.eval(script);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    } finally {
+      window.matchMedia = origMatchMedia;
+      Storage.prototype.getItem = origGetItem;
+      localStorage.removeItem('respro-theme');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+});
+
+describe('AboutPage copy-citation timeout lifecycle (WA-050)', () => {
+  const originalNavigator = global.navigator;
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.stubGlobal('navigator', originalNavigator);
+  });
+
+  function openCliSection() {
+    const view = renderAbout();
+    const toc = screen.getByRole('navigation', { name: /on this page/i });
+    fireEvent.click(within(toc).getByRole('button', { name: 'CLI and extended functionality' }));
+    return view;
+  }
+
+  it('shows Copied and resets back to Copy after 1600ms', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    openCliSection();
+    const copyBtn = screen.getByRole('button', { name: 'Copy CLI commands' });
+
+    await act(async () => {
+      fireEvent.click(copyBtn);
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    act(() => {
+      vi.advanceTimersByTime(1599);
+    });
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(copyBtn).toHaveTextContent('Copy');
+  });
+
+  it('clears the pending copy timeout on unmount without warnings', async () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    const { unmount } = openCliSection();
+    const copyBtn = screen.getByRole('button', { name: 'Copy CLI commands' });
+
+    await act(async () => {
+      fireEvent.click(copyBtn);
+      await Promise.resolve();
+    });
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    unmount();
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('cancels the prior timer on rapid re-trigger so Copied stays visible for a full 1600ms', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    openCliSection();
+    const copyBtn = screen.getByRole('button', { name: 'Copy CLI commands' });
+
+    await act(async () => {
+      fireEvent.click(copyBtn);
+      await Promise.resolve();
+    });
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    await act(async () => {
+      fireEvent.click(copyBtn);
+      await Promise.resolve();
+    });
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    // t=1600ms from first click (600ms after second click) must still show Copied.
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(copyBtn).toHaveTextContent('Copied');
+
+    // t=1600ms from second click resets to Copy.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(copyBtn).toHaveTextContent('Copy');
+  });
+
+  it('does not schedule a timer or update state if unmounted while clipboard write is pending', async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    let resolveWrite;
+    let rejectWrite;
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => new Promise((res) => { resolveWrite = res; }))
+      .mockImplementationOnce(() => new Promise((_, rej) => { rejectWrite = rej; }));
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    const first = openCliSection();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy CLI commands' }));
+    const timeoutsBeforeResolve = setTimeoutSpy.mock.calls.length;
+    first.unmount();
+
+    await act(async () => {
+      resolveWrite();
+      await Promise.resolve();
+    });
+    expect(setTimeoutSpy.mock.calls.length).toBe(timeoutsBeforeResolve);
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    const second = openCliSection();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy CLI commands' }));
+    second.unmount();
+
+    await act(async () => {
+      rejectWrite(new Error('denied'));
+      await Promise.resolve();
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

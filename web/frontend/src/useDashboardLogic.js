@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import faviconSrc from './assets/favicon.svg';
 import packageJson from '../package.json';
-import { API_BASE, apiGet, setArtifactBundleLimit } from './api';
+import { API_BASE, apiGet, isAbortError, setArtifactBundleLimit } from './api';
+import { sanitizeEmailAddress, sanitizeHttpUrl } from './utils';
 import { PROFILE_MODES } from './constants';
 import { useProfileSubmit } from './hooks/useProfileSubmit';
 import { useBatchManager } from './hooks/useBatchManager';
@@ -12,7 +13,7 @@ import { useSessionCleanup } from './hooks/useSessionCleanup';
 import { useUploadManager } from './hooks/useUploadManager';
 import { useComparisonManager } from './hooks/useComparisonManager';
 
-const webVersion = packageJson.version;
+export const webVersion = packageJson.version;
 
 export function useDashboardLogic() {
   const [databases, setDatabases] = useState([]);
@@ -59,9 +60,20 @@ export function useDashboardLogic() {
   });
 
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     const initData = async () => {
-      try {
-        const uiConfig = (await apiGet('/api/ui/config').catch(() => null))?.data || {};
+      const [configRes, legalRes, contactRes, databasesRes] = await Promise.allSettled([
+        apiGet('/api/ui/config', { signal }),
+        apiGet('/api/ui/legal', { signal }),
+        apiGet('/api/ui/contact', { signal }),
+        apiGet('/api/databases', { signal }),
+      ]);
+      if (signal.aborted) return;
+
+      if (configRes.status === 'fulfilled') {
+        const uiConfig = configRes.value?.data || {};
         if (Number.isFinite(uiConfig.batch_max_samples) && uiConfig.batch_max_samples > 0) {
           batch.setBatchMaxSamples(uiConfig.batch_max_samples);
         }
@@ -72,25 +84,41 @@ export function useDashboardLogic() {
           setArtifactBundleLimit(uiConfig.artifact_bundle_max_artifacts);
         }
         if (uiConfig.cli_version) setCliVersion(uiConfig.cli_version);
+      }
 
-        const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
-        setLegalLink(_resolveLegalLink(legalPayload?.data));
-        const contactPayload = await apiGet('/api/ui/contact').catch(() => null);
-        setContactEmail(_resolveContactEmail(contactPayload?.data));
+      if (legalRes.status === 'fulfilled') {
+        setLegalLink(_resolveLegalLink(legalRes.value?.data));
+      } else if (!isAbortError(legalRes.reason)) {
+        setLegalLink(null);
+      }
 
-        const items = (await apiGet('/api/databases')).data.items || [];
+      if (contactRes.status === 'fulfilled') {
+        setContactEmail(_resolveContactEmail(contactRes.value?.data));
+      } else if (!isAbortError(contactRes.reason)) {
+        setContactEmail(null);
+      }
+
+      if (databasesRes.status === 'fulfilled') {
+        const items = databasesRes.value?.data?.items || [];
         setDatabases(items);
         if (items.length > 0) setSelectedDatabaseId(items[0].id);
-      } catch (error) {
-        setStatusError(`Error loading data: ${error.message}`);
+      } else if (!isAbortError(databasesRes.reason)) {
+        const message = databasesRes.reason?.message || 'Failed to load databases.';
+        setStatusError(`Error loading data: ${message}`);
       }
     };
+
     initData();
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
-    if (selectedDatabaseId) mutations.loadMutations(selectedDatabaseId);
-  }, [selectedDatabaseId]);
+    const controller = new AbortController();
+    mutations.loadMutations(selectedDatabaseId, { signal: controller.signal });
+    return () => controller.abort();
+  }, [selectedDatabaseId, mutations.loadMutations]);
 
   useSessionCleanup(session.uploadedPaths, session.reportPaths);
 
@@ -144,11 +172,15 @@ export function useDashboardLogic() {
 
 export function _resolveLegalLink(legalData) {
   if (!legalData || !legalData.enabled) return null;
-  if (legalData.kind === 'url' && legalData.url) return legalData.url;
+  if (legalData.kind === 'url') {
+    const rawUrl = legalData.url === null || legalData.url === undefined ? '' : String(legalData.url).trim();
+    if (!rawUrl) return `${API_BASE}/legal`;
+    return sanitizeHttpUrl(rawUrl);
+  }
   return `${API_BASE}/legal`;
 }
 
 export function _resolveContactEmail(contactData) {
   if (!contactData || !contactData.enabled || !contactData.email) return null;
-  return contactData.email;
+  return sanitizeEmailAddress(contactData.email);
 }

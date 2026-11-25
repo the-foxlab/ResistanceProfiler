@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import { isPopulated } from '../../../utils';
+import { isPopulated, sanitizeEmailAddress, sanitizeHttpUrl } from '../../../utils';
 
 function renderPmidLinks(value) {
   const pmidText = String(value);
@@ -25,7 +25,10 @@ function renderPmidLinks(value) {
 function renderDatabaseMetaValue(entry) {
   const valueText = String(entry.value).trim();
   if (entry.key === 'website') {
-    return <a href={valueText} target="_blank" rel="noreferrer">{valueText}</a>;
+    const safeWebsite = sanitizeHttpUrl(valueText);
+    return safeWebsite
+      ? <a href={safeWebsite} target="_blank" rel="noreferrer">{valueText}</a>
+      : valueText;
   }
   if (entry.key === 'publication_doi') {
     const doi = valueText.replace(/^https?:\/\/doi\.org\//i, '');
@@ -34,8 +37,9 @@ function renderDatabaseMetaValue(entry) {
   if (entry.key === 'publication_pmid') {
     return renderPmidLinks(valueText);
   }
-  if (entry.key === 'contact' && valueText.includes('@') && !valueText.includes('mailto:')) {
-    return <a href={`mailto:${valueText}`}>{valueText}</a>;
+  if (entry.key === 'contact') {
+    const safeEmail = sanitizeEmailAddress(valueText);
+    return safeEmail ? <a href={`mailto:${safeEmail}`}>{safeEmail}</a> : entry.value;
   }
   return entry.value;
 }

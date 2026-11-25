@@ -192,6 +192,103 @@ class TestJobResultPathRedaction:
         assert all('/' not in artifact_id for artifact_id in first['artifact_ids'])
         assert first['mode'] == 'fasta'
 
+    def test_concurrent_redaction_claims_artifact_ids_atomically_with_result_ttl(
+        self,
+        _owned_records: fakeredis.FakeRedis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import concurrent.futures
+        import threading
+
+        monkeypatch.setenv('RESPRO_WEB_RESULT_TTL', '180')
+        session_service.record_job(session_hash='owner', upload_ids=[], job_id='job-concurrent')
+        result = {
+            'report_html_path': '/private/results/sample.report.html',
+            'report_json_path': '/private/results/sample.results.json',
+        }
+        barrier = threading.Barrier(4)
+        tls = threading.local()
+        orig_record_artifact = session_service.record_artifact
+
+        def _sync_record(**kwargs):
+            if not getattr(tls, 'entered', False):
+                tls.entered = True
+                barrier.wait(timeout=1.0)
+            return orig_record_artifact(**kwargs)
+
+        monkeypatch.setattr('web.backend.routes.jobs.record_artifact', _sync_record)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            outputs = list(pool.map(lambda _: _redact_result_paths('job-concurrent', 'owner', result), range(4)))
+
+        first_ids = outputs[0]['artifact_ids']
+        assert all(out['artifact_ids'] == first_ids for out in outputs)
+        art_keys = list(_owned_records.scan_iter('respro:artifact:*'))
+        assert len(art_keys) == 2
+        for key in art_keys:
+            assert 1 <= _owned_records.ttl(key) <= 180
+
+    def test_cancel_started_job_handles_stop_race_and_queued_transition(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tempfile
+
+        from fastapi.testclient import TestClient
+        from rq.exceptions import InvalidJobOperation, NoSuchJobError
+
+        from web.backend.main import create_app
+        from web.backend.queue import get_queue
+        from web.backend.startup_config import StartupConfig, build_project_db_uuid_index
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pd_dir = root / 'project_databases'
+            up_dir = root / 'uploads'
+            res_dir = root / 'results'
+            pd_dir.mkdir()
+            up_dir.mkdir()
+            res_dir.mkdir()
+            cfg = StartupConfig(
+                project_databases_dir=pd_dir,
+                uploads_dir=up_dir,
+                results_dir=res_dir,
+                data_dir=root,
+                allowed_roots=(pd_dir, up_dir, res_dir),
+                project_db_uuid_index=build_project_db_uuid_index(pd_dir),
+            )
+            fake_q = Mock()
+            fake_q.connection = fakeredis.FakeRedis()
+            app = create_app(startup_config=cfg)
+            app.dependency_overrides[get_queue] = lambda: fake_q
+            client = TestClient(app)
+
+            client.post('/api/session/cleanup', json={'upload_ids': [], 'artifact_ids': []})
+            tok = client.cookies.get(session_service.SESSION_COOKIE_NAME)
+            assert tok is not None
+            sh = session_service.hash_session_token(tok)
+            session_service.record_job(session_hash=sh, upload_ids=[], job_id='race-job')
+
+            started_job = Mock()
+            started_job.get_status.return_value = 'started'
+            monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_a, **_kw: started_job)
+            monkeypatch.setattr(
+                'web.backend.routes.jobs.send_stop_job_command',
+                lambda *_a, **_kw: (_ for _ in ()).throw(NoSuchJobError('already finished')),
+            )
+            assert client.delete('/api/jobs/race-job').status_code == 204
+
+            # Queued -> started race during cancel() falls back to send_stop_job_command.
+            transition_job = Mock()
+            transition_job.get_status.side_effect = ['queued', 'started']
+            transition_job.cancel.side_effect = InvalidJobOperation('already started')
+            stop_calls: list[str] = []
+            monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_a, **_kw: transition_job)
+            monkeypatch.setattr(
+                'web.backend.routes.jobs.send_stop_job_command',
+                lambda _conn, jid, **_kw: stop_calls.append(jid),
+            )
+            assert client.delete('/api/jobs/race-job').status_code == 204
+            assert stop_calls == ['race-job']
+
 
 class TestJobTtlExpiry:
     """Failed-job metadata expires after the configured result TTL."""

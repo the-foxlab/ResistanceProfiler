@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useContext, useEffect, useMemo, useRef } from 'react';
 import 'd3-transition';
 import { select } from 'd3-selection';
 import { VennDiagram } from 'venn.js/build/venn.js';
 import { buildVennAreas, regionKey, VENN_PALETTES } from './vennAreas';
-import { currentTheme } from './database-plots/shared';
+import { ThemeContext } from '../hooks/useTheme';
 
 function themePresentation(theme) {
   return {
@@ -18,6 +18,14 @@ function themePresentation(theme) {
  */
 export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
   const containerRef = useRef(null);
+  const theme = useContext(ThemeContext);
+  const onRegionClickRef = useRef(onRegionClick);
+  onRegionClickRef.current = onRegionClick;
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  const activeRegionRef = useRef(activeRegion);
+  activeRegionRef.current = activeRegion;
+
   const areas = useMemo(() => (data ? buildVennAreas(data) : []), [data]);
   const hasRules = useMemo(() => areas.some((area) => area.size > 0), [areas]);
 
@@ -37,8 +45,10 @@ export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
       chart(selection);
       selection.selectAll('.venn-area')
         .on('click', (area) => {
-          onRegionClick?.(area.sets);
+          onRegionClickRef.current?.(area.sets);
         });
+      applyPresentation({ el, areas, theme: themeRef.current });
+      applyActiveRegion(el, activeRegionRef.current);
     };
 
     renderDiagram();
@@ -52,9 +62,8 @@ export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
       select(el).selectAll('.venn-area').on('click', null);
       select(el).selectAll('*').remove();
     };
-  }, [data, areas, hasRules, onRegionClick]);
+  }, [data, areas, hasRules]);
 
-  const theme = currentTheme();
   useEffect(() => {
     if (!data || !containerRef.current || !hasRules) return;
     applyPresentation({ el: containerRef.current, areas, theme });
@@ -62,9 +71,7 @@ export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
 
   useEffect(() => {
     if (!data || !containerRef.current) return;
-    const activeKey = activeRegion?.length ? regionKey(activeRegion) : '';
-    select(containerRef.current).selectAll('.venn-area')
-      .classed('is-active', (area) => regionKey(area.sets) === activeKey);
+    applyActiveRegion(containerRef.current, activeRegion);
   }, [data, activeRegion]);
 
   if (!data) {
@@ -77,6 +84,12 @@ export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
       {!hasRules && <p className="comparison-venn-empty">No atomic rules to compare.</p>}
     </div>
   );
+}
+
+function applyActiveRegion(el, activeRegion) {
+  const activeKey = activeRegion?.length ? regionKey(activeRegion) : '';
+  select(el).selectAll('.venn-area')
+    .classed('is-active', (area) => regionKey(area.sets) === activeKey);
 }
 
 function applyPresentation({ el, areas, theme }) {
@@ -100,14 +113,19 @@ function applyPresentation({ el, areas, theme }) {
         areaSelection.select('path')
           .style('fill', setColor.fill)
           .style('fill-opacity', 1)
-          .style('stroke', setColor.line)
-          .style('stroke-width', '1.5px');
+          .style('stroke', null)
+          .style('stroke-width', null)
+          .attr('stroke', setColor.line)
+          .attr('stroke-width', '1.5px');
       } else {
         // venn.js defaults intersection fills to black; use a neutral tint instead.
         areaSelection.select('path')
           .style('fill', intersectionFill)
           .style('fill-opacity', 1)
-          .style('stroke', 'none');
+          .style('stroke', null)
+          .style('stroke-width', null)
+          .attr('stroke', 'none')
+          .attr('stroke-width', null);
       }
     });
 }

@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, act } from '@testing-library/react';
 
 import { AnalyzePage } from './AnalyzePage';
 import { ThemeContext } from '../../hooks/useTheme';
+import { useBatchManager } from '../../hooks/useBatchManager';
 
 // AnalyzePage reads a large logic surface, but only a handful of fields are
 // read on the render path exercised here (the report iframe + plot modal). The
@@ -11,9 +12,21 @@ import { ThemeContext } from '../../hooks/useTheme';
 function minimalLogic(overrides = {}) {
   return {
     selectedDatabase: null,
-    vcfInput: '',
+    vcfInput: {
+      vcf_id: '',
+      input_display_name: '',
+      reference_id: '',
+      bam_id: null,
+      sample: '',
+      min_af: 0.01,
+      min_depth: 10,
+    },
     setVcfInput: () => {},
-    fastaInput: '',
+    fastaInput: {
+      fasta_id: '',
+      input_display_name: '',
+      sample: '',
+    },
     setFastaInput: () => {},
     jsonInputId: '',
     isRegenerateBusy: false,
@@ -23,12 +36,12 @@ function minimalLogic(overrides = {}) {
     uploadReferenceFile: () => {},
     uploadBamFile: () => {},
     uploadJsonFile: () => {},
-    uploadProgress: { percent: 0, name: '' },
+    uploadProgress: { percent: 0, fileName: '' },
     isUploading: false,
     isBatchUploading: false,
     cancelUpload: () => {},
     cancelBatchUpload: () => {},
-    activeProfileMode: '',
+    activeProfileMode: 'vcf',
     setActiveProfileMode: () => {},
     analyzeSubMode: 'single',
     setAnalyzeSubMode: () => {},
@@ -44,28 +57,32 @@ function minimalLogic(overrides = {}) {
     reportOptions: [],
     buildReportUrl: (path) => `http://127.0.0.1:8000/api/report?artifact_id=${path}`,
     buildArtifactUrl: (path) => `http://127.0.0.1:8000/api/artifact?artifact_id=${path}`,
-    batchMode: false,
+    batchMode: 'vcf',
     setBatchMode: () => {},
     batchVcfFiles: [],
     batchFastaFiles: [],
+    batchJsonFiles: [],
     batchReferenceFasta: null,
     batchSamples: [],
     batchSubmitting: false,
+    isBatchPolling: false,
     isBatchDownloadBusy: false,
-    batchError: '',
+    batchError: null,
     batchRateLimitCooldown: 0,
     setBatchRateLimitCooldown: () => {},
     batchSubmitted: false,
     batchMaxSamples: 25,
-    batchVcfCutoffs: {},
+    batchVcfCutoffs: { min_af: 0.01, min_depth: 10 },
     setBatchVcfCutoffs: () => {},
     addBatchVcfFiles: () => {},
     addBatchFastaFiles: () => {},
+    addBatchJsonFiles: () => {},
     addBatchBamFiles: () => {},
     attachBatchBam: () => {},
     removeBatchFile: () => {},
     uploadBatchReferenceFasta: () => {},
     submitBatch: () => {},
+    stopBatchPolling: () => {},
     downloadAllBatchArtifacts: () => {},
     resetBatch: () => {},
     inlineReportPath: '',
@@ -288,7 +305,7 @@ describe('AnalyzePage reportOrigin with relative report URLs', () => {
 
     fireEvent.load(frame);
     expect(postMessage).toHaveBeenCalledOnce();
-    expect(postMessage).toHaveBeenCalledWith(themeMessage, window.location.origin);
+    expect(postMessage).toHaveBeenCalledWith(themeMessage, '*');
   });
 
   function dispatchFromFrame(type, payload) {
@@ -386,7 +403,7 @@ describe('AnalyzePage submit gating during upload', () => {
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
-      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
       batchSubmitting: false,
       batchRateLimitCooldown: 0,
       isBatchUploading: true,
@@ -401,7 +418,7 @@ describe('AnalyzePage submit gating during upload', () => {
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
-      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
       batchSubmitting: false,
       batchRateLimitCooldown: 0,
       isBatchUploading: false,
@@ -447,7 +464,7 @@ describe('AnalyzePage cancel-upload button', () => {
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
-      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
       isBatchUploading: true,
       cancelBatchUpload,
     })} />);
@@ -485,7 +502,7 @@ describe('AnalyzePage clear-all button (batch upload overview)', () => {
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
-      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
     })} />);
 
     expect(screen.getByRole('button', { name: /clear all/i })).toBeInTheDocument();
@@ -497,7 +514,7 @@ describe('AnalyzePage clear-all button (batch upload overview)', () => {
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
-      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
       resetBatch,
     })} />);
 
@@ -558,5 +575,74 @@ describe('AnalyzePage upload progress visibility', () => {
     })} />);
 
     expect(screen.getByLabelText('Upload progress')).toBeInTheDocument();
+  });
+});
+
+describe('AnalyzePage batch rate-limit cooldown lifecycle (WA-050)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('displays cooldown text and disables Submit batch when batchRateLimitCooldown > 0', () => {
+    render(<AnalyzePage logic={minimalLogic({
+      analyzeSubMode: 'batch',
+      batchSubmitted: false,
+      batchMode: 'fasta',
+      batchFastaFiles: [{ rowId: 'row-1', uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchRateLimitCooldown: 15,
+    })} />);
+
+    expect(screen.getByText('Rate limit reached. Try again in 15s.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Submit batch' })).toBeDisabled();
+  });
+
+  it('keeps counting down on a single interval even while AnalyzePage unmounts and remounts across routes', () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+
+    function RouteHost({ showAnalyze }) {
+      const batch = useBatchManager({
+        selectedDatabaseId: 'db1',
+        addUploadedPath: () => {},
+        addResultArtifactPaths: () => {},
+        setSessionResults: () => {},
+        setUploadProgress: () => {},
+      });
+      const logic = minimalLogic({
+        analyzeSubMode: 'batch',
+        ...batch,
+      });
+      return (
+        <>
+          <button type="button" onClick={() => batch.setBatchRateLimitCooldown(10)}>
+            Trigger cooldown
+          </button>
+          {showAnalyze ? <AnalyzePage logic={logic} /> : <div>Other route</div>}
+        </>
+      );
+    }
+
+    const { rerender } = render(<RouteHost showAnalyze />);
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger cooldown' }));
+    expect(screen.getByText('Rate limit reached. Try again in 10s.')).toBeInTheDocument();
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+    // Unmount AnalyzePage (route change), advance 4 seconds, and remount AnalyzePage.
+    rerender(<RouteHost showAnalyze={false} />);
+    expect(screen.getByText('Other route')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    rerender(<RouteHost showAnalyze />);
+
+    expect(screen.getByText('Rate limit reached. Try again in 6s.')).toBeInTheDocument();
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(6000);
+    });
+    expect(screen.queryByText(/Rate limit reached/)).not.toBeInTheDocument();
   });
 });

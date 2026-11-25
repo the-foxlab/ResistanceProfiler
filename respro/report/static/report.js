@@ -17,7 +17,7 @@
   }
   if (window.parent !== window) {
     window.addEventListener('message', function (event) {
-      if (event.source !== window.parent || event.origin !== window.location.origin) {
+      if (event.source !== window.parent) {
         return;
       }
       if (event.data && event.data.type === 'respro:report-theme' && event.data.theme) {
@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function () {
           type: 'respro:open-plot',
           src: plotImage.currentSrc || plotImage.src,
           alt: plotImage.alt || 'Resistance plot',
-        }, window.location.origin);
+        }, '*');
         return;
       }
       openModal(plotModal);
@@ -125,7 +125,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.documentElement.scrollHeight
       );
       if (height > 0) {
-        window.parent.postMessage({ type: 'respro:report-height', height: height }, window.location.origin);
+        window.parent.postMessage({ type: 'respro:report-height', height: height }, '*');
       }
     };
     var heightObserver = new ResizeObserver(postReportHeight);
@@ -159,7 +159,7 @@ document.addEventListener('DOMContentLoaded', function () {
             title: title,
             ntSequence: ntSeq,
             aaSequence: aaSeq,
-          }, window.location.origin);
+          }, '*');
           return;
         }
 
@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', function () {
             type: 'respro:open-structure',
             src: url,
             title: title,
-          }, window.location.origin);
+          }, '*');
           return;
         }
         structureTitle.textContent = title;
@@ -290,7 +290,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── Utility: TSV file download ────────────────────────────────────────────
   function sanitizeTsvCell(value) {
-    return String(value || '').replace(/\r\n|[\t\r\n]/g, ' ');
+    const raw = String(value == null ? '' : value);
+    const cleaned = raw.replace(/\r\n|[\t\r\n]/g, ' ');
+    if (/^[\t\r]/.test(raw) || /^\s*[=+\-@]/.test(cleaned)) {
+      return "'" + cleaned;
+    }
+    return cleaned;
   }
 
   function downloadTsv(lines, filename) {
@@ -302,7 +307,11 @@ document.addEventListener('DOMContentLoaded', function () {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(function () {
+      if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(url);
+      }
+    }, 1000);
   }
 
   const mutationTab = document.getElementById('tab-all-mutations');
@@ -640,7 +649,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hasDbCol) {
           headers.push('In database');
         }
-        const lines = [headers.join('\t')];
+        const lines = [headers.map(sanitizeTsvCell).join('\t')];
 
         collectMutationRowPairs().forEach(function (pair) {
           const row = pair.row;
@@ -997,7 +1006,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hasReference) { headers.push('Reference'); }
         headers.push('Drug sensitivity data', 'Amino acid frequency', 'Source');
         if (hasPubs) { headers.push('References'); }
-        const lines = [headers.join('\t')];
+        const lines = [headers.map(sanitizeTsvCell).join('\t')];
 
         collectRows().forEach(function (row) {
           if (row.hidden) { return; }
@@ -1050,7 +1059,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hasDrugClass) { headers.push('Drug class'); }
         headers.push('Drug', 'Mutation', 'Known Rule', 'Similarity to entry', 'Drug sensitivity data', 'Amino acid frequency', 'Source');
         if (hasPubs) { headers.push('References'); }
-        const lines = [headers.join('\t')];
+        const lines = [headers.map(sanitizeTsvCell).join('\t')];
 
         collectRows().forEach(function (row) {
           if (row.hidden) { return; }

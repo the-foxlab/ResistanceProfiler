@@ -12,6 +12,7 @@ import textwrap
 import zipfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -128,9 +129,11 @@ def _download_artifact_json(
 
 
 def _establish_session(client: TestClient) -> str:
-    """Issue any request to establish the session cookie, return the session hash."""
-    client.get('/api/ui/config')
+    """Issue a stateful request to establish the session cookie, return the session hash."""
+    response = client.post('/api/session/cleanup', json={'upload_ids': [], 'artifact_ids': []})
+    assert response.status_code == 200, response.text
     cookie = client.cookies.get(SESSION_COOKIE_NAME)
+    assert cookie is not None
     return hash_session_token(cookie)
 
 
@@ -272,12 +275,15 @@ class TestNoApiToken:
         self,
         startup_config: StartupConfig,
         sync_queue: Queue,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         The local-mode test above covers the default; this guards the online
         deployment path, where the session cookie is marked ``Secure`` and the
         docs are disabled, but the API routes remain open.
         """
+        fake_client = fakeredis.FakeStrictRedis()
+        monkeypatch.setattr('web.backend.services.session._redis_connection', lambda: fake_client)
         online_config = replace(startup_config, deployment_mode='online')
         app = create_app(startup_config=online_config)
         app.dependency_overrides[get_queue] = lambda: sync_queue
@@ -380,9 +386,9 @@ class TestWebApi:
         no_token_config = replace(startup_config, deployment_mode='local')
         monkeypatch.setattr(main_module, 'load_startup_config', lambda: no_token_config)
         client = TestClient(create_app())
-        # /api/health is public in local mode; the response must carry a session
-        # cookie, proving the middleware was wired with the resolved config.
-        response = client.get('/api/health')
+        # Stateful requests must carry a session cookie, proving the middleware
+        # was wired with the resolved config.
+        response = client.post('/api/session/cleanup', json={'upload_ids': [], 'artifact_ids': []})
         assert response.status_code == 200
         set_cookie = response.headers.get('set-cookie', '')
         assert SESSION_COOKIE_NAME in set_cookie
@@ -1350,22 +1356,27 @@ class TestWebApi:
         assert response.status_code == 204
         job.cancel.assert_called_once_with()
 
-    def test_cancel_started_job_calls_kill_worker_when_available(
+    def test_cancel_started_job_calls_send_stop_job_command(
         self,
         client: TestClient,
+        sync_queue: Queue,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from rq.serializers import JSONSerializer
+
         session_hash = _establish_session(client)
         record_job(session_hash=session_hash, upload_ids=[], job_id='test-job-id')
 
         job = Mock()
         job.get_status.return_value = 'started'
+        stop_mock = Mock()
 
         monkeypatch.setattr('web.backend.routes.jobs.Job.fetch', lambda *_args, **_kwargs: job)
+        monkeypatch.setattr('web.backend.routes.jobs.send_stop_job_command', stop_mock)
 
         response = client.delete('/api/jobs/test-job-id')
         assert response.status_code == 204
-        job.kill_worker.assert_called_once_with()
+        stop_mock.assert_called_once_with(sync_queue.connection, 'test-job-id', serializer=JSONSerializer)
 
     def test_profile_vcf_enqueues_with_job_timeout_and_retry_defaults(
         self,
@@ -2275,30 +2286,41 @@ class TestBatchProfileEndpoints:
         assert "FASTA file not found for sample 'fasta-b'." in response.json()['detail']
         assert enqueue_calls == 0
 
-    def test_batch_fasta_sample_quota_uses_default_redis_url_when_env_missing(
+    def test_batch_fasta_sample_quota_skips_redis_when_env_missing_and_uses_configured_url(
         self,
         client: TestClient,
         startup_config: StartupConfig,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        import redis as redis_pkg
+
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        redis_urls: list[str] = []
+        fasta_id = _upload_bytes(client, f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n'.encode(), 'fasta', 'quota.fasta')
+        pool_urls: list[str] = []
 
-        class FakeQuotaRedis:
-            def incrby(self, _key: str, _value: int) -> int:
-                return 1
+        class FakePool:
+            def __init__(self, url: str) -> None:
+                self.url = url
+                self.connection_kwargs: dict[str, object] = {}
 
-            def expire(self, _key: str, _seconds: int) -> bool:
-                return True
+            def disconnect(self) -> None:
+                pass
 
-        def fake_from_url(url: str):
-            redis_urls.append(url)
-            return FakeQuotaRedis()
+        fake_redis_client = fakeredis.FakeStrictRedis()
+
+        def fake_pool_from_url(cls, url: str, **_kwargs):
+            pool_urls.append(url)
+            return FakePool(url)
 
         monkeypatch.delenv('REDIS_URL', raising=False)
-        monkeypatch.setattr('web.backend.rate_limit.redis.Redis.from_url', fake_from_url)
+        import web.backend.rate_limit as rate_limit_module
 
-        response = client.post(
+        monkeypatch.setattr(rate_limit_module, '_current_window_minute', lambda: 1_000_000)
+        monkeypatch.setattr(redis_pkg.ConnectionPool, 'from_url', classmethod(fake_pool_from_url))
+        monkeypatch.setattr('web.backend.services.session.redis.Redis', lambda **_kw: fake_redis_client)
+
+        # Invalid upload fails 404 before quota check; valid upload succeeds without dialing Redis when REDIS_URL is unset.
+        bad_resp = client.post(
             '/api/profile/batch/fasta',
             json={
                 'fasta_ids': ['nonexistent-fasta-id'],
@@ -2306,10 +2328,33 @@ class TestBatchProfileEndpoints:
                 'db_path': default_db.name,
             },
         )
+        assert bad_resp.status_code == 404
+        assert pool_urls == []
 
-        assert response.status_code == 404
-        assert redis_urls
-        assert redis_urls[-1] == WEB_BACKEND_CONFIG.defaults.redis_url
+        ok_resp = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_ids': [fasta_id],
+                'sample_names': ['fasta-a'],
+                'db_path': default_db.name,
+            },
+        )
+        assert ok_resp.status_code == 200
+        assert pool_urls == []
+
+        # When REDIS_URL is explicitly configured, sample quota dials that configured Redis URL via shared pool.
+        configured_url = 'redis://127.0.0.1:6379/5'
+        monkeypatch.setenv('REDIS_URL', configured_url)
+        redis_resp = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_ids': [fasta_id],
+                'sample_names': ['fasta-b'],
+                'db_path': default_db.name,
+            },
+        )
+        assert redis_resp.status_code == 200
+        assert pool_urls == [configured_url]
 
     # ── Batch VCF per-sample BAM ──────────────────────────────────────
 
@@ -2742,6 +2787,7 @@ class TestBatchRegenerateEndpoints:
 
         fixed_identity = 'ip:testclient'
         monkeypatch.setattr(rate_limit_module, '_rate_limit_key', lambda request: fixed_identity)
+        monkeypatch.setattr(rate_limit_module, '_current_window_minute', lambda: 1_000_000)
         max_per_minute = WEB_BACKEND_CONFIG.defaults.max_batch_size
         window_minute = rate_limit_module._current_window_minute()
         _SAMPLE_QUOTA_COUNTER.clear()
@@ -3684,3 +3730,214 @@ class TestNoPathLeakage:
         response = client.get('/api/report', params={'artifact_id': 'no-such-id'})
         assert response.status_code in (400, 404)
         self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+
+class TestM2BRouteHardeningRegressions:
+    """Targeted regression tests for WA-017, WA-029, WA-039, WA-040, WA-041, S5-B1."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_session_stores(self) -> Any:
+        reset_memory_stores()
+        _SAMPLE_QUOTA_COUNTER.clear()
+        yield
+        reset_memory_stores()
+        _SAMPLE_QUOTA_COUNTER.clear()
+
+    def test_validation_runs_before_quota_burn_across_profile_and_regenerate_routes(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import web.backend.rate_limit as rate_limit_module
+
+        monkeypatch.setattr(rate_limit_module, '_current_window_minute', lambda: 1_000_000)
+        monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '1')
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0].name
+        fasta_id = _upload_bytes(client, f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n'.encode(), 'fasta', 'q.fa')
+        vcf_id = _upload_file(client, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, web_sample_ref_fasta, 'fasta')
+        valid_json = json.dumps({
+            'run': {
+                'sample_name': 's',
+                'project_name': 'Demo',
+                'reference_name': TINY_REF_NAME,
+                'vcf_path': 'sample.vcf',
+                'total_variants': 0,
+                'variants_in_cds': 0,
+                'resistance_hits': 0,
+                'respro_version': '0.1.0',
+                'created_at': '2026-04-21T10:00:00',
+                'project_fingerprint': 'unknown-fp',
+            },
+            'variant_result': [],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }).encode('utf-8')
+        json_id = _upload_bytes(client, valid_json, 'json', 'bad_fp.results.json')
+
+        assert client.post('/api/profile/fasta', json={'fasta_id': fasta_id, 'database_id': 'missing.db'}).status_code == 400
+        assert client.post('/api/profile/vcf', json={'vcf_id': vcf_id, 'reference_id': ref_id, 'database_id': 'missing.db'}).status_code == 400
+        assert client.post('/api/profile/batch/fasta', json={'fasta_ids': [fasta_id], 'sample_names': ['s1'], 'db_path': 'missing.db'}).status_code == 400
+        assert client.post('/api/profile/batch/vcf', json={'vcf_ids': [vcf_id], 'reference_id': ref_id, 'sample_names': ['s1'], 'db_path': 'missing.db'}).status_code == 400
+        assert client.post('/api/regenerate/json', json={'json_id': json_id}).status_code == 400
+        assert client.post('/api/regenerate/batch', json={'json_ids': [json_id], 'sample_names': ['s1']}).status_code == 400
+
+        # The single valid sample in the minute budget must still succeed.
+        ok = client.post('/api/profile/fasta', json={'fasta_id': fasta_id, 'database_id': default_db, 'sample': 'ok'})
+        assert ok.status_code == 200, ok.text
+
+    def test_regenerate_json_enforces_sample_quota_and_bundle_deduplicates_ids(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import web.backend.rate_limit as rate_limit_module
+
+        monkeypatch.setattr(rate_limit_module, '_current_window_minute', lambda: 1_000_000)
+        monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '1')
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+
+        result = _profile_vcf_result(client, web_sample_vcf, web_sample_ref_fasta, sample='q', display_name='q.vcf')
+        json_bytes = client.get('/api/artifact', params={'artifact_id': result['report_json_path']}).content
+        json_id = _upload_bytes(client, json_bytes, 'json', 'q.results.json')
+
+        # Previous profile_vcf consumed the 1-sample/min quota, so regenerate/json must hit 429 + Retry-After.
+        over = client.post('/api/regenerate/json', json={'json_id': json_id})
+        assert over.status_code == 429
+        assert int(over.headers['retry-after']) >= 1
+
+        # Duplicate artifact_ids in /api/artifact-bundle must deduplicate to 1 entry.
+        bundle = client.post(
+            '/api/artifact-bundle',
+            json={'artifact_ids': [result['report_html_path'], result['report_html_path']]},
+        )
+        assert bundle.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as zf:
+            assert len(zf.namelist()) == 1
+
+    def test_deduplicate_archive_name_preserves_multidot_suffix(self) -> None:
+        from web.backend.routes.artifacts import _deduplicate_archive_name
+
+        used: set[str] = set()
+        assert _deduplicate_archive_name('sample.v1.html', used) == 'sample.v1.html'
+        assert _deduplicate_archive_name('sample.v1.html', used) == 'sample.v1_1.html'
+
+    def test_session_cleanup_deletes_confined_bai_skips_symlink_bai_and_preserves_record_on_unlink_error(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from tests.conftest import MINIMAL_BAM_BYTES
+        from web.backend.services.session import fetch_owned_record
+
+        bam1_id = _upload_bytes(client, MINIMAL_BAM_BYTES, 'bam', 'one.bam')
+        rec1 = fetch_owned_record('upload', bam1_id)
+        assert rec1 is not None and rec1.canonical_path is not None
+        bai1 = Path(f'{rec1.canonical_path}.bai')
+        bai1.write_bytes(b'BAI')
+
+        resp1 = client.post('/api/session/cleanup', json={'upload_ids': [bam1_id], 'artifact_ids': []})
+        assert resp1.status_code == 200
+        assert resp1.json()['deleted_count'] == 1
+        assert not bai1.exists()
+
+        bam2_id = _upload_bytes(client, MINIMAL_BAM_BYTES, 'bam', 'two.bam')
+        rec2 = fetch_owned_record('upload', bam2_id)
+        assert rec2 is not None and rec2.canonical_path is not None
+        outside_bai = tmp_path / 'outside.bai'
+        outside_bai.write_bytes(b'KEEP')
+        bai2 = Path(f'{rec2.canonical_path}.bai')
+        bai2.symlink_to(outside_bai)
+
+        resp2 = client.post('/api/session/cleanup', json={'upload_ids': [bam2_id], 'artifact_ids': []})
+        assert resp2.status_code == 200
+        assert resp2.json()['deleted_count'] == 1
+        assert bai2.is_symlink()
+        assert outside_bai.read_bytes() == b'KEEP'
+        bai2.unlink(missing_ok=True)
+
+        fa_id = _upload_bytes(client, f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n'.encode(), 'fasta', 'keep.fa')
+        fa_rec = fetch_owned_record('upload', fa_id)
+        assert fa_rec is not None and fa_rec.canonical_path is not None
+        fa_path = Path(fa_rec.canonical_path)
+        orig_unlink = Path.unlink
+
+        def _fail_unlink(self_path: Path, missing_ok: bool = False) -> None:
+            if self_path == fa_path:
+                raise OSError('EACCES')
+            orig_unlink(self_path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, 'unlink', _fail_unlink)
+        resp3 = client.post('/api/session/cleanup', json={'upload_ids': [fa_id], 'artifact_ids': []})
+        assert resp3.status_code == 200
+        assert resp3.json()['deleted_count'] == 0
+        assert fetch_owned_record('upload', fa_id) is not None
+
+    def test_failed_enqueue_rolls_back_job_record_and_batch_vcf_records_bam_ids(
+        self,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        from tests.conftest import MINIMAL_BAM_BYTES
+        from web.backend.services.session import fetch_owned_record
+
+        recorded_job_ids: list[str] = []
+
+        class _FailingQueue:
+            def enqueue(self, *_args: Any, **kwargs: Any) -> Any:
+                recorded_job_ids.append(kwargs['job_id'])
+                raise RuntimeError('broker down')
+
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: _FailingQueue()
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post('/api/profile/fasta', json={'use_example': True, 'sample': 'fail'})
+        assert resp.status_code == 500
+        assert len(recorded_job_ids) == 1
+        assert fetch_owned_record('job', recorded_job_ids[0]) is None
+
+        # Verify batch VCF record_job includes non-None bam_ids (WA-041).
+        sync_conn = fakeredis.FakeRedis()
+        from rq.serializers import JSONSerializer
+        ok_queue = Queue('profiling', connection=sync_conn, is_async=False, serializer=JSONSerializer)
+        app.dependency_overrides[get_queue] = lambda: ok_queue
+        app.dependency_overrides[get_batch_queue] = lambda: ok_queue
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0].name
+        vcf_id = _upload_file(client, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, web_sample_ref_fasta, 'fasta')
+        bam_id = _upload_bytes(client, MINIMAL_BAM_BYTES, 'bam', 's1.bam')
+
+        batch_resp = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_ids': [vcf_id, vcf_id],
+                'reference_id': ref_id,
+                'bam_ids': [bam_id, None],
+                'sample_names': ['S1', 'S2'],
+                'db_path': default_db,
+            },
+        )
+        assert batch_resp.status_code == 200, batch_resp.text
+        samples = batch_resp.json()['samples']
+        rec1 = fetch_owned_record('job', samples[0]['job_id'])
+        rec2 = fetch_owned_record('job', samples[1]['job_id'])
+        assert rec1 is not None and bam_id in rec1.fields.get('upload_ids', '').split(',')
+        assert rec2 is not None and bam_id not in rec2.fields.get('upload_ids', '').split(',')

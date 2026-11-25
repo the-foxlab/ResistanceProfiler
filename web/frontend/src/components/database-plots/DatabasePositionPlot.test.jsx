@@ -9,6 +9,7 @@ vi.mock('plotly.js-dist-min', () => ({
   default: {
     react: vi.fn(),
     purge: vi.fn(),
+    Plots: { resize: vi.fn() },
   },
 }));
 
@@ -61,8 +62,39 @@ describe('DatabasePositionPlot', () => {
         <DatabasePositionPlot plot={samplePlot} />
       </ThemeContext.Provider>,
     );
-    expect(Plotly.purge).toHaveBeenCalled();
+    expect(Plotly.purge).not.toHaveBeenCalled();
     expect(Plotly.react).toHaveBeenCalledTimes(2);
+  });
+
+  it('diffs plot updates in-place with Plotly.react and purges the container element on unmount', () => {
+    const { container, rerender, unmount } = render(
+      <ThemeContext.Provider value="light">
+        <DatabasePositionPlot plot={samplePlot} />
+      </ThemeContext.Provider>,
+    );
+    const chartEl = Plotly.react.mock.calls[0][0];
+    expect(chartEl).toBeInstanceOf(HTMLElement);
+    expect(container.contains(chartEl)).toBe(true);
+
+    const updatedPlot = {
+      ...samplePlot,
+      positions: [
+        ...samplePlot.positions,
+        { label: '30', rangeStart: 21, rangeEnd: 30, rank1: 2, rank5: 0 },
+      ],
+    };
+    rerender(
+      <ThemeContext.Provider value="light">
+        <DatabasePositionPlot plot={updatedPlot} />
+      </ThemeContext.Provider>,
+    );
+
+    expect(Plotly.purge).not.toHaveBeenCalled();
+    expect(Plotly.react).toHaveBeenCalledTimes(2);
+
+    unmount();
+    expect(Plotly.purge).toHaveBeenCalledTimes(1);
+    expect(Plotly.purge).toHaveBeenCalledWith(chartEl);
   });
 
   it('switches to nticks when there are more than 24 position bins', () => {
@@ -77,5 +109,61 @@ describe('DatabasePositionPlot', () => {
     const layout = Plotly.react.mock.calls.at(-1)[2];
     expect(layout.xaxis.nticks).toBe(25);
     expect(layout.xaxis.dtick).toBeUndefined();
+  });
+
+  it('applies dark-mode baseLayout, axisTitleFont, and classification colors via ThemeContext without DOM mutation', () => {
+    document.documentElement.setAttribute('data-theme', 'light');
+    const mixedPlot = {
+      ...samplePlot,
+      tones: ['rank1', 'contradictory', 'unknown'],
+      toneLabels: { rank1: 'sensitive', contradictory: 'contradictory', unknown: 'other' },
+      positions: [
+        { label: '10', rangeStart: 1, rangeEnd: 10, rank1: 1, contradictory: 2, unknown: 1 },
+      ],
+    };
+
+    const { container, rerender } = render(
+      <ThemeContext.Provider value="light">
+        <DatabasePositionPlot plot={mixedPlot} />
+      </ThemeContext.Provider>,
+    );
+    const lightCall = Plotly.react.mock.calls.at(-1);
+    expect(lightCall[1].map((t) => t.marker.color)).toEqual(['#27ae60', '#64748b', '#c3ccd6']);
+    expect(lightCall[2].xaxis.title.font.color).toBe('#71717a');
+
+    rerender(
+      <ThemeContext.Provider value="dark">
+        <DatabasePositionPlot plot={mixedPlot} />
+      </ThemeContext.Provider>,
+    );
+    const darkCall = Plotly.react.mock.calls.at(-1);
+    expect(darkCall[1].map((t) => t.marker.color)).toEqual(['#4ade80', '#94a3b8', '#cbd5e1']);
+    expect(darkCall[2].font.color).toBe('#d4d4d8');
+    expect(darkCall[2].xaxis.title.font.color).toBe('#d4d4d8');
+    expect(darkCall[2].yaxis.title.font.color).toBe('#d4d4d8');
+    expect(darkCall[2].hoverlabel.bgcolor).toBe('#27272a');
+
+    const dots = container.querySelectorAll('.database-legend-dot');
+    expect(dots[0]).toHaveStyle({ backgroundColor: '#4ade80' });
+    expect(dots[1]).toHaveStyle({ backgroundColor: '#94a3b8' });
+    expect(dots[2]).toHaveStyle({ backgroundColor: '#cbd5e1' });
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('renders plotError using var(--color-error)', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    Plotly.react.mockImplementationOnce(() => {
+      throw new Error('pos boom');
+    });
+
+    render(
+      <ThemeContext.Provider value="dark">
+        <DatabasePositionPlot plot={samplePlot} />
+      </ThemeContext.Provider>,
+    );
+
+    const errEl = screen.getByText(/Chart error: pos boom/);
+    expect(errEl).toHaveStyle({ color: 'var(--color-error)' });
+    errSpy.mockRestore();
   });
 });

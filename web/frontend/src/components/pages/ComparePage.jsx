@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+import { useOptionalCompareLogic } from '../../DashboardContext';
 import { useDatabaseCompare } from '../../hooks/useDatabaseCompare';
 import { ComparisonVenn } from '../ComparisonVenn';
 import { CompareMutationsTable } from './compare/CompareMutationsTable';
@@ -7,9 +9,16 @@ import {
   MIN_COMPARE_DATABASES,
 } from './compare/CompareSelectorsCard';
 
-export function ComparePage({ logic }) {
+export function ComparePage({ logic: logicProp }) {
+  const contextLogic = useOptionalCompareLogic();
+  const logic = logicProp ?? contextLogic;
   const compare = useDatabaseCompare(logic.databases);
   const { response, regionFilter, handleRegionClick } = compare;
+  const activeRegion = useMemo(() => {
+    if (regionFilter === 'all') return null;
+    if (!regionFilter) return [];
+    return regionFilter.split(',').filter(Boolean);
+  }, [regionFilter]);
 
   return (
     <div className="compare-tab">
@@ -35,7 +44,7 @@ export function ComparePage({ logic }) {
             <>
               <ComparisonVenn
                 data={response}
-                activeRegion={regionFilter === 'all' ? null : regionFilter.split(',')}
+                activeRegion={activeRegion}
                 onRegionClick={handleRegionClick}
               />
               <div className="compare-counts">

@@ -18,11 +18,18 @@ class MockXHR {
     this.open = vi.fn();
     this.send = vi.fn();
     this.setRequestHeader = vi.fn();
+    this.getResponseHeader = vi.fn(() => null);
     this.upload = { onprogress: null };
     this.onload = null;
     this.onerror = null;
+    this.onabort = null;
     this.status = 200;
     this.responseText = '';
+    this.abort = vi.fn(() => {
+      if (this.onabort) {
+        this.onabort({});
+      }
+    });
   }
 
   triggerProgress(loaded, total) {
@@ -66,26 +73,20 @@ function setupXhrStub() {
 // Mock fetch for API calls and job polling
 vi.stubGlobal('fetch', vi.fn());
 
-// Mock config
-vi.mock('./config.js', () => ({
-  FRONTEND_CONFIG: {
-    apiBase: 'http://localhost:8000',
-    profile: {
-      threads: 1,
-      vcf: {
-        minAf: 0.01,
-        minDepth: 10,
+// Mock config preserving production defaults (e.g. apiBase: '', batch, ui) while speeding up job polling
+vi.mock('./config.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    FRONTEND_CONFIG: {
+      ...actual.FRONTEND_CONFIG,
+      profile: {
+        ...actual.FRONTEND_CONFIG.profile,
+        jobPollIntervalMs: 10, // Short poll interval for tests
       },
-      jobPollIntervalMs: 10, // Short poll interval for tests
     },
-    defaults: {
-      sampleName: 'sample',
-    },
-    ui: {
-      explorerUrl: 'http://127.0.0.1:8000',
-    },
-  },
-}));
+  };
+});
 
 describe('useDashboardLogic - File Upload Flow', () => {
   beforeEach(() => {
@@ -197,22 +198,20 @@ describe('useDashboardLogic - File Upload Flow', () => {
 
     const file = new File(['data'], 'large.fasta', { type: 'application/octet-stream' });
 
+    let uploadPromise;
     await act(async () => {
-      const uploadPromise = result.current.uploadFastaFile(file);
+      uploadPromise = result.current.uploadFastaFile(file);
+    });
 
-      // Simulate progression through upload
-      const progressValues = [];
-      const unsubscribe = vi.fn(() => {
-        progressValues.push(result.current.uploadProgress.percent);
-      });
-
-      for (let i = 10; i <= 90; i += 20) {
+    for (let i = 10; i <= 90; i += 20) {
+      act(() => {
         mockXHRInstance.triggerProgress(i, 100);
-        unsubscribe();
-      }
+      });
+      expect(result.current.uploadProgress.percent).toBe(i);
+    }
 
+    await act(async () => {
       mockXHRInstance.triggerSuccess({ upload_id: 'up-fastA-large' });
-
       await uploadPromise;
     });
 
@@ -330,72 +329,41 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     vi.clearAllMocks();
   });
 
+  const setupUrlRoutedJobFetch = (onJobRoute) => {
+    global.fetch.mockImplementation((url, options) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/api/ui/config')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) });
+      }
+      if (requestUrl.includes('/api/ui/legal')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: false } }) });
+      }
+      if (requestUrl.includes('/api/ui/contact')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: false, email: null } }) });
+      }
+      if (requestUrl.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            data: { items: [{ id: 'db1', display_name: 'HIV' }] },
+          }),
+        });
+      }
+      if (requestUrl.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: { items: [], columns: [] } }),
+        });
+      }
+      return onJobRoute(requestUrl, options);
+    });
+  };
+
   it('should poll job until completion with succeeded status', async () => {
-    // Setup: ui/config, ui/legal, and ui/contact are fetched before databases on init
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
-    });
-
-    // Setup: Initialize with a database
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
-
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-123',
-      }),
-    });
-
-    // Polling responses: queued -> running -> succeeded
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'queued',
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'running',
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    const pollResponses = [
+      { status: 'queued' },
+      { status: 'running' },
+      {
         status: 'succeeded',
         result: {
           sample_name: 'test_sample',
@@ -409,7 +377,20 @@ describe('useDashboardLogic - Job Polling Flow', () => {
           input_path: '/data/uploads/test.fasta',
           mode: 'fasta',
         },
-      }),
+      },
+    ];
+    let pollIdx = 0;
+
+    setupUrlRoutedJobFetch((requestUrl) => {
+      if (requestUrl.includes('/api/profile/fasta')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ job_id: 'job-123' }) });
+      }
+      if (requestUrl.includes('/api/jobs/job-123')) {
+        const next = pollResponses[Math.min(pollIdx, pollResponses.length - 1)];
+        pollIdx += 1;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(next) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) });
     });
 
     const { result } = renderDashboardHook();
@@ -443,66 +424,22 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should handle job polling with failed status', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
+    const pollResponses = [
+      { status: 'queued' },
+      { status: 'failed', error: 'Unsupported FASTA format' },
+    ];
+    let pollIdx = 0;
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
-    });
-
-    // Setup: Initialize with a database
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
-
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-fail',
-      }),
-    });
-
-    // Polling: queued -> failed
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'queued',
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'failed',
-        error: 'Unsupported FASTA format',
-      }),
+    setupUrlRoutedJobFetch((requestUrl) => {
+      if (requestUrl.includes('/api/profile/fasta')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ job_id: 'job-fail' }) });
+      }
+      if (requestUrl.includes('/api/jobs/job-fail')) {
+        const next = pollResponses[Math.min(pollIdx, pollResponses.length - 1)];
+        pollIdx += 1;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(next) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) });
     });
 
     const { result } = renderDashboardHook();
@@ -525,57 +462,14 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should cancel active job via DELETE request', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
-
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-to-cancel',
-      }),
-    });
-
-    // Mock infinite polling (keep returning "running")
-    global.fetch.mockImplementation(() => {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ status: 'running' }),
-      });
+    setupUrlRoutedJobFetch((requestUrl, options) => {
+      if (requestUrl.includes('/api/profile/fasta')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ job_id: 'job-to-cancel' }) });
+      }
+      if (requestUrl.includes('/api/jobs/job-to-cancel') && options?.method === 'DELETE') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'running' }) });
     });
 
     const { result } = renderDashboardHook();
@@ -597,14 +491,6 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       expect(result.current.canCancelJob).toBe(true);
     });
 
-    // Now cancel
-    global.fetch.mockImplementationOnce(() => {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-    });
-
     await act(async () => {
       await result.current.cancelActiveJob();
     });
@@ -619,50 +505,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should update job status during polling transitions', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
-
     // Polling: track status transitions
     const statuses = ['queued', 'running', 'running', 'succeeded'];
     let pollCount = 0;
 
-    global.fetch.mockImplementation((url) => {
-      const requestUrl = String(url);
-
+    setupUrlRoutedJobFetch((requestUrl) => {
       if (requestUrl.includes('/api/profile/fasta')) {
         return Promise.resolve({
           ok: true,
@@ -829,7 +676,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
     });
   });
 
-  it('should build report URL with path parameter', () => {
+  it('should build report URL with path parameter', async () => {
     global.fetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -841,6 +688,10 @@ describe('useDashboardLogic - Report Display Flow', () => {
     });
 
     const { result } = renderDashboardHook();
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+    });
 
     const reportUrl = result.current.buildReportUrl('/data/results/test.report.html');
 
@@ -1064,9 +915,8 @@ describe('useDashboardLogic - Example FASTA profile', () => {
 describe('_resolveLegalLink', () => {
   // The footer "Legal notice" href is derived from the /api/ui/legal payload.
   // Disabled → null (no footer). URL mode → external link. Path mode → /legal route.
-  // The test setup mocks apiBase to 'http://localhost:8000', so the self-hosted
-  // route resolves to 'http://localhost:8000/legal'.
-  const SELF_HOSTED_LEGAL = 'http://localhost:8000/legal';
+  // Same-origin deployment defaults apiBase to '', so the self-hosted route resolves to '/legal'.
+  const SELF_HOSTED_LEGAL = '/legal';
 
   it('returns null when the imprint feature is disabled', () => {
     expect(_resolveLegalLink({ enabled: false })).toBeNull();
@@ -1095,6 +945,18 @@ describe('_resolveLegalLink', () => {
     expect(_resolveLegalLink({ enabled: true, kind: 'url', url: null })).toBe(SELF_HOSTED_LEGAL);
     expect(_resolveLegalLink({ enabled: true, kind: 'url', url: '' })).toBe(SELF_HOSTED_LEGAL);
   });
+
+  it('rejects non-http(s) legal URLs in url mode', () => {
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'javascript:alert(1)' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'data:text/html,<script>' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'vbscript:msgbox(1)' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'file:///etc/passwd' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: '//evil.example/legal' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'https://user:pass@evil.com' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'https://www.who.int@evil.com/legal' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: 'https://user@example.org/legal' })).toBeNull();
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: '/legal' })).toBeNull();
+  });
 });
 
 describe('_resolveContactEmail', () => {
@@ -1118,6 +980,12 @@ describe('_resolveContactEmail', () => {
 
   it('returns the email address when enabled', () => {
     expect(_resolveContactEmail({ enabled: true, email: 'support@example.org' })).toBe('support@example.org');
+  });
+
+  it('rejects malformed or query-injected contact emails', () => {
+    expect(_resolveContactEmail({ enabled: true, email: 'user@example.org?bcc=evil@x.org' })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true, email: 'mailto:user@example.org' })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true, email: 'Alice <user@example.org>' })).toBeNull();
   });
 });
 
@@ -1279,7 +1147,7 @@ describe('pagehide session cleanup', () => {
     expect(beacon).toHaveBeenCalledTimes(1);
     expect(warning).toHaveBeenCalledWith(expect.stringMatching(/beacon.*rejected/i));
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/session/cleanup',
+      '/api/session/cleanup',
       expect.objectContaining({
         method: 'POST',
         keepalive: true,
@@ -1347,5 +1215,231 @@ describe('pagehide session cleanup', () => {
       expect.stringContaining('/api/session/cleanup'),
       expect.objectContaining({ body: JSON.stringify({ upload_ids: ['upload-1'], artifact_ids: [] }) }),
     );
+  });
+});
+
+describe('useDashboardLogic - startup concurrency, abort lifecycle, and M4d exports (WA-050 / W3)', () => {
+  beforeEach(() => {
+    setupXhrStub();
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it('fetches the 4 startup endpoints in parallel and exposes M4d busy/polling keys', async () => {
+    const configDef = makeDeferred();
+    const legalDef = makeDeferred();
+    const contactDef = makeDeferred();
+    const databasesDef = makeDeferred();
+
+    global.fetch.mockImplementation((url) => {
+      const reqUrl = String(url);
+      if (reqUrl.includes('/api/ui/config')) return configDef.promise;
+      if (reqUrl.includes('/api/ui/legal')) return legalDef.promise;
+      if (reqUrl.includes('/api/ui/contact')) return contactDef.promise;
+      if (reqUrl.includes('/api/databases')) return databasesDef.promise;
+      if (reqUrl.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { items: [], formula_items: [], plot_meta: { references: [], features: [] } } }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const { result } = renderDashboardHook();
+
+    // All 4 startup GETs must be dispatched concurrently before any settles.
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+    });
+    const requestedUrls = global.fetch.mock.calls.map(([url]) => String(url));
+    expect(requestedUrls).toEqual([
+      '/api/ui/config',
+      '/api/ui/legal',
+      '/api/ui/contact',
+      '/api/databases',
+    ]);
+
+    await act(async () => {
+      configDef.resolve({ ok: true, json: async () => ({ data: { cli_version: '2.0.0' } }) });
+      legalDef.resolve({ ok: true, json: async () => ({ data: { enabled: true, kind: 'path' } }) });
+      contactDef.resolve({ ok: true, json: async () => ({ data: { enabled: true, email: 'team@example.org' } }) });
+      databasesDef.resolve({
+        ok: true,
+        json: async () => ({ data: { items: [{ id: 'db1', display_name: 'HSVdb' }] } }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedDatabaseId).toBe('db1');
+    });
+    expect(result.current.cliVersion).toBe('2.0.0');
+    expect(result.current.legalLink).toBe('/legal');
+    expect(result.current.contactEmail).toBe('team@example.org');
+    expect(result.current.databases).toHaveLength(1);
+
+    // Verify M4d AppShell keys exist with expected types
+    expect(typeof result.current.isProfileBusy).toBe('boolean');
+    expect(typeof result.current.isRegenerateBusy).toBe('boolean');
+    expect(typeof result.current.isUploading).toBe('boolean');
+    expect(typeof result.current.batchSubmitting).toBe('boolean');
+    expect(typeof result.current.isBatchUploading).toBe('boolean');
+    expect(typeof result.current.isBatchPolling).toBe('boolean');
+    expect(typeof result.current.stopBatchPolling).toBe('function');
+  });
+
+  it('aborts all 4 startup GETs on unmount and ignores late AbortError or resolution', async () => {
+    const signals = [];
+    const deferreds = [];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    global.fetch.mockImplementation((_, options = {}) => {
+      signals.push(options.signal);
+      const def = makeDeferred();
+      deferreds.push(def);
+      return def.promise;
+    });
+
+    const { unmount } = renderDashboardHook();
+    await waitFor(() => {
+      expect(signals).toHaveLength(4);
+    });
+    expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(true);
+
+    unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+
+    await act(async () => {
+      const abortErr = new Error('The operation was aborted.');
+      abortErr.name = 'AbortError';
+      deferreds[0].reject(abortErr);
+      deferreds[1].reject(abortErr);
+      deferreds[2].reject(abortErr);
+      deferreds[3].resolve({ ok: true, json: async () => ({ data: { items: [{ id: 'db1' }] } }) });
+      await Promise.resolve();
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('surfaces statusError when /api/databases fails while tolerating optional /api/ui/* failures', async () => {
+    global.fetch.mockImplementation((url) => {
+      const reqUrl = String(url);
+      if (reqUrl.includes('/api/ui/config')) return Promise.reject(new Error('Config unavailable'));
+      if (reqUrl.includes('/api/ui/legal')) return Promise.reject(new Error('Legal unavailable'));
+      if (reqUrl.includes('/api/ui/contact')) return Promise.reject(new Error('Contact unavailable'));
+      if (reqUrl.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { items: [{ id: 'db1', display_name: 'DB1' }] } }),
+        });
+      }
+      if (reqUrl.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { items: [], formula_items: [], plot_meta: { references: [], features: [] } } }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const first = renderDashboardHook();
+    await waitFor(() => {
+      expect(first.result.current.selectedDatabaseId).toBe('db1');
+    });
+    expect(first.result.current.statusError).toBe('');
+    expect(first.result.current.legalLink).toBeNull();
+    expect(first.result.current.contactEmail).toBeNull();
+    first.unmount();
+
+    global.fetch.mockImplementation((url) => {
+      if (String(url).includes('/api/databases')) {
+        return Promise.reject(new Error('DB down'));
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ data: {} }) });
+    });
+
+    const second = renderDashboardHook();
+    await waitFor(() => {
+      expect(second.result.current.statusError).toBe('Error loading data: DB down');
+    });
+    second.unmount();
+  });
+
+  it('aborts in-flight mutations fetch when switching selectedDatabaseId', async () => {
+    const mutationSignals = [];
+    const mutationDeferreds = [];
+
+    global.fetch.mockImplementation((url, options = {}) => {
+      const reqUrl = String(url);
+      if (reqUrl.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [
+                { id: 'db1', display_name: 'DB 1' },
+                { id: 'db2', display_name: 'DB 2' },
+              ],
+            },
+          }),
+        });
+      }
+      if (reqUrl.includes('/api/mutations')) {
+        mutationSignals.push(options.signal);
+        const def = makeDeferred();
+        mutationDeferreds.push(def);
+        return def.promise;
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ data: {} }) });
+    });
+
+    const { result } = renderDashboardHook();
+
+    await waitFor(() => {
+      expect(mutationSignals).toHaveLength(1);
+    });
+    expect(mutationSignals[0].aborted).toBe(false);
+
+    act(() => {
+      result.current.setSelectedDatabaseId('db2');
+    });
+
+    await waitFor(() => {
+      expect(mutationSignals).toHaveLength(2);
+    });
+    expect(mutationSignals[0].aborted).toBe(true);
+    expect(mutationSignals[1].aborted).toBe(false);
+
+    await act(async () => {
+      mutationDeferreds[1].resolve({
+        ok: true,
+        json: async () => ({
+          data: {
+            items: [{ id: 10, feature: 'UL54', position: 0, mutation: 'M1V', drug: 'FOS' }],
+            formula_items: [],
+            plot_meta: { references: [], features: [] },
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.loadedDatabaseId).toBe('db2');
+    });
+    expect(result.current.rules).toHaveLength(1);
   });
 });
