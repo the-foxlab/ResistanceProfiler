@@ -510,8 +510,16 @@ describe('SingleAnalyzePanel', () => {
     expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeDisabled();
   });
 
-  it('resets file input value on selection so re-selecting the same filename triggers onChange', () => {
-    const uploadVcfFile = vi.fn();
+  it('keeps file input value on successful upload and resets it only on failed/canceled upload for the same file', async () => {
+    let resolveFirst;
+    const uploadVcfFile = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockResolvedValueOnce(true);
+
     render(
       <SingleAnalyzePanel
         logic={makePanelLogic({
@@ -522,23 +530,61 @@ describe('SingleAnalyzePanel', () => {
     );
 
     const vcfInput = document.querySelector('[data-tour-target="vcf-file"] input[type="file"]');
-    const file = new File(['##VCF'], 'sample1.vcf', { type: 'text/plain' });
-    let currentValue = 'C:\\fakepath\\sample1.vcf';
+    let currentValue = '';
+    let currentFiles = [];
     Object.defineProperty(vcfInput, 'value', {
       configurable: true,
       get: () => currentValue,
       set: (next) => {
         currentValue = next;
+        if (next === '') {
+          currentFiles = [];
+        }
+      },
+    });
+    Object.defineProperty(vcfInput, 'files', {
+      configurable: true,
+      get: () => currentFiles,
+      set: (next) => {
+        currentFiles = next;
       },
     });
 
-    fireEvent.change(vcfInput, { target: { files: [file] } });
-    expect(uploadVcfFile).toHaveBeenCalledTimes(1);
+    // 1. Successful upload preserves the native file input value so the filename stays visible.
+    const file1 = new File(['##VCF'], 'sample1.vcf', { type: 'text/plain' });
+    currentValue = 'C:\\fakepath\\sample1.vcf';
+    currentFiles = [file1];
+    await act(async () => {
+      fireEvent.change(vcfInput);
+      await Promise.resolve();
+    });
+    expect(uploadVcfFile).toHaveBeenNthCalledWith(1, file1);
+    expect(vcfInput.value).toBe('C:\\fakepath\\sample1.vcf');
+
+    // 2. Failed/canceled upload resets value to '' so re-selecting the same filename triggers onChange.
+    const file2 = new File(['BAD'], 'bad.vcf', { type: 'text/plain' });
+    currentValue = 'C:\\fakepath\\bad.vcf';
+    currentFiles = [file2];
+    await act(async () => {
+      fireEvent.change(vcfInput);
+      await Promise.resolve();
+    });
+    expect(uploadVcfFile).toHaveBeenNthCalledWith(2, file2);
     expect(vcfInput.value).toBe('');
 
-    currentValue = 'C:\\fakepath\\sample1.vcf';
-    fireEvent.change(vcfInput, { target: { files: [file] } });
-    expect(uploadVcfFile).toHaveBeenCalledTimes(2);
-    expect(vcfInput.value).toBe('');
+    // 3. Stale failed/canceled upload does not clear a newer file already chosen in the input.
+    const staleFile = new File(['##VCF'], 'stale.vcf', { type: 'text/plain' });
+    const newerFile = new File(['##VCF'], 'newer.vcf', { type: 'text/plain' });
+    currentValue = 'C:\\fakepath\\stale.vcf';
+    currentFiles = [staleFile];
+    fireEvent.change(vcfInput);
+    currentValue = 'C:\\fakepath\\newer.vcf';
+    currentFiles = [newerFile];
+    await act(async () => {
+      fireEvent.change(vcfInput);
+      resolveFirst(false);
+      await Promise.resolve();
+    });
+    expect(vcfInput.value).toBe('C:\\fakepath\\newer.vcf');
   });
 });

@@ -186,11 +186,13 @@ describe('useProfileSubmit — upload lifecycle (W9)', () => {
     act(() => {
       result.current.setVcfInput((prev) => ({ ...prev, sample: 'VcfSample', min_af: 0.25, min_depth: 20 }));
     });
+    let vcfAOk;
     await act(async () => {
       const p = result.current.uploadVcfFile(new File(['##VCF'], 'a.vcf'));
       vcfA.complete('up-vcf-A');
-      await p;
+      vcfAOk = await p;
     });
+    expect(vcfAOk).toBe(true);
     expect(result.current.vcfInput.vcf_id).toBe('up-vcf-A');
 
     let pVcfB;
@@ -198,10 +200,12 @@ describe('useProfileSubmit — upload lifecycle (W9)', () => {
       pVcfB = result.current.uploadVcfFile(new File(['BAD'], 'b.vcf'));
     });
     expect(result.current.vcfInput.vcf_id).toBe(''); // cleared on start before completion
+    let vcfBOk;
     await act(async () => {
       vcfB.failStatus(400, 'Unsupported VCF format');
-      await pVcfB;
+      vcfBOk = await pVcfB;
     });
+    expect(vcfBOk).toBe(false);
     expect(result.current.vcfInput.vcf_id).toBe('');
     expect(result.current.vcfInput.sample).toBe('VcfSample');
     expect(result.current.vcfInput.min_af).toBe(0.25);

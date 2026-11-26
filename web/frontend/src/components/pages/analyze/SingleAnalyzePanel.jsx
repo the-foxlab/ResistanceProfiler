@@ -57,11 +57,13 @@ export function SingleAnalyzePanel({ logic: logicProp }) {
         : !fastaInput.fasta_id
   );
 
-  const onSingleFile = (uploadFn) => (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (file) {
-      uploadFn(file);
+  const onSingleFile = (uploadFn) => async (event) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    const succeeded = await uploadFn(file);
+    if (succeeded === false && input.files?.[0] === file) {
+      input.value = '';
     }
   };
 

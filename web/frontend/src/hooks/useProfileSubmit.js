@@ -416,7 +416,7 @@ export function useProfileSubmit({
   };
 
   const uploadFile = async (inputKey, file, fileType, onSuccess) => {
-    if (!file) return;
+    if (!file) return false;
     const existingHandle = uploadHandlesRef.current.get(inputKey);
     if (existingHandle) {
       existingHandle.canceled = true;
@@ -471,10 +471,11 @@ export function useProfileSubmit({
         || controller.signal.aborted
         || uploadTokensRef.current.get(inputKey) !== nextToken
       ) {
-        return;
+        return false;
       }
       onSuccess(response.upload_id);
       setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+      return true;
     } catch (error) {
       if (
         isMountedRef.current
@@ -486,6 +487,7 @@ export function useProfileSubmit({
         clearInputUploadState(inputKey);
         setStatusError(formatUserError(error.message));
       }
+      return false;
     } finally {
       if (uploadHandlesRef.current.get(inputKey) === handle) {
         uploadHandlesRef.current.delete(inputKey);
