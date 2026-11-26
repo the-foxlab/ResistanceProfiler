@@ -16,7 +16,6 @@ from web.backend.config import (
     env_str,
     parse_csv_tokens,
     parse_int_env,
-    redact_redis_text,
     redact_redis_url,
     sanitize_redis_client_error,
 )
@@ -24,7 +23,6 @@ from web.backend.services.session import get_redis_client, invalidate_redis_pool
 from web.backend.services.session import reset_redis_pool as reset_redis_pool
 
 logger = logging.getLogger(__name__)
-_redact_redis_text = redact_redis_text
 
 
 @dataclass(frozen=True)

@@ -35,7 +35,7 @@ def _is_redis_connected() -> bool:
             socket_timeout=2.0,
         )
         return bool(client.ping())
-    except (redis.RedisError, OSError, RuntimeError) as exc:
+    except (redis.RedisError, OSError, RuntimeError, ValueError) as exc:
         logger.debug(
             'Readiness check: Redis unavailable at %s: %s',
             redact_redis_url(redis_url),

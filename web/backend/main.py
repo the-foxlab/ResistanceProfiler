@@ -47,7 +47,7 @@ from web.backend.rate_limit import (
     resolve_proxy_settings,
     resolve_upload_rate_limit,
 )
-from web.backend.routes.artifacts import build_artifacts_router
+from web.backend.routes.artifacts import REPORT_CSP, build_artifacts_router
 from web.backend.routes.catalog import build_catalog_router
 from web.backend.routes.health import build_health_router
 from web.backend.routes.jobs import build_jobs_router
@@ -111,18 +111,6 @@ _LEGAL_CSP = (
     "base-uri 'none'; "
     "object-src 'none'; "
     "frame-ancestors 'none'"
-)
-_REPORT_CSP = (
-    "default-src 'none'; "
-    "script-src 'unsafe-inline'; "
-    "style-src 'unsafe-inline'; "
-    "img-src 'self' data: blob: https://pubchem.ncbi.nlm.nih.gov; "
-    "font-src 'self' data:; "
-    "connect-src 'none'; "
-    "form-action 'none'; "
-    "base-uri 'none'; "
-    "object-src 'none'; "
-    "frame-ancestors 'self'"
 )
 _API_CSP = "default-src 'none'; frame-ancestors 'none'"
 
@@ -484,7 +472,7 @@ class SecurityHeadersAndCsrfMiddleware:
                     if 'x-frame-options' not in res_headers:
                         res_headers['x-frame-options'] = 'SAMEORIGIN'
                     if 'content-security-policy' not in res_headers:
-                        res_headers['content-security-policy'] = _REPORT_CSP
+                        res_headers['content-security-policy'] = REPORT_CSP
                 elif path == '/legal':
                     if 'x-frame-options' not in res_headers:
                         res_headers['x-frame-options'] = 'DENY'
@@ -576,9 +564,10 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     cors_origins = resolve_cors_origins()
     proxy_headers, forwarded_allow_ips = resolve_proxy_settings()
 
-    # Starlette add_middleware wraps in LIFO order: register innermost first, CORSMiddleware last (outermost).
-    app.add_middleware(UploadAdmissionMiddleware)
+    # Starlette add_middleware wraps in LIFO order: SessionMiddleware runs inside UploadAdmissionMiddleware
+    # so pre-parse rejected uploads never mint Redis sessions, and CORSMiddleware stays outermost.
     app.add_middleware(SessionMiddleware, deployment_mode=config.deployment_mode)
+    app.add_middleware(UploadAdmissionMiddleware)
     app.add_middleware(
         SecurityHeadersAndCsrfMiddleware,
         deployment_mode=config.deployment_mode,
@@ -704,14 +693,12 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(name)s: %(message)s')
     host = os.getenv(WEB_ENV.host, WEB_BACKEND_CONFIG.defaults.web_host)
     port = _resolve_web_port()
-    proxy_headers, forwarded_allow_ips = resolve_proxy_settings()
     uvicorn.run(
         create_app(),
         host=host,
         port=port,
         reload=False,
-        proxy_headers=proxy_headers,
-        forwarded_allow_ips=forwarded_allow_ips,
+        proxy_headers=False,
     )
 
 

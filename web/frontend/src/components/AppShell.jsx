@@ -10,6 +10,7 @@ import compareIconSrc from '../assets/icon-venn.svg';
 import exampleIconSrc from '../assets/example.svg';
 import { useOptionalShellLogic } from '../DashboardContext';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
+import { ErrorBoundary } from './ErrorBoundary';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemeContext, useTheme } from '../hooks/useTheme';
 import { AppFooter } from './AppFooter';
@@ -240,7 +241,7 @@ export const AppShell = memo(function AppShell({ logic: logicProp, children }) {
             )}
             <section className="panel-stack">
               {meta.description && <p className="workspace-description">{meta.description}</p>}
-              {children}
+              <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
             </section>
           </main>
           <AppFooter

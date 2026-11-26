@@ -1,39 +1,10 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
+import {
+  handleFocusTrapTab,
+  restorePreviousFocus,
+} from '../../hooks/useDialogFocusTrap';
 import { useTour } from './TourContext';
-
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ');
-
-function getFocusableElements(container) {
-  if (!container) return [];
-  return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
-    (el) => !el.closest('[aria-hidden="true"], [inert]'),
-  );
-}
-
-function restorePreviousFocus(previousEl) {
-  if (
-    previousEl
-    && previousEl.isConnected
-    && typeof previousEl.focus === 'function'
-    && !previousEl.hasAttribute('disabled')
-    && !previousEl.closest('[aria-hidden="true"], [inert]')
-  ) {
-    previousEl.focus();
-    if (document.activeElement === previousEl) return;
-  }
-  const mainFallback = document.querySelector('main[tabindex], #main-content[tabindex]');
-  if (mainFallback && typeof mainFallback.focus === 'function') {
-    mainFallback.focus();
-  }
-}
 
 // Repositions the spotlight/tooltip on viewport changes so it stays glued to its target
 // even when the app switches tabs/modes (which changes the DOM layout).
@@ -79,6 +50,16 @@ function useElementRect(selector, active) {
       window.removeEventListener('scroll', update, true);
     };
   }, [active, update]);
+
+  // If a lazy route chunk hasn't mounted the target yet, watch DOM additions briefly until found.
+  useEffect(() => {
+    if (!active || !selector || rect !== null || typeof MutationObserver === 'undefined') {
+      return undefined;
+    }
+    const observer = new MutationObserver(() => update());
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [active, selector, rect, update]);
 
   return { rect, update };
 }
@@ -217,30 +198,7 @@ export function TourOverlay({ steps: stepsProp }) {
     const handler = (event) => {
       if (event.defaultPrevented || event.isComposing) return;
       if (event.key === 'Tab') {
-        if (event.altKey || event.ctrlKey || event.metaKey) return;
-        const container = tooltipRef.current;
-        if (!container) return;
-        const focusable = getFocusableElements(container);
-        if (focusable.length === 0) {
-          event.preventDefault();
-          container.focus();
-          return;
-        }
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        const active = document.activeElement;
-        if (!container.contains(active) || active === container) {
-          event.preventDefault();
-          (event.shiftKey ? last : first).focus();
-          return;
-        }
-        if (event.shiftKey && active === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && active === last) {
-          event.preventDefault();
-          first.focus();
-        }
+        handleFocusTrapTab(event, tooltipRef.current);
         return;
       }
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;

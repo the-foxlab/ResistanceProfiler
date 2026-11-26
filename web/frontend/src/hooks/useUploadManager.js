@@ -32,8 +32,6 @@ export function createProgressStore(initial = INITIAL_PROGRESS) {
   return { getSnapshot, subscribe, setProgress };
 }
 
-export const uploadProgressStore = createProgressStore();
-
 const NOOP_SUBSCRIBE = () => () => {};
 
 export function useUploadManager({ syncProgress = true, progressStore: externalStore = null } = {}) {

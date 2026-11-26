@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import threading
 import time
 from typing import Any, cast
-from urllib.parse import unquote
 
 import redis
 from fastapi import HTTPException, Request
@@ -19,21 +17,11 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from web.backend.config import (
-    _HTTP_LIKE_SCHEMES,
-    _SECRET_QUERY_KEYS,
     WEB_BACKEND_CONFIG,
     WEB_ENV,
-    _contains_any_pattern,
-    _has_short_userinfo_host_leak,
-    _is_unix_scheme,
-    _is_valid_host_and_tail,
-    _split_authority_at,
-    _split_query_fragment,
     env_str,
-    extract_redis_port_leak,
     parse_csv_tokens,
     parse_int_env,
-    redact_redis_text,
     redact_redis_url,
     sanitize_redis_client_error,
 )
@@ -45,7 +33,6 @@ logger = logging.getLogger(__name__)
 _REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS = 2.0
 _REDIS_SOCKET_TIMEOUT_SECONDS = 2.0
 _SAMPLE_QUOTA_WINDOW_TTL_SECONDS = 120
-_redact_redis_text = redact_redis_text
 
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
@@ -108,214 +95,17 @@ def _rate_limit_key(request: Request) -> str:
     return f'ip:{host or get_remote_address(request)}'
 
 
-_RATE_LIMITER_LOCATION_PREFIX_RE = re.compile(r'\blocation\s+')
-_RATE_LIMITER_LOCATION_RE = re.compile(r'\blocation\s+([^\r\n]+)')
-_QUERY_SECRET_SPLIT_RE = re.compile(r'[,;)@\]]')
-_USERINFO_SECRET_SPLIT_RE = re.compile(r'[,;)?#/!|:@]')
-_USERINFO_LOC_SPLIT_RE = re.compile(r'[,;)?#/!|@]')
-
-
-def _extract_uri_secret_fragments(uri: str) -> tuple[str, ...]:
-    if '://' not in uri:
-        return ()
-    scheme, _, rest = uri.partition('://')
-    scheme_lower = scheme.lower()
-    is_unix = _is_unix_scheme(scheme_lower)
-    is_http_like = scheme_lower in _HTTP_LIKE_SCHEMES
-    is_sentinel_or_cluster = scheme_lower.endswith(('+sentinel', '+cluster'))
-    fragments: list[str] = []
-    seen: set[str] = set()
-
-    def _add_fragment(val: str) -> None:
-        if val and val not in seen:
-            seen.add(val)
-            fragments.append(val)
-
-    if not (is_unix and rest.startswith('/')):
-        authority_split = _split_authority_at(
-            rest,
-            is_unix=is_unix,
-            is_http_like=is_http_like,
-            is_sentinel_or_cluster=is_sentinel_or_cluster,
-        )
-    else:
-        authority_split = None
-    query_parts: list[str] = []
-    host_and_tail = ''
-    if authority_split is not None:
-        userinfo, host_and_tail = authority_split
-        secret = userinfo.partition(':')[2] if ':' in userinfo else userinfo
-        if secret:
-            secret_norm = (
-                secret.replace('\t', '').replace('\r', '').replace('\n', '')
-                if ('\t' in secret or '\r' in secret or '\n' in secret)
-                else secret
-            )
-            for candidate_secret in (secret, secret_norm) if secret_norm != secret else (secret,):
-                has_long_sub = False
-                for sub in _USERINFO_SECRET_SPLIT_RE.split(candidate_secret):
-                    if len(sub) >= 4:
-                        has_long_sub = True
-                        _add_fragment(sub)
-                if len(candidate_secret) >= 4 and (not has_long_sub or len(candidate_secret) <= 256):
-                    _add_fragment(candidate_secret)
-                if '@' in candidate_secret:
-                    for tail_part in candidate_secret.split('@')[1:]:
-                        if tail_part:
-                            if len(tail_part) < 4:
-                                _add_fragment(f'{tail_part}@')
-                            else:
-                                _add_fragment(tail_part)
-        _head, query_part, _frag = _split_query_fragment(host_and_tail)
-        if query_part.startswith('?'):
-            query_parts.append(query_part)
-        _rest_head, rest_query_part, _rest_frag = _split_query_fragment(rest)
-        if rest_query_part.startswith('?') and rest_query_part != query_part:
-            query_parts.append(rest_query_part)
-    else:
-        _head, query_part, _frag = _split_query_fragment(rest)
-        if query_part.startswith('?'):
-            query_parts.append(query_part)
-    skip_host_tail = (
-        authority_split is not None
-        and bool(host_and_tail)
-        and _is_valid_host_and_tail(host_and_tail, is_unix=is_unix, require_strong=True)
-    )
-    for qp in query_parts:
-        for item in qp[1:].split('&'):
-            if '=' in item:
-                key, _, value = item.partition('=')
-                if unquote(key).strip().lower() in _SECRET_QUERY_KEYS and value:
-                    value_norm = (
-                        value.replace('\t', '').replace('\r', '').replace('\n', '')
-                        if ('\t' in value or '\r' in value or '\n' in value)
-                        else value
-                    )
-                    for candidate_value in (value, value_norm) if value_norm != value else (value,):
-                        has_long_q_sub = False
-                        for sub in _QUERY_SECRET_SPLIT_RE.split(candidate_value):
-                            if skip_host_tail and sub == host_and_tail:
-                                continue
-                            if len(sub) >= 4:
-                                has_long_q_sub = True
-                                _add_fragment(sub)
-                            elif sub:
-                                _add_fragment(f'{key}={sub}')
-                            if '=' in sub:
-                                rhs = sub.partition('=')[2]
-                                if len(rhs) >= 4:
-                                    has_long_q_sub = True
-                                    _add_fragment(rhs)
-                        if len(candidate_value) >= 4 and (not has_long_q_sub or len(candidate_value) <= 256):
-                            _add_fragment(candidate_value)
-                        elif len(candidate_value) < 4:
-                            _add_fragment(f'{key}={candidate_value}')
-    return tuple(fragments)
-
-
-def _has_rate_limiter_location_at(msg: str) -> bool:
-    if '@' not in msg or 'location' not in msg:
-        return False
-    n = len(msg)
-    pos = 0
-    next_r = -2
-    next_n = -2
-    while (m := _RATE_LIMITER_LOCATION_PREFIX_RE.search(msg, pos)) is not None:
-        start = m.end()
-        if next_r == -2 or (next_r != -1 and next_r < start):
-            next_r = msg.find('\r', start)
-        if next_n == -2 or (next_n != -1 and next_n < start):
-            next_n = msg.find('\n', start)
-        if next_r == -1 and next_n == -1:
-            line_end = n
-        elif next_r == -1:
-            line_end = next_n
-        elif next_n == -1:
-            line_end = next_r
-        else:
-            line_end = next_r if next_r < next_n else next_n
-        if msg.find('@', start, line_end) != -1:
-            return True
-        if line_end >= n:
-            break
-        w = line_end
-        while w > start and msg[w - 1].isspace():
-            w -= 1
-        pos = (w - 8) if (w - 8 >= start) else (line_end + 1)
-    return False
-
-
-def _has_userinfo_edge_leak(redacted_msg: str, uri: str) -> bool:
-    if '://' not in uri:
-        return False
-    scheme, _, rest = uri.partition('://')
-    scheme_lower = scheme.lower()
-    is_unix = _is_unix_scheme(scheme_lower)
-    if is_unix and rest.startswith('/'):
-        return False
-    is_http_like = scheme_lower in _HTTP_LIKE_SCHEMES
-    is_sentinel_or_cluster = scheme_lower.endswith(('+sentinel', '+cluster'))
-    authority_split = _split_authority_at(
-        rest,
-        is_unix=is_unix,
-        is_http_like=is_http_like,
-        is_sentinel_or_cluster=is_sentinel_or_cluster,
-    )
-    if authority_split is None:
-        return False
-    if "netloc '" in redacted_msg and "' contains invalid characters under NFKC normalization" in redacted_msg:
-        return True
-    userinfo, _ = authority_split
-    secret = userinfo.partition(':')[2] if ':' in userinfo else userinfo
-    if not secret or '@' not in secret:
-        return False
-    secret_norm = (
-        secret.replace('\t', '').replace('\r', '').replace('\n', '')
-        if ('\t' in secret or '\r' in secret or '\n' in secret)
-        else secret
-    )
-    loc_matches = _RATE_LIMITER_LOCATION_RE.findall(redacted_msg) if 'location' in redacted_msg else []
-    if loc_matches:
-        loc_parts: set[str] = set()
-        for candidate_secret in (secret, secret_norm) if secret_norm != secret else (secret,):
-            for part in _USERINFO_LOC_SPLIT_RE.split(candidate_secret.split('@', 1)[1]):
-                if part:
-                    loc_parts.add(part)
-                    stripped = part.strip()
-                    if stripped:
-                        loc_parts.add(stripped)
-        if loc_parts:
-            for loc_val in loc_matches:
-                if loc_val in loc_parts or loc_val.strip() in loc_parts:
-                    return True
-    return _has_short_userinfo_host_leak(redacted_msg, secret)
-
-
 def _sanitize_rate_limiter_error_message(raw_msg: str, redis_url: str, storage_uri: str) -> str:
-    redacted_msg = _redact_redis_text(raw_msg)
+    sanitized = sanitize_redis_client_error(raw_msg, redis_url)
+    if storage_uri != redis_url:
+        sanitized = sanitize_redis_client_error(sanitized, storage_uri)
     redacted_url = redact_redis_url(redis_url)
-    redacted_storage = redact_redis_url(storage_uri)
-    if redacted_url != redis_url or redacted_storage != storage_uri:
-        leaked_location = _has_rate_limiter_location_at(redacted_msg)
-        unredacted_at = redacted_msg == raw_msg and '@' in redacted_msg
-        secrets = _extract_uri_secret_fragments(redis_url)
-        if storage_uri != redis_url:
-            secrets = tuple(dict.fromkeys((*secrets, *_extract_uri_secret_fragments(storage_uri))))
-        leaked_secret = _contains_any_pattern(redacted_msg, secrets)
-        port_leaked = extract_redis_port_leak(redacted_msg, redis_url) or extract_redis_port_leak(
-            redacted_msg,
-            storage_uri,
-        )
-        leaked_edge = _has_userinfo_edge_leak(redacted_msg, redis_url) or _has_userinfo_edge_leak(
-            redacted_msg,
-            storage_uri,
-        )
-        if leaked_location or unredacted_at or leaked_secret or port_leaked or leaked_edge:
-            if _contains_any_pattern(redacted_url, secrets):
-                scheme_prefix = redis_url.partition('://')[0]
-                return f'Invalid rate limiter storage configuration for {scheme_prefix}://***'
-            return f'Invalid rate limiter storage configuration for {redacted_url}'
-    return redacted_msg
+    has_creds = redacted_url != redis_url or redact_redis_url(storage_uri) != storage_uri
+    if has_creds and ('location ' in sanitized and '@' in sanitized):
+        return f'Invalid rate limiter storage configuration for {redacted_url}'
+    if has_creds and sanitized.startswith('Invalid Redis configuration for '):
+        return f'Invalid rate limiter storage configuration for {redacted_url}'
+    return sanitized
 
 
 def create_rate_limiter() -> Limiter:

@@ -44,8 +44,6 @@ _REDIS_SOCKET_TIMEOUT_SECONDS = 2.0
 _REDIS_NEGATIVE_CACHE_SECONDS = 5
 _MEMORY_SWEEP_INTERVAL_SECONDS = 60.0
 
-_redact_redis_text = redact_redis_text
-
 # Process-local fallbacks used when Redis is unreachable (local zero-config mode).
 _MEMORY_STORE: dict[str, float] = {}
 _MEMORY_STORE_LOCK = threading.Lock()
@@ -63,26 +61,6 @@ _REDIS_REQUIRED_CONTEXT: contextvars.ContextVar[bool | None] = contextvars.Conte
     '_REDIS_REQUIRED_CONTEXT',
     default=None,
 )
-
-_UPDATE_OWNED_LUA = """
-if redis.call('EXISTS', KEYS[1]) == 0 then
-    return 0
-end
-local current_ttl = redis.call('TTL', KEYS[1])
-for i = 3, #ARGV, 2 do
-    redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 1])
-end
-local target_ttl = tonumber(ARGV[1])
-if target_ttl and target_ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], target_ttl)
-elseif current_ttl and current_ttl < 0 then
-    local default_ttl = tonumber(ARGV[2])
-    if default_ttl and default_ttl > 0 then
-        redis.call('EXPIRE', KEYS[1], default_ttl)
-    end
-end
-return 1
-"""
 
 _CLAIM_OWNED_FIELD_LUA = """
 if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -348,7 +326,7 @@ def _store_session(session_hash: str, ttl: int, *, deployment_mode: str | None =
                 pipe.execute()
             return
         except (redis.RedisError, OSError) as exc:
-            logger.debug('Session store Redis write failed: %s', _redact_redis_text(str(exc)))
+            logger.debug('Session store Redis write failed: %s', redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc
@@ -365,7 +343,7 @@ def _session_exists(session_hash: str, *, deployment_mode: str | None = None) ->
         try:
             return bool(client.expire(_session_key(session_hash), ttl))
         except (redis.RedisError, OSError) as exc:
-            logger.debug('Session existence Redis check failed: %s', _redact_redis_text(str(exc)))
+            logger.debug('Session existence Redis check failed: %s', redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc
@@ -500,7 +478,7 @@ def _record_owned(
                 pipe.execute()
             return record_id
         except (redis.RedisError, OSError) as exc:
-            logger.warning('Owned record write failed for %s: %s', key, _redact_redis_text(str(exc)))
+            logger.warning('Owned record write failed for %s: %s', key, redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc
@@ -543,7 +521,7 @@ def fetch_owned_record(
                 fields=decoded,
             )
         except (redis.RedisError, OSError) as exc:
-            logger.debug('Owned record fetch failed for %s: %s', key, _redact_redis_text(str(exc)))
+            logger.debug('Owned record fetch failed for %s: %s', key, redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc
@@ -566,81 +544,6 @@ def fetch_owned_record(
         canonical_path=decoded.get('canonical_path'),
         fields=decoded,
     )
-
-
-def _update_owned_via_transaction(
-    client: redis.Redis,
-    key: str,
-    updates: dict[str, str],
-    target_ttl: int,
-    default_ttl: int,
-) -> bool:
-    updated = False
-
-    def _txn(pipe: redis.client.Pipeline) -> None:
-        nonlocal updated
-        if not bool(pipe.exists(key)):
-            updated = False
-            return
-        current_ttl = int(cast(int, pipe.ttl(key)))
-        pipe.multi()
-        if updates:
-            pipe.hset(key, mapping=updates)
-        if target_ttl > 0:
-            pipe.expire(key, target_ttl)
-        elif current_ttl < 0 and default_ttl > 0:
-            pipe.expire(key, default_ttl)
-        updated = True
-
-    client.transaction(_txn, key, value_from_callable=False)
-    return updated
-
-
-def update_owned_record_fields(
-    prefix: str,
-    record_id: str,
-    updates: dict[str, str],
-    *,
-    ttl: int | None = None,
-    deployment_mode: str | None = None,
-) -> bool:
-    """Atomically merge *updates* into an existing owned record without resurrecting expired keys."""
-    key = _owned_key(prefix, record_id)
-    target_ttl = ttl if ttl is not None and ttl > 0 else 0
-    default_ttl = _default_ttl_for_prefix(prefix)
-    client, required = _redis_client_for_mode(deployment_mode)
-    if client is not None:
-        flat_updates: list[str] = []
-        for field_name, field_value in updates.items():
-            flat_updates.extend((field_name, field_value))
-        try:
-            try:
-                result = client.eval(_UPDATE_OWNED_LUA, 1, key, str(target_ttl), str(default_ttl), *flat_updates)
-                return bool(int(cast(int | str, result)))
-            except redis.ResponseError as exc:
-                if not _is_lua_unsupported_error(exc):
-                    raise
-                return _update_owned_via_transaction(client, key, updates, target_ttl, default_ttl)
-        except (redis.RedisError, OSError) as exc:
-            logger.warning('Owned record update failed for %s: %s', key, _redact_redis_text(str(exc)))
-            invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
-            if required:
-                raise SessionBackendError('Session store unavailable.') from exc
-            return False
-    now = time.time()
-    with _MEMORY_OWNED_LOCK:
-        _sweep_memory_owned_locked(now)
-        entry = _MEMORY_OWNED_STORE.get(key)
-        if entry is None:
-            return False
-        expiry, fields = entry
-        if now > expiry:
-            _MEMORY_OWNED_STORE.pop(key, None)
-            return False
-        merged = {**fields, **updates}
-        new_expiry = now + target_ttl if target_ttl > 0 else expiry
-        _MEMORY_OWNED_STORE[key] = (new_expiry, merged)
-        return True
 
 
 def _claim_owned_via_transaction(
@@ -698,7 +601,7 @@ def claim_owned_record_field(
                     raise
                 return _claim_owned_via_transaction(client, key, field, value, target_ttl, default_ttl)
         except (redis.RedisError, OSError) as exc:
-            logger.warning('Owned record claim failed for %s: %s', key, _redact_redis_text(str(exc)))
+            logger.warning('Owned record claim failed for %s: %s', key, redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc
@@ -739,7 +642,7 @@ def delete_owned_record(
         try:
             return bool(client.delete(key))
         except (redis.RedisError, OSError) as exc:
-            logger.debug('Owned record delete failed for %s: %s', key, _redact_redis_text(str(exc)))
+            logger.debug('Owned record delete failed for %s: %s', key, redact_redis_text(str(exc)))
             invalidate_redis_pool(getattr(client, 'connection_pool', None), mark_unavailable=not required)
             if required:
                 raise SessionBackendError('Session store unavailable.') from exc

@@ -5,14 +5,15 @@ import { Spinner } from './components/Spinner';
 import { usePageTitle } from './hooks/usePageTitle';
 import { resolveRouteMeta } from './routes';
 
-const HomePage = lazy(() => import('./components/pages/HomePage').then((m) => ({ default: m.HomePage })));
-const AnalyzePage = lazy(() => import('./components/pages/AnalyzePage').then((m) => ({ default: m.AnalyzePage })));
+import { HomePage } from './components/pages/HomePage';
+import { AnalyzePage } from './components/pages/AnalyzePage';
+import { NotFoundPage } from './components/pages/NotFoundPage';
+
 const ResultsPage = lazy(() => import('./components/pages/ResultsPage').then((m) => ({ default: m.ResultsPage })));
 const DatabasePage = lazy(() => import('./components/pages/DatabasePage').then((m) => ({ default: m.DatabasePage })));
 const MutationsPage = lazy(() => import('./components/pages/MutationsPage').then((m) => ({ default: m.MutationsPage })));
 const ComparePage = lazy(() => import('./components/pages/ComparePage').then((m) => ({ default: m.ComparePage })));
 const AboutPage = lazy(() => import('./components/pages/AboutPage').then((m) => ({ default: m.AboutPage })));
-const NotFoundPage = lazy(() => import('./components/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 
 function RouteLoadingFallback() {
   return (

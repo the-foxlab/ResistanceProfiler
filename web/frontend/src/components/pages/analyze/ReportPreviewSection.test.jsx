@@ -301,7 +301,7 @@ describe('ReportPreviewSection security boundaries', () => {
       source: frame.contentWindow,
     });
 
-    expect(screen.getAllByRole('dialog')).toHaveLength(3);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
     const seqDialog = screen.getByRole('dialog', { name: /feature sequence/i });
     fireEvent.click(seqDialog.querySelector('.seq-toggle-btn:last-child'));
     expect(seqDialog.querySelector('.report-preview-sequence-block')).toHaveTextContent('MV');
@@ -375,7 +375,7 @@ describe('ReportPreviewSection security boundaries', () => {
       origin: 'null',
       source: frame.contentWindow,
     });
-    expect(screen.getAllByRole('dialog')).toHaveLength(2);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
 
     rerender(
       <ThemeContext.Provider value="light">
@@ -671,7 +671,7 @@ describe('ReportPreviewSection accessibility (WA-053)', () => {
     fireEvent.click(document.querySelector('.report-preview-plot-backdrop'));
     expect(document.activeElement).toBe(parentBtn);
 
-    // 3. Stacked modals: opening structure then sequence, closing sequence focuses structure close, closing structure restores parentBtn
+    // 3. Switching active modal: opening sequence replaces structure cleanly, and closing restores parentBtn
     parentBtn.focus();
     dispatchMessage({
       data: {
@@ -694,11 +694,10 @@ describe('ReportPreviewSection accessibility (WA-053)', () => {
     });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close feature sequence' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close feature sequence' }));
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close chemical structure' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close chemical structure' }));
     expect(document.activeElement).toBe(parentBtn);
 
-    // 4. Trigger is iframe -> falls back to #main-content
+    // 4. Trigger is iframe -> falls back to #main-content without scrolling viewport
+    const mainFocusSpy = vi.spyOn(mainEl, 'focus');
     frame.focus();
     dispatchMessage({
       data: { type: 'respro:open-plot', src: 'blob:plot', alt: 'Plot' },
@@ -709,6 +708,8 @@ describe('ReportPreviewSection accessibility (WA-053)', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     });
     expect(document.activeElement).toBe(mainEl);
+    expect(mainFocusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    mainFocusSpy.mockRestore();
 
     // 5. inlineReportPath reset while modal open -> restores focus to detached fallback (#main-content)
     const tempTrigger = document.createElement('button');

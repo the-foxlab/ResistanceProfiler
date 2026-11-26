@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 _WORKER_SOCKET_CONNECT_TIMEOUT_SECONDS = 2.0
 _HORSE_TERMINATE_GRACE_SECONDS = 5.0
-_redact_redis_text = redact_redis_text
 
 _WORKER_POOL_LOCK = threading.Lock()
 _WORKER_POOLS: dict[str, redis.ConnectionPool] = {}
@@ -156,7 +155,7 @@ def run_worker(
             err_url = env_str(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
             sanitized_msg = sanitize_redis_client_error(str(exc), err_url)
         else:
-            sanitized_msg = _redact_redis_text(str(exc))
+            sanitized_msg = redact_redis_text(str(exc))
         logger.error('Worker Redis failure: %s', sanitized_msg)
         if connection is None:
             reset_redis_pool()

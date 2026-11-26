@@ -217,10 +217,6 @@ def resolve_maintained_bootstrap_enabled() -> bool:
     raise ValueError(f'Invalid boolean for {WEB_ENV.maintained_bootstrap}: {raw!r}')
 
 
-# Backward-compatible alias for main.py until M2 updates its import.
-_resolve_maintained_bootstrap_enabled = resolve_maintained_bootstrap_enabled
-
-
 def _validate_trusted_proxies_env() -> None:
     """Validate ``RESPRO_WEB_TRUSTED_PROXIES`` as non-empty IP/CIDR tokens (no wildcards)."""
     tokens = parse_csv_tokens(os.getenv(WEB_ENV.trusted_proxies, ''))

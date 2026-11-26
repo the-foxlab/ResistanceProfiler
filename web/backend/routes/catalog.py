@@ -24,11 +24,9 @@ logger = logging.getLogger(__name__)
 
 _OPAQUE_ID_MAX_LEN = WEB_BACKEND_CONFIG.defaults.opaque_id_max_length
 _IDS_QUERY_MAX_LEN = 4096
-_BROWSE_ERRORS = (FileNotFoundError, ValueError, OSError, sqlite3.Error)
-_COMPARE_ERRORS = (FileNotFoundError, ValueError, OSError, sqlite3.Error)
 
 
-def _envelope_or_400(loader: Callable[[], dict], error_types: tuple[type[Exception], ...]) -> ApiEnvelope:
+def _envelope_or_400(loader: Callable[[], dict]) -> ApiEnvelope:
     try:
         return ApiEnvelope(data=loader())
     except (FileNotFoundError, ValueError) as exc:
@@ -36,8 +34,6 @@ def _envelope_or_400(loader: Callable[[], dict], error_types: tuple[type[Excepti
     except (OSError, sqlite3.Error) as exc:
         logger.warning('Catalog database access failed: %s', exc)
         raise HTTPException(status_code=400, detail='Project database is unavailable or corrupt.') from exc
-    except error_types as exc:
-        raise HTTPException(status_code=400, detail=user_facing_error_message(str(exc))) from exc
 
 
 def build_catalog_router(
@@ -52,7 +48,6 @@ def build_catalog_router(
     def _load_rules(database_id: str | None, reference: str | None) -> ApiEnvelope:
         return _envelope_or_400(
             lambda: list_rules(project_databases_dir, database_id, reference_filter=reference),
-            _BROWSE_ERRORS,
         )
 
     @router.get('/api/rules', response_model=ApiEnvelope)
@@ -79,7 +74,7 @@ def build_catalog_router(
     @limiter.limit(api_rate_limit)
     def databases(request: Request) -> ApiEnvelope:
         del request
-        return _envelope_or_400(lambda: list_databases(project_databases_dir), _BROWSE_ERRORS)
+        return _envelope_or_400(lambda: list_databases(project_databases_dir))
 
     @router.get('/api/databases/shared-references', response_model=ApiEnvelope)
     @limiter.limit(api_rate_limit)
@@ -88,7 +83,6 @@ def build_catalog_router(
         database_ids = parse_csv_tokens(ids)
         return _envelope_or_400(
             lambda: {'items': (items := list_shared_references(project_databases_dir, database_ids)), 'count': len(items)},
-            _COMPARE_ERRORS,
         )
 
     @router.get('/api/databases/reference-accessions', response_model=ApiEnvelope)
@@ -98,7 +92,6 @@ def build_catalog_router(
         database_ids = parse_csv_tokens(ids)
         return _envelope_or_400(
             lambda: {'items': (items := list_database_reference_accessions(project_databases_dir, database_ids)), 'count': len(items)},
-            _COMPARE_ERRORS,
         )
 
     @router.post('/api/databases/compare', response_model=ApiEnvelope)
@@ -107,7 +100,6 @@ def build_catalog_router(
         del request
         return _envelope_or_400(
             lambda: compare_databases(project_databases_dir, payload.database_ids, payload.accession),
-            _COMPARE_ERRORS,
         )
 
     return router

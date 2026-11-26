@@ -7,6 +7,7 @@ import logging
 import os
 import tempfile
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO, Literal, Protocol
 
@@ -350,6 +351,14 @@ async def save_upload_stream(
     bgz_handle: pysam.BGZFile | None = None
     total_size = 0
 
+    async def _pump_chunks(sink: Callable[[bytes], None]) -> None:
+        nonlocal total_size
+        while chunk := await upload_file.read(effective_chunk_size):
+            total_size += len(chunk)
+            if total_size > max_size:
+                raise _size_limit_error(file_type, max_size)
+            sink(chunk)
+
     try:
         if file_type == 'vcf':
             prefix = bytearray()
@@ -379,35 +388,32 @@ async def save_upload_stream(
                     max_decompressed_size=_max_decompressed_vcf_size(max_size),
                 )
                 gzip_stream.feed(initial_bytes)
-                while chunk := await upload_file.read(effective_chunk_size):
-                    total_size += len(chunk)
-                    if total_size > max_size:
-                        raise _size_limit_error(file_type, max_size)
-                    gzip_stream.feed(chunk)
+                await _pump_chunks(gzip_stream.feed)
                 gzip_stream.finalize()
             else:
                 fd, temp_path_str = tempfile.mkstemp(suffix=_EXTENSIONS[file_type], dir=str(upload_dir))
                 temp_path = Path(temp_path_str)
                 handle = os.fdopen(fd, 'wb')
-                validator.feed(initial_bytes)
-                handle.write(initial_bytes)
-                while chunk := await upload_file.read(effective_chunk_size):
-                    total_size += len(chunk)
-                    if total_size > max_size:
-                        raise _size_limit_error(file_type, max_size)
-                    validator.feed(chunk)
-                    handle.write(chunk)
+
+                def _write_validated(data: bytes) -> None:
+                    assert handle is not None
+                    validator.feed(data)
+                    handle.write(data)
+
+                _write_validated(initial_bytes)
+                await _pump_chunks(_write_validated)
                 validator.finalize()
         else:
             fd, temp_path_str = tempfile.mkstemp(suffix=_EXTENSIONS[file_type], dir=str(upload_dir))
             temp_path = Path(temp_path_str)
             handle = os.fdopen(fd, 'wb')
-            while chunk := await upload_file.read(effective_chunk_size):
-                total_size += len(chunk)
-                if total_size > max_size:
-                    raise _size_limit_error(file_type, max_size)
-                validator.feed(chunk)
-                handle.write(chunk)
+
+            def _write_validated_other(data: bytes) -> None:
+                assert handle is not None
+                validator.feed(data)
+                handle.write(data)
+
+            await _pump_chunks(_write_validated_other)
             validator.finalize()
 
         if bgz_handle is not None:

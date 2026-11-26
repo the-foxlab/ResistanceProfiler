@@ -30,13 +30,6 @@
   box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
-.mutation-search img {
-  width: 1rem;
-  height: 1rem;
-  opacity: 0.75;
-  flex: 0 0 auto;
-}
-
 .mutation-search-input {
   border: none;
   background: transparent;
@@ -75,11 +68,6 @@
   align-items: center;
   justify-content: center;
   color: var(--muted-strong);
-}
-
-.mutation-reset-button img {
-  width: 1.1rem;
-  height: 1.1rem;
 }
 
 .mutation-search-icon,

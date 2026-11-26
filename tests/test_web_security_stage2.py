@@ -493,13 +493,52 @@ class TestSecurityHeadersCspAndOriginCsrf:
         csp = resp.headers.get('content-security-policy', '')
         for token in (
             "frame-ancestors 'self'",
-            "connect-src 'none'",
+            'connect-src https://translate.googleapis.com',
             "form-action 'none'",
             "base-uri 'none'",
             "object-src 'none'",
             'https://pubchem.ncbi.nlm.nih.gov',
         ):
             assert token in csp
+        assert 'connect-src https://translate.googleapis.com' in csp
+        assert "connect-src 'self'" not in csp
+
+    def test_rejected_upload_admission_does_not_mint_session(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_client = fakeredis.FakeStrictRedis()
+        monkeypatch.setattr(session_service, '_redis_connection', lambda: fake_client)
+        client = _make_client(startup_config)
+
+        bad_ct = client.post('/api/upload/fasta', content=b'>s\nACGT\n', headers={'Content-Type': 'text/plain'})
+        assert bad_ct.status_code == 400
+        assert 'set-cookie' not in bad_ct.headers
+        assert list(fake_client.scan_iter('respro:session:*')) == []
+
+        oversized = client.post(
+            '/api/upload/vcf',
+            content=b'',
+            headers={
+                'Content-Type': 'multipart/form-data; boundary=abc',
+                'Content-Length': str(10 * 1024 * 1024),
+            },
+        )
+        assert oversized.status_code == 413
+        assert 'set-cookie' not in oversized.headers
+        assert list(fake_client.scan_iter('respro:session:*')) == []
+
+    def test_readiness_returns_503_on_malformed_redis_url(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = _make_client(startup_config)
+        monkeypatch.setenv('REDIS_URL', 'not-a-valid-redis-url')
+        resp = client.get('/api/readiness')
+        assert resp.status_code == 503
+        assert 'redis_unreachable' in resp.json()['data']['diagnostics']
 
     def test_online_csrf_blocks_cross_site_and_foreign_origin_but_allows_same_origin(
         self,

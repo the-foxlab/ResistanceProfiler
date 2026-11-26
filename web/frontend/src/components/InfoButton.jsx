@@ -1,67 +1,17 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import infoIconSrc from '../assets/info.svg';
 
-export function InfoButton({ label, ariaLabel, title, text }) {
+export function InfoButton({ label, title }) {
   const tooltipId = useId();
   const wrapRef = useRef(null);
   const pointerDownRef = useRef(false);
-  const pointerResetTimerRef = useRef(null);
-  const pointerCleanupRef = useRef(null);
   const [openTrigger, setOpenTrigger] = useState(null); // null | 'hover' | 'focus' | 'click'
   const [popoverPosition, setPopoverPosition] = useState({ alignRight: false, shift: 0 });
 
-  const buttonLabel = label || ariaLabel || 'More information';
-  const rawInfo = text ?? title ?? '';
-  const infoText = typeof rawInfo === 'string' ? rawInfo : String(rawInfo);
+  const buttonLabel = label || 'More information';
+  const infoText = title == null ? '' : String(title);
   const hasInfo = Boolean(infoText.trim());
   const isOpen = hasInfo && openTrigger !== null;
-
-  const clearPointerResetTimer = useCallback(() => {
-    if (pointerResetTimerRef.current !== null) {
-      clearTimeout(pointerResetTimerRef.current);
-      pointerResetTimerRef.current = null;
-    }
-  }, []);
-
-  const removePointerDocListeners = useCallback(() => {
-    if (pointerCleanupRef.current) {
-      pointerCleanupRef.current();
-      pointerCleanupRef.current = null;
-    }
-  }, []);
-
-  const clearPointerState = useCallback(() => {
-    clearPointerResetTimer();
-    removePointerDocListeners();
-    pointerDownRef.current = false;
-  }, [clearPointerResetTimer, removePointerDocListeners]);
-
-  const markPointerDown = useCallback(() => {
-    clearPointerResetTimer();
-    pointerDownRef.current = true;
-    if (typeof document === 'undefined' || pointerCleanupRef.current) return;
-
-    const scheduleReset = () => {
-      clearPointerResetTimer();
-      pointerResetTimerRef.current = setTimeout(() => {
-        pointerResetTimerRef.current = null;
-        pointerDownRef.current = false;
-        removePointerDocListeners();
-      }, 0);
-    };
-
-    document.addEventListener('pointerup', scheduleReset, true);
-    document.addEventListener('mouseup', scheduleReset, true);
-    document.addEventListener('pointercancel', scheduleReset, true);
-
-    pointerCleanupRef.current = () => {
-      document.removeEventListener('pointerup', scheduleReset, true);
-      document.removeEventListener('mouseup', scheduleReset, true);
-      document.removeEventListener('pointercancel', scheduleReset, true);
-    };
-  }, [clearPointerResetTimer, removePointerDocListeners]);
-
-  useEffect(() => clearPointerState, [clearPointerState]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -105,18 +55,13 @@ export function InfoButton({ label, ariaLabel, title, text }) {
         if (rect.right - estWidth >= 12) {
           setPopoverPosition({ alignRight: true, shift: 0 });
         } else {
-          const shift = Math.min(
-            0,
-            Math.max(12 - rect.left, window.innerWidth - 12 - (rect.left + estWidth)),
-          );
+          const shift = Math.min(0, Math.max(12 - rect.left, window.innerWidth - 12 - (rect.left + estWidth)));
           setPopoverPosition({ alignRight: false, shift });
         }
-      } else {
-        setPopoverPosition({ alignRight: false, shift: 0 });
+        return;
       }
-    } else {
-      setPopoverPosition({ alignRight: false, shift: 0 });
     }
+    setPopoverPosition({ alignRight: false, shift: 0 });
   }, [isOpen]);
 
   return (
@@ -124,33 +69,13 @@ export function InfoButton({ label, ariaLabel, title, text }) {
       ref={wrapRef}
       className="input-info-wrap"
       onMouseEnter={() => {
-        if (hasInfo && openTrigger === null) {
-          setOpenTrigger('hover');
-        }
+        if (hasInfo && openTrigger === null) setOpenTrigger('hover');
       }}
       onMouseLeave={() => {
-        if (openTrigger === 'hover') {
-          setOpenTrigger(null);
-        }
-      }}
-      onKeyDown={(event) => {
-        if (
-          isOpen
-          && !event.defaultPrevented
-          && !event.isComposing
-          && !event.altKey
-          && !event.ctrlKey
-          && !event.metaKey
-          && !event.shiftKey
-          && event.key === 'Escape'
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          setOpenTrigger(null);
-        }
+        if (openTrigger === 'hover') setOpenTrigger(null);
       }}
       onBlur={(event) => {
-        clearPointerState();
+        pointerDownRef.current = false;
         if (!wrapRef.current?.contains(event.relatedTarget)) {
           setOpenTrigger(null);
         }
@@ -163,9 +88,15 @@ export function InfoButton({ label, ariaLabel, title, text }) {
         aria-expanded={hasInfo ? isOpen : undefined}
         aria-controls={isOpen ? tooltipId : undefined}
         aria-describedby={isOpen ? tooltipId : undefined}
-        onPointerDown={markPointerDown}
-        onMouseDown={markPointerDown}
-        onPointerCancel={clearPointerState}
+        onPointerDown={() => {
+          pointerDownRef.current = true;
+        }}
+        onMouseDown={() => {
+          pointerDownRef.current = true;
+        }}
+        onPointerCancel={() => {
+          pointerDownRef.current = false;
+        }}
         onFocus={() => {
           if (hasInfo && !pointerDownRef.current && openTrigger === null) {
             setOpenTrigger('focus');
@@ -173,13 +104,9 @@ export function InfoButton({ label, ariaLabel, title, text }) {
         }}
         onClick={() => {
           const fromPointer = pointerDownRef.current;
-          clearPointerState();
+          pointerDownRef.current = false;
           if (!hasInfo) return;
-          if (fromPointer) {
-            setOpenTrigger((prev) => (prev === 'click' ? null : 'click'));
-          } else {
-            setOpenTrigger((prev) => (prev === null ? 'click' : null));
-          }
+          setOpenTrigger((prev) => (fromPointer ? (prev === 'click' ? null : 'click') : (prev === null ? 'click' : null)));
         }}
       >
         <img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" />
@@ -190,9 +117,7 @@ export function InfoButton({ label, ariaLabel, title, text }) {
           role="tooltip"
           className={`input-info-popover${popoverPosition.alignRight ? ' is-aligned-right' : ''}`}
           style={popoverPosition.shift ? { '--popover-shift': `${popoverPosition.shift}px` } : undefined}
-          onMouseDown={(event) => {
-            event.preventDefault();
-          }}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();

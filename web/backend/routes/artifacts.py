@@ -31,13 +31,13 @@ from web.backend.services.compare import build_comparison_matrix
 from web.backend.startup_config import is_path_within_allowed_roots
 
 _OPAQUE_ID_MAX_LEN = WEB_BACKEND_CONFIG.defaults.opaque_id_max_length
-_REPORT_CSP = (
+REPORT_CSP = (
     "default-src 'none'; "
     "script-src 'unsafe-inline'; "
     "style-src 'unsafe-inline'; "
     "img-src 'self' data: blob: https://pubchem.ncbi.nlm.nih.gov; "
     "font-src 'self' data:; "
-    "connect-src 'none'; "
+    "connect-src https://translate.googleapis.com; "
     "form-action 'none'; "
     "base-uri 'none'; "
     "frame-ancestors 'self'; "
@@ -88,7 +88,7 @@ def build_artifacts_router(
             str(report_path),
             media_type='text/html',
             headers={
-                'Content-Security-Policy': _REPORT_CSP,
+                'Content-Security-Policy': REPORT_CSP,
                 'X-Frame-Options': 'SAMEORIGIN',
             },
         )
