@@ -31,8 +31,7 @@ import {
   webVersion,
 } from './useDashboardLogic';
 
-const StatusErrorValueContext = createContext(null);
-const StatusErrorActionContext = createContext(null);
+const StartupErrorContext = createContext('');
 
 const CoreDatabasesContext = createContext(null);
 const CoreSelectedDbContext = createContext(null);
@@ -44,6 +43,8 @@ const CoreBatchConfigContext = createContext(null);
 const SessionActionsContext = createContext(null);
 const SessionReportSelectionContext = createContext(null);
 const SessionResultsTableContext = createContext(null);
+const ResultsErrorActionContext = createContext(null);
+const ResultsErrorValueContext = createContext('');
 
 const UploadProgressStoreContext = createContext(null);
 const UploadBusyContext = createContext(null);
@@ -60,19 +61,8 @@ const MutationsFilterContext = createContext(null);
 const ComparisonContext = createContext(null);
 const ShellContext = createContext(null);
 
-function StatusErrorProvider({ children }) {
-  const [statusError, setStatusError] = useState('');
-  return (
-    <StatusErrorActionContext.Provider value={setStatusError}>
-      <StatusErrorValueContext.Provider value={statusError}>
-        {children}
-      </StatusErrorValueContext.Provider>
-    </StatusErrorActionContext.Provider>
-  );
-}
-
 function CoreShellProvider({ children }) {
-  const setStatusError = useContext(StatusErrorActionContext);
+  const [startupError, setStartupError] = useState('');
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [legalLink, setLegalLink] = useState(null);
@@ -143,7 +133,7 @@ function CoreShellProvider({ children }) {
         if (items.length > 0) setSelectedDatabaseId(items[0].id);
       } else if (!isAbortError(databasesRes.reason)) {
         const message = databasesRes.reason?.message || 'Failed to load databases.';
-        setStatusError(`Error loading data: ${message}`);
+        setStartupError(`Error loading data: ${message}`);
       }
     };
 
@@ -151,7 +141,7 @@ function CoreShellProvider({ children }) {
     return () => {
       controller.abort();
     };
-  }, [setStatusError]);
+  }, []);
 
   useEffect(() => {
     let link = document.querySelector('link[rel="icon"]');
@@ -196,32 +186,34 @@ function CoreShellProvider({ children }) {
   );
 
   return (
-    <CoreActionsContext.Provider value={actionsValue}>
-      <CoreDatabasesContext.Provider value={databasesValue}>
-        <CoreSelectedDbContext.Provider value={selectedDbValue}>
-          <CoreFooterContext.Provider value={footerValue}>
-            <CoreAnalyzeModeContext.Provider value={analyzeModeValue}>
-              <CoreBatchConfigContext.Provider value={batchConfig}>
-                {children}
-              </CoreBatchConfigContext.Provider>
-            </CoreAnalyzeModeContext.Provider>
-          </CoreFooterContext.Provider>
-        </CoreSelectedDbContext.Provider>
-      </CoreDatabasesContext.Provider>
-    </CoreActionsContext.Provider>
+    <StartupErrorContext.Provider value={startupError}>
+      <CoreActionsContext.Provider value={actionsValue}>
+        <CoreDatabasesContext.Provider value={databasesValue}>
+          <CoreSelectedDbContext.Provider value={selectedDbValue}>
+            <CoreFooterContext.Provider value={footerValue}>
+              <CoreAnalyzeModeContext.Provider value={analyzeModeValue}>
+                <CoreBatchConfigContext.Provider value={batchConfig}>
+                  {children}
+                </CoreBatchConfigContext.Provider>
+              </CoreAnalyzeModeContext.Provider>
+            </CoreFooterContext.Provider>
+          </CoreSelectedDbContext.Provider>
+        </CoreDatabasesContext.Provider>
+      </CoreActionsContext.Provider>
+    </StartupErrorContext.Provider>
   );
 }
 
 function SessionProvider({ children }) {
-  const setStatusError = useContext(StatusErrorActionContext);
+  const [resultsError, setResultsError] = useState('');
   const session = useSessionResults();
   useSessionCleanup(session.uploadedPaths, session.reportPaths);
 
   const downloadRef = useRef(session.downloadSelectedArtifacts);
   downloadRef.current = session.downloadSelectedArtifacts;
   const stableDownloadSelectedArtifacts = useCallback(
-    () => downloadRef.current(setStatusError),
-    [setStatusError],
+    () => downloadRef.current(setResultsError),
+    [],
   );
 
   const actionsValue = useMemo(
@@ -276,13 +268,17 @@ function SessionProvider({ children }) {
   );
 
   return (
-    <SessionActionsContext.Provider value={actionsValue}>
-      <SessionReportSelectionContext.Provider value={reportSelectionValue}>
-        <SessionResultsTableContext.Provider value={resultsTableValue}>
-          {children}
-        </SessionResultsTableContext.Provider>
-      </SessionReportSelectionContext.Provider>
-    </SessionActionsContext.Provider>
+    <ResultsErrorActionContext.Provider value={setResultsError}>
+      <ResultsErrorValueContext.Provider value={resultsError}>
+        <SessionActionsContext.Provider value={actionsValue}>
+          <SessionReportSelectionContext.Provider value={reportSelectionValue}>
+            <SessionResultsTableContext.Provider value={resultsTableValue}>
+              {children}
+            </SessionResultsTableContext.Provider>
+          </SessionReportSelectionContext.Provider>
+        </SessionActionsContext.Provider>
+      </ResultsErrorValueContext.Provider>
+    </ResultsErrorActionContext.Provider>
   );
 }
 
@@ -309,7 +305,7 @@ function UploadProvider({ children }) {
 }
 
 function ProfileProvider({ children }) {
-  const setStatusError = useContext(StatusErrorActionContext);
+  const [profileError, setProfileError] = useState('');
   const { databases } = useContext(CoreDatabasesContext);
   const { selectedDatabaseId } = useContext(CoreSelectedDbContext);
   const { activeProfileMode } = useContext(CoreAnalyzeModeContext);
@@ -317,7 +313,7 @@ function ProfileProvider({ children }) {
   const uploadBusy = useContext(UploadBusyContext);
 
   const profile = useProfileSubmit({
-    setStatusError,
+    setStatusError: setProfileError,
     addUploadedPath: sessionActions.addUploadedPath,
     addResultArtifactPaths: sessionActions.addResultArtifactPaths,
     setSessionResults: sessionActions.setSessionResults,
@@ -330,6 +326,11 @@ function ProfileProvider({ children }) {
     beginUpload: uploadBusy.beginUpload,
     endUpload: uploadBusy.endUpload,
   });
+
+  const profilePanelValue = useMemo(
+    () => ({ ...profile, profileError }),
+    [profile, profileError],
+  );
 
   const runExampleProfileRef = useRef(profile.runExampleProfile);
   runExampleProfileRef.current = profile.runExampleProfile;
@@ -357,7 +358,7 @@ function ProfileProvider({ children }) {
 
   return (
     <ProfileBusyContext.Provider value={busyValue}>
-      <ProfilePanelContext.Provider value={profile}>
+      <ProfilePanelContext.Provider value={profilePanelValue}>
         {children}
       </ProfilePanelContext.Provider>
     </ProfileBusyContext.Provider>
@@ -443,7 +444,7 @@ function BatchProvider({ children }) {
 }
 
 function DatabaseRulesProvider({ children }) {
-  const setStatusError = useContext(StatusErrorActionContext);
+  const [mutationsError, setMutationsError] = useState('');
   const { selectedDatabaseId } = useContext(CoreSelectedDbContext);
   const [switchTick, setSwitchTick] = useState(0);
 
@@ -452,7 +453,7 @@ function DatabaseRulesProvider({ children }) {
   }, []);
 
   const dbRules = useDatabaseRules({
-    setStatusError,
+    setStatusError: setMutationsError,
     onDatabaseSwitch: handleDatabaseSwitch,
   });
 
@@ -470,6 +471,7 @@ function DatabaseRulesProvider({ children }) {
       mutationsLoaded: dbRules.mutationsLoaded,
       isMutationsLoading: dbRules.isMutationsLoading,
       loadedDatabaseId: dbRules.loadedDatabaseId,
+      mutationsError,
       switchTick,
     }),
     [
@@ -479,6 +481,7 @@ function DatabaseRulesProvider({ children }) {
       dbRules.mutationsLoaded,
       dbRules.isMutationsLoading,
       dbRules.loadedDatabaseId,
+      mutationsError,
       switchTick,
     ],
   );
@@ -543,7 +546,7 @@ function MutationsFilterProvider({ children }) {
 }
 
 function ComparisonProvider({ children }) {
-  const setStatusError = useContext(StatusErrorActionContext);
+  const setResultsError = useContext(ResultsErrorActionContext);
   const {
     sessionResults,
     selectedResultIndices,
@@ -554,7 +557,7 @@ function ComparisonProvider({ children }) {
     sessionResults,
     selectedResultIndices,
     setSelectedResultIndices,
-    setStatusError,
+    setStatusError: setResultsError,
   });
 
   const comparisonValue = useMemo(
@@ -651,27 +654,25 @@ function ShellProvider({ children }) {
 
 export function DashboardProvider({ children }) {
   return (
-    <StatusErrorProvider>
-      <CoreShellProvider>
-        <SessionProvider>
-          <UploadProvider>
-            <ProfileProvider>
-              <BatchProvider>
-                <DatabaseRulesProvider>
-                  <MutationsFilterProvider>
-                    <ComparisonProvider>
-                      <ShellProvider>
-                        {children}
-                      </ShellProvider>
-                    </ComparisonProvider>
-                  </MutationsFilterProvider>
-                </DatabaseRulesProvider>
-              </BatchProvider>
-            </ProfileProvider>
-          </UploadProvider>
-        </SessionProvider>
-      </CoreShellProvider>
-    </StatusErrorProvider>
+    <CoreShellProvider>
+      <SessionProvider>
+        <UploadProvider>
+          <ProfileProvider>
+            <BatchProvider>
+              <DatabaseRulesProvider>
+                <MutationsFilterProvider>
+                  <ComparisonProvider>
+                    <ShellProvider>
+                      {children}
+                    </ShellProvider>
+                  </ComparisonProvider>
+                </MutationsFilterProvider>
+              </DatabaseRulesProvider>
+            </BatchProvider>
+          </ProfileProvider>
+        </UploadProvider>
+      </SessionProvider>
+    </CoreShellProvider>
   );
 }
 
@@ -735,28 +736,28 @@ export function useOptionalAnalyzePageLogic() {
 export function useOptionalSingleAnalyzeLogic() {
   const selectedDb = useContext(CoreSelectedDbContext);
   const analyzeMode = useContext(CoreAnalyzeModeContext);
-  const statusError = useContext(StatusErrorValueContext);
+  const startupError = useContext(StartupErrorContext);
   const uploadBusy = useContext(UploadBusyContext);
   const reportSelection = useContext(SessionReportSelectionContext);
   const sessionActions = useContext(SessionActionsContext);
-  const profile = useContext(ProfilePanelContext);
+  const profilePanel = useContext(ProfilePanelContext);
 
   return useMemo(() => {
     if (
       !selectedDb
       || !analyzeMode
-      || statusError === null
       || !uploadBusy
       || !reportSelection
       || !sessionActions
-      || !profile
+      || !profilePanel
     ) {
       return null;
     }
+    const { profileError, ...profile } = profilePanel;
     return {
       selectedDatabase: selectedDb.selectedDatabase,
       activeProfileMode: analyzeMode.activeProfileMode,
-      statusError,
+      statusError: profileError || startupError,
       isUploading: uploadBusy.isUploading,
       selectedProfileReportPath: reportSelection.selectedProfileReportPath,
       setSelectedProfileReportPath: reportSelection.setSelectedProfileReportPath,
@@ -766,7 +767,7 @@ export function useOptionalSingleAnalyzeLogic() {
       buildArtifactUrl: sessionActions.buildArtifactUrl,
       ...profile,
     };
-  }, [selectedDb, analyzeMode, statusError, uploadBusy, reportSelection, sessionActions, profile]);
+  }, [selectedDb, analyzeMode, startupError, uploadBusy, reportSelection, sessionActions, profilePanel]);
 }
 
 export function useOptionalBatchAnalyzeLogic() {
@@ -790,20 +791,20 @@ export function useOptionalBatchAnalyzeLogic() {
 export function useOptionalMutationsLogic() {
   const dbRules = useContext(DatabaseRulesContext);
   const filterState = useContext(MutationsFilterContext);
-  const statusError = useContext(StatusErrorValueContext);
+  const startupError = useContext(StartupErrorContext);
 
   return useMemo(() => {
-    if (!dbRules || !filterState || statusError === null) {
+    if (!dbRules || !filterState) {
       return null;
     }
     return {
       rules: dbRules.rules,
       formulaRules: dbRules.formulaRules,
       mutationsLoaded: dbRules.mutationsLoaded,
-      statusError,
+      statusError: dbRules.mutationsError || startupError,
       ...filterState,
     };
-  }, [dbRules, filterState, statusError]);
+  }, [dbRules, filterState, startupError]);
 }
 
 export function useOptionalDatabasePageLogic() {
@@ -826,21 +827,21 @@ export function useOptionalDatabasePageLogic() {
 export function useOptionalResultsLogic() {
   const resultsTable = useContext(SessionResultsTableContext);
   const sessionActions = useContext(SessionActionsContext);
-  const statusError = useContext(StatusErrorValueContext);
+  const resultsError = useContext(ResultsErrorValueContext);
   const comparison = useContext(ComparisonContext);
 
   return useMemo(() => {
-    if (!resultsTable || !sessionActions || statusError === null || !comparison) {
+    if (!resultsTable || !sessionActions || !comparison) {
       return null;
     }
     return {
       ...resultsTable,
       buildReportUrl: sessionActions.buildReportUrl,
       buildArtifactUrl: sessionActions.buildArtifactUrl,
-      statusError,
+      statusError: resultsError,
       ...comparison,
     };
-  }, [resultsTable, sessionActions, statusError, comparison]);
+  }, [resultsTable, sessionActions, resultsError, comparison]);
 }
 
 export function useOptionalCompareLogic() {

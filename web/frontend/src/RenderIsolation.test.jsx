@@ -561,4 +561,45 @@ describe('Render isolation across DashboardProvider, AppShell, and routes (WA-05
     expect(renderCounts.appRoutes - before.appRoutes).toBe(0);
     expect(renderCounts.homePage - before.homePage).toBe(0);
   });
+
+  it('scopes profiling errors to Analyze and does not show them in Session Results or Mutations', async () => {
+    setupStartupFetch();
+    const origFetch = global.fetch;
+    global.fetch = vi.fn((url, opts) => {
+      if (String(url).includes('/api/profile/fasta')) {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ detail: 'No reference found' }),
+        });
+      }
+      return origFetch(url, opts);
+    });
+
+    function ResultsAndMutationsProbe() {
+      const resultsLogic = useOptionalResultsLogic();
+      return (
+        <div data-testid="results-status-error">{resultsLogic?.statusError || ''}</div>
+      );
+    }
+
+    render(
+      <ProductionComposition initialPath="/analysis">
+        <AppRoutes />
+        <ResultsAndMutationsProbe />
+      </ProductionComposition>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Example' })).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Example' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('No reference found');
+    });
+    expect(screen.getByTestId('results-status-error')).toHaveTextContent('');
+  });
 });
